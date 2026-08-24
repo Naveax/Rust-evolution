@@ -131,10 +131,7 @@ fn unique_temp_dir(label: &str) -> Result<PathBuf, String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("system clock error: {error}"))?
         .as_nanos();
-    Ok(env::temp_dir().join(format!(
-        "rust-evolution-{label}-{}-{nanos}",
-        process::id()
-    )))
+    Ok(env::temp_dir().join(format!("rust-evolution-{label}-{}-{nanos}", process::id())))
 }
 
 fn default_output_path(source: &Path) -> PathBuf {
