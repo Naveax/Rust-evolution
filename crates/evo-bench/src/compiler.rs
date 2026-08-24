@@ -91,7 +91,10 @@ fn find_single_llvm_ir(dir: &Path) -> Result<PathBuf, String> {
         .map_err(|error| format!("failed to inspect {}: {error}", dir.display()))?
     {
         let entry = entry.map_err(|error| {
-            format!("failed to inspect an artifact in {}: {error}", dir.display())
+            format!(
+                "failed to inspect an artifact in {}: {error}",
+                dir.display()
+            )
         })?;
         let path = entry.path();
         let display_name = path
