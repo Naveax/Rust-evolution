@@ -1,0 +1,25 @@
+[workspace]
+members = [
+    "crates/evo-lexer",
+    "crates/evo-parser",
+    "crates/evo-codegen-rust",
+    "crates/evo-bench",
+    "crates/evo-cli",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
