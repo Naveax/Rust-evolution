@@ -44,5 +44,15 @@ jobs:
       - name: Test workspace
         run: cargo test --workspace
 
+      - name: Benchmark harness smoke
+        run: cargo run -p evo-bench -- run benchmarks/cases/arithmetic-smoke --out target/evo-bench-smoke --report-only
+
+      - name: Upload benchmark smoke report
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-bench-smoke-${{ matrix.os }}
+          path: target/evo-bench-smoke/
+          if-no-files-found: error
+
       - name: Release build
         run: cargo build --workspace --release
