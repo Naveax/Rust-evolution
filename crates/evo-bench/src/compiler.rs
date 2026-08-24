@@ -28,7 +28,9 @@ pub(crate) fn compile_binary(rustc: &OsStr, source: &Path, output: &Path) -> Res
 
 pub(crate) fn compile_llvm_ir(rustc: &OsStr, source: &Path, output: &Path) -> Result<(), String> {
     let mut command = rustc_base_command(rustc, source);
-    command.arg("--emit=llvm-ir").arg("-o").arg(output);
+    let mut emit = OsString::from("llvm-ir=");
+    emit.push(output.as_os_str());
+    command.arg("--emit").arg(emit);
     run_compile_command(command, "LLVM IR")
 }
 
