@@ -1,0 +1,14 @@
+[package]
+name = "evo-codegen-rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+evo-parser = { path = "../evo-parser" }
+
+[dev-dependencies]
+evo-lexer = { path = "../evo-lexer" }
+
+[lints]
+workspace = true

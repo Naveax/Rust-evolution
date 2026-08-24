@@ -1,0 +1,11 @@
+[package]
+name = "evo-parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+evo-lexer = { path = "../evo-lexer" }
+
+[lints]
+workspace = true

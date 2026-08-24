@@ -31,6 +31,27 @@ See issue #4 for the full performance contract and issue #5 for the benchmark/di
 
 The first implementation is intentionally a frontend/transpiler experiment rather than a new VM/runtime. This lets us explore syntax and developer ergonomics while retaining Rust/rustc/LLVM semantics and native code generation.
 
+## Executable v0
+
+The first vertical slice supports a deliberately tiny script syntax:
+
+```text
+x = 1
+y = 1
+print x + y
+```
+
+Current commands:
+
+```text
+cargo run -p evo-cli -- check examples/basic.evo
+cargo run -p evo-cli -- emit-rust examples/basic.evo
+cargo run -p evo-cli -- run examples/basic.evo
+cargo run -p evo-cli -- build examples/basic.evo
+```
+
+The current language sketch and grammar are documented in `docs/LANGUAGE_SPEC_V0.md`. This v0 is experimental and exists to prove the complete source-to-native pipeline before expanding syntax.
+
 ## Project roadmap
 
 - Phase 0: repository/toolchain/workspace/CI foundation
@@ -63,4 +84,4 @@ The first implementation is intentionally a frontend/transpiler experiment rathe
 
 ## Status
 
-Early foundation / research stage. The detailed living plan is maintained in GitHub Issues, especially #1.
+Early implementation stage. The first executable front-end vertical slice is under active development; performance claims remain blocked until the differential benchmark harness is running under the project contract.
