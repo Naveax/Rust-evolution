@@ -25,8 +25,8 @@ fn arithmetic_smoke_runs_end_to_end_and_writes_reports() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let report = fs::read_to_string(output_dir.join("report.json"))
-        .expect("report.json should be written");
+    let report =
+        fs::read_to_string(output_dir.join("report.json")).expect("report.json should be written");
     assert!(report.contains("\"correctness\": true"));
     assert!(report.contains("\"performance_ratio\":"));
     assert!(output_dir.join("report.md").is_file());
