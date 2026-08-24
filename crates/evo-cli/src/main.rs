@@ -34,10 +34,9 @@ fn run_cli() -> Result<(), String> {
             Ok(())
         }
         "build" => {
-            let output = args.next().map_or_else(
-                || Ok(default_output_path(&source_path)),
-                |value| Ok(PathBuf::from(value)),
-            )?;
+            let output = args
+                .next()
+                .map_or_else(|| default_output_path(&source_path), PathBuf::from);
             reject_extra_args(args)?;
             let generated = load_program(&source_path)?;
             compile_rust(&generated, &output)?;
