@@ -93,6 +93,6 @@ mod tests {
     #[test]
     fn escapes_strings_using_rust_debug_literal_rules() {
         let generated = compile_source("print \"hello\\nworld\"\n");
-        assert!(generated.contains("\"hello\\\\nworld\""));
+        assert!(generated.contains("\"hello\\nworld\""));
     }
 }

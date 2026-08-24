@@ -80,7 +80,10 @@ fn compile_rust(generated: &str, output: &Path) -> Result<(), String> {
     fs::write(&source_path, generated)
         .map_err(|error| format!("failed to write generated Rust: {error}"))?;
 
-    if let Some(parent) = output.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+    if let Some(parent) = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         fs::create_dir_all(parent)
             .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     }
@@ -128,7 +131,10 @@ fn unique_temp_dir(label: &str) -> Result<PathBuf, String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("system clock error: {error}"))?
         .as_nanos();
-    Ok(env::temp_dir().join(format!("rust-evolution-{label}-{}-{nanos}", process::id())))
+    Ok(env::temp_dir().join(format!(
+        "rust-evolution-{label}-{}-{nanos}",
+        process::id()
+    )))
 }
 
 fn default_output_path(source: &Path) -> PathBuf {

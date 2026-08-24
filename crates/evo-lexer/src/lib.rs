@@ -54,7 +54,11 @@ pub struct LexError {
 
 impl fmt::Display for LexError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} at {}:{}", self.message, self.span.line, self.span.column)
+        write!(
+            f,
+            "{} at {}:{}",
+            self.message, self.span.line, self.span.column
+        )
     }
 }
 
@@ -345,8 +349,8 @@ mod tests {
     #[test]
     fn handles_comments_and_string_escapes() {
         let tokens = lex("# comment\nprint \"hello\\nworld\"\n").expect("lexing should succeed");
-        assert!(matches!(tokens[0].kind, TokenKind::Newline));
-        assert!(matches!(tokens[1].kind, TokenKind::Print));
+        assert!(matches!(&tokens[0].kind, TokenKind::Newline));
+        assert!(matches!(&tokens[1].kind, TokenKind::Print));
         assert_eq!(
             tokens[2].kind,
             TokenKind::StringLiteral("hello\nworld".to_owned())

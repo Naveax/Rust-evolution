@@ -54,7 +54,11 @@ pub struct ParseError {
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} at {}:{}", self.message, self.span.line, self.span.column)
+        write!(
+            f,
+            "{} at {}:{}",
+            self.message, self.span.line, self.span.column
+        )
     }
 }
 
@@ -209,10 +213,6 @@ impl<'a> Parser<'a> {
                 expr.span = token.span.join(close);
                 Ok(expr)
             }
-            TokenKind::Newline | TokenKind::Eof => Err(ParseError {
-                message: "expected expression".to_owned(),
-                span: token.span,
-            }),
             _ => Err(ParseError {
                 message: "expected expression".to_owned(),
                 span: token.span,
@@ -231,9 +231,11 @@ impl<'a> Parser<'a> {
     }
 
     fn current(&self) -> &Token {
-        self.tokens
-            .get(self.index)
-            .unwrap_or_else(|| self.tokens.last().expect("parser requires at least one token"))
+        self.tokens.get(self.index).unwrap_or_else(|| {
+            self.tokens
+                .last()
+                .expect("parser requires at least one token")
+        })
     }
 
     fn advance(&mut self) -> Token {
@@ -267,12 +269,12 @@ mod tests {
         let program = parse_source("x = 1\nprint x + 2\n");
         assert_eq!(program.statements.len(), 2);
         assert!(matches!(
-            program.statements[0].kind,
-            StmtKind::Bind { ref name, .. } if name == "x"
+            &program.statements[0].kind,
+            StmtKind::Bind { name, .. } if name == "x"
         ));
         match &program.statements[1].kind {
             StmtKind::Print(expr) => assert!(matches!(
-                expr.kind,
+                &expr.kind,
                 ExprKind::Binary {
                     op: BinaryOp::Add,
                     ..
@@ -293,7 +295,7 @@ mod tests {
         };
         assert_eq!(*op, BinaryOp::Add);
         assert!(matches!(
-            right.kind,
+            &right.kind,
             ExprKind::Binary {
                 op: BinaryOp::Multiply,
                 ..
