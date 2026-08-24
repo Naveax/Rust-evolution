@@ -28,10 +28,10 @@ pub fn compare_samples(
     correctness: bool,
     stable_measurement: bool,
 ) -> Result<Comparison, CompareError> {
-    let reference_median_ns = median(reference_samples_ns)
-        .ok_or(CompareError::EmptyReferenceSamples)?;
-    let evolution_median_ns = median(evolution_samples_ns)
-        .ok_or(CompareError::EmptyEvolutionSamples)?;
+    let reference_median_ns =
+        median(reference_samples_ns).ok_or(CompareError::EmptyReferenceSamples)?;
+    let evolution_median_ns =
+        median(evolution_samples_ns).ok_or(CompareError::EmptyEvolutionSamples)?;
     if reference_median_ns == 0.0 {
         return Err(CompareError::ZeroReferenceMedian);
     }
