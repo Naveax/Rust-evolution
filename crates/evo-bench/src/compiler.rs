@@ -1,8 +1,11 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static IR_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn rustc_program() -> OsString {
     env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc"))
@@ -27,11 +30,31 @@ pub(crate) fn compile_binary(rustc: &OsStr, source: &Path, output: &Path) -> Res
 }
 
 pub(crate) fn compile_llvm_ir(rustc: &OsStr, source: &Path, output: &Path) -> Result<(), String> {
-    let mut command = rustc_base_command(rustc, source);
-    let mut emit = OsString::from("llvm-ir=");
-    emit.push(output.as_os_str());
-    command.arg("--emit").arg(emit);
-    run_compile_command(command, "LLVM IR")
+    let work_dir = unique_ir_dir(output)?;
+    fs::create_dir_all(&work_dir)
+        .map_err(|error| format!("failed to create {}: {error}", work_dir.display()))?;
+
+    let result = (|| {
+        let mut command = rustc_base_command(rustc, source);
+        command
+            .arg("--emit=llvm-ir")
+            .arg("--out-dir")
+            .arg(&work_dir);
+        run_compile_command(command, "LLVM IR")?;
+
+        let generated = find_single_llvm_ir(&work_dir)?;
+        fs::copy(&generated, output).map_err(|error| {
+            format!(
+                "failed to copy LLVM IR {} to {}: {error}",
+                generated.display(),
+                output.display()
+            )
+        })?;
+        Ok(())
+    })();
+
+    let _ = fs::remove_dir_all(&work_dir);
+    result
 }
 
 pub(crate) fn compare_normalized_ir(reference: &Path, evolution: &Path) -> Result<bool, String> {
@@ -40,6 +63,64 @@ pub(crate) fn compare_normalized_ir(reference: &Path, evolution: &Path) -> Resul
     let evolution_text = fs::read_to_string(evolution)
         .map_err(|error| format!("failed to read {}: {error}", evolution.display()))?;
     Ok(normalize_llvm_ir(&reference_text) == normalize_llvm_ir(&evolution_text))
+}
+
+fn unique_ir_dir(output: &Path) -> Result<PathBuf, String> {
+    let parent = output.parent().ok_or_else(|| {
+        format!(
+            "LLVM IR output path has no parent directory: {}",
+            output.display()
+        )
+    })?;
+    let stem = output
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .unwrap_or("artifact");
+    let counter = IR_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+    Ok(parent.join(format!(
+        ".evo-bench-ir-{stem}-{}-{counter}",
+        std::process::id()
+    )))
+}
+
+fn find_single_llvm_ir(dir: &Path) -> Result<PathBuf, String> {
+    let mut llvm_files = Vec::new();
+    let mut artifacts = Vec::new();
+
+    for entry in fs::read_dir(dir)
+        .map_err(|error| format!("failed to inspect {}: {error}", dir.display()))?
+    {
+        let entry = entry.map_err(|error| {
+            format!("failed to inspect an artifact in {}: {error}", dir.display())
+        })?;
+        let path = entry.path();
+        let display_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        artifacts.push(display_name);
+        if path.extension().is_some_and(|extension| extension == "ll") {
+            llvm_files.push(path);
+        }
+    }
+
+    artifacts.sort();
+    llvm_files.sort();
+
+    match llvm_files.as_slice() {
+        [only] => Ok(only.clone()),
+        [] => Err(format!(
+            "rustc reported successful LLVM IR emission but no .ll file was produced in {}; artifacts: [{}]",
+            dir.display(),
+            artifacts.join(", ")
+        )),
+        _ => Err(format!(
+            "expected exactly one LLVM IR artifact in {}, found {}: [{}]",
+            dir.display(),
+            llvm_files.len(),
+            artifacts.join(", ")
+        )),
+    }
 }
 
 fn rustc_base_command(rustc: &OsStr, source: &Path) -> Command {
@@ -131,7 +212,12 @@ fn normalize_rust_symbol_hashes(line: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_llvm_ir, normalize_rust_symbol_hashes};
+    use super::{find_single_llvm_ir, normalize_llvm_ir, normalize_rust_symbol_hashes};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn normalizes_rust_symbol_hashes() {
@@ -154,5 +240,28 @@ mod tests {
             normalize_rust_symbol_hashes("; açıklama h0123456789abcdef"),
             "; açıklama h<RUST_HASH>"
         );
+    }
+
+    #[test]
+    fn discovers_single_llvm_ir_artifact() {
+        let dir = test_temp_dir("single-ir");
+        fs::create_dir_all(&dir).expect("temp directory should be created");
+        let expected = dir.join("crate.ll");
+        fs::write(&expected, "; ir\n").expect("test IR should be written");
+        fs::write(dir.join("crate.d"), "deps\n").expect("side artifact should be written");
+
+        assert_eq!(
+            find_single_llvm_ir(&dir).expect("single IR artifact should be discovered"),
+            expected
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn test_temp_dir(label: &str) -> PathBuf {
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "rust-evolution-compiler-test-{label}-{}-{counter}",
+            std::process::id()
+        ))
     }
 }
