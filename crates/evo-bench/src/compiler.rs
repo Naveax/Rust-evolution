@@ -262,8 +262,12 @@ mod tests {
 
         aggregate_llvm_ir(&dir, &output).expect("multiple IR modules should aggregate");
         let aggregate = fs::read_to_string(&output).expect("aggregate should be readable");
-        let a = aggregate.find("define void @a() {}").expect("a module missing");
-        let z = aggregate.find("define void @z() {}").expect("z module missing");
+        let a = aggregate
+            .find("define void @a() {}")
+            .expect("a module missing");
+        let z = aggregate
+            .find("define void @z() {}")
+            .expect("z module missing");
         assert!(a < z, "normalized modules should be sorted by content");
         assert!(!aggregate.contains("ModuleID"));
         assert!(!aggregate.contains("source_filename"));
