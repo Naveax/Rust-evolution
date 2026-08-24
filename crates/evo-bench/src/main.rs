@@ -75,9 +75,10 @@ fn run_cli() -> Result<ExitCode, String> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--out" => {
-                output_dir = Some(PathBuf::from(args.next().ok_or_else(|| {
-                    "--out requires a directory argument".to_owned()
-                })?));
+                output_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        "--out requires a directory argument".to_owned()
+                    })?));
             }
             "--report-only" => report_only = true,
             _ => return Err(format!("unknown argument {arg:?}\n{}", usage())),
@@ -203,8 +204,20 @@ fn check_correctness(
     let evolution = execute_with_timeout(evolution_binary, stdin, timeout)?;
 
     let mut problems = Vec::new();
-    collect_execution_problems("reference", &reference, expected_stdout, expected_stderr, &mut problems);
-    collect_execution_problems("evolution", &evolution, expected_stdout, expected_stderr, &mut problems);
+    collect_execution_problems(
+        "reference",
+        &reference,
+        expected_stdout,
+        expected_stderr,
+        &mut problems,
+    );
+    collect_execution_problems(
+        "evolution",
+        &evolution,
+        expected_stdout,
+        expected_stderr,
+        &mut problems,
+    );
 
     if reference.status != evolution.status {
         problems.push("exit status differs between reference and evolution".to_owned());
@@ -298,18 +311,9 @@ fn measure(
         .ok_or_else(|| "reference samples unexpectedly empty".to_owned())?;
     let evolution_stats = summarize(&evolution_samples_ns)
         .ok_or_else(|| "evolution samples unexpectedly empty".to_owned())?;
-    let stable = measurement_is_stable(
-        reference_stats,
-        evolution_stats,
-        config.max_relative_mad,
-    );
-    let comparison = compare_samples(
-        &reference_samples_ns,
-        &evolution_samples_ns,
-        true,
-        stable,
-    )
-    .map_err(|error| format!("failed to compare samples: {error:?}"))?;
+    let stable = measurement_is_stable(reference_stats, evolution_stats, config.max_relative_mad);
+    let comparison = compare_samples(&reference_samples_ns, &evolution_samples_ns, true, stable)
+        .map_err(|error| format!("failed to compare samples: {error:?}"))?;
 
     Ok(Measurement {
         reference_samples_ns,
@@ -437,10 +441,17 @@ fn render_markdown(report: &RunReport) -> String {
     text.push_str("# Rust Evolution benchmark report\n\n");
     text.push_str(&format!("- Benchmark: `{}`\n", report.config.name));
     text.push_str(&format!("- Target: `{}`\n", report.target));
-    text.push_str(&format!("- Warmup/sample count: {}/{}\n", report.config.warmup, report.config.samples));
+    text.push_str(&format!(
+        "- Warmup/sample count: {}/{}\n",
+        report.config.warmup, report.config.samples
+    ));
     text.push_str(&format!(
         "- Correctness: **{}**\n",
-        if report.correctness.passed { "PASS" } else { "FAIL" }
+        if report.correctness.passed {
+            "PASS"
+        } else {
+            "FAIL"
+        }
     ));
     text.push_str(&format!(
         "- Correctness detail: {}\n",
@@ -488,7 +499,9 @@ fn render_markdown(report: &RunReport) -> String {
             measurement.reference_stats.relative_mad, measurement.evolution_stats.relative_mad
         ));
     } else {
-        text.push_str("- Verdict: **FAIL** (performance phase skipped because correctness failed)\n");
+        text.push_str(
+            "- Verdict: **FAIL** (performance phase skipped because correctness failed)\n",
+        );
     }
 
     text.push_str("\n## Measurement policy\n\n");
@@ -514,10 +527,19 @@ fn render_raw_samples(report: &RunReport) -> String {
 fn print_summary(report: &RunReport) {
     println!("benchmark: {}", report.config.name);
     println!("correctness: {}", report.correctness.passed);
-    println!("normalized LLVM IR equal: {}", report.normalized_llvm_ir_equal);
+    println!(
+        "normalized LLVM IR equal: {}",
+        report.normalized_llvm_ir_equal
+    );
     if let Some(measurement) = &report.measurement {
-        println!("reference median: {:.0} ns", measurement.reference_stats.median_ns);
-        println!("evolution median: {:.0} ns", measurement.evolution_stats.median_ns);
+        println!(
+            "reference median: {:.0} ns",
+            measurement.reference_stats.median_ns
+        );
+        println!(
+            "evolution median: {:.0} ns",
+            measurement.evolution_stats.median_ns
+        );
         println!("ratio: {:.9}", measurement.ratio);
         println!("stable: {}", measurement.stable);
         println!("verdict: {}", measurement.verdict);
