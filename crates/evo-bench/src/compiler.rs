@@ -41,16 +41,7 @@ pub(crate) fn compile_llvm_ir(rustc: &OsStr, source: &Path, output: &Path) -> Re
             .arg("--out-dir")
             .arg(&work_dir);
         run_compile_command(command, "LLVM IR")?;
-
-        let generated = find_single_llvm_ir(&work_dir)?;
-        fs::copy(&generated, output).map_err(|error| {
-            format!(
-                "failed to copy LLVM IR {} to {}: {error}",
-                generated.display(),
-                output.display()
-            )
-        })?;
-        Ok(())
+        aggregate_llvm_ir(&work_dir, output)
     })();
 
     let _ = fs::remove_dir_all(&work_dir);
@@ -83,8 +74,8 @@ fn unique_ir_dir(output: &Path) -> Result<PathBuf, String> {
     )))
 }
 
-fn find_single_llvm_ir(dir: &Path) -> Result<PathBuf, String> {
-    let mut llvm_files = Vec::new();
+fn aggregate_llvm_ir(dir: &Path, output: &Path) -> Result<(), String> {
+    let mut modules = Vec::new();
     let mut artifacts = Vec::new();
 
     for entry in fs::read_dir(dir)
@@ -102,28 +93,35 @@ fn find_single_llvm_ir(dir: &Path) -> Result<PathBuf, String> {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string());
         artifacts.push(display_name);
+
         if path.extension().is_some_and(|extension| extension == "ll") {
-            llvm_files.push(path);
+            let text = fs::read_to_string(&path)
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            modules.push(normalize_llvm_ir(&text));
         }
     }
 
     artifacts.sort();
-    llvm_files.sort();
-
-    match llvm_files.as_slice() {
-        [only] => Ok(only.clone()),
-        [] => Err(format!(
+    if modules.is_empty() {
+        return Err(format!(
             "rustc reported successful LLVM IR emission but no .ll file was produced in {}; artifacts: [{}]",
             dir.display(),
             artifacts.join(", ")
-        )),
-        _ => Err(format!(
-            "expected exactly one LLVM IR artifact in {}, found {}: [{}]",
-            dir.display(),
-            llvm_files.len(),
-            artifacts.join(", ")
-        )),
+        ));
     }
+
+    modules.sort();
+    let mut aggregate = String::new();
+    for module in modules {
+        aggregate.push_str("; ---- normalized rustc LLVM module ----\n");
+        aggregate.push_str(&module);
+        if !module.ends_with('\n') {
+            aggregate.push('\n');
+        }
+    }
+
+    fs::write(output, aggregate)
+        .map_err(|error| format!("failed to write {}: {error}", output.display()))
 }
 
 fn rustc_base_command(rustc: &OsStr, source: &Path) -> Command {
@@ -215,7 +213,7 @@ fn normalize_rust_symbol_hashes(line: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_single_llvm_ir, normalize_llvm_ir, normalize_rust_symbol_hashes};
+    use super::{aggregate_llvm_ir, normalize_llvm_ir, normalize_rust_symbol_hashes};
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -246,17 +244,29 @@ mod tests {
     }
 
     #[test]
-    fn discovers_single_llvm_ir_artifact() {
-        let dir = test_temp_dir("single-ir");
+    fn aggregates_multiple_llvm_modules_deterministically() {
+        let dir = test_temp_dir("multi-ir");
         fs::create_dir_all(&dir).expect("temp directory should be created");
-        let expected = dir.join("crate.ll");
-        fs::write(&expected, "; ir\n").expect("test IR should be written");
+        fs::write(
+            dir.join("z.ll"),
+            "; ModuleID = 'z'\nsource_filename = \"z.rs\"\ndefine void @z() {}\n",
+        )
+        .expect("first test IR should be written");
+        fs::write(
+            dir.join("a.ll"),
+            "; ModuleID = 'a'\nsource_filename = \"a.rs\"\ndefine void @a() {}\n",
+        )
+        .expect("second test IR should be written");
         fs::write(dir.join("crate.d"), "deps\n").expect("side artifact should be written");
+        let output = dir.join("aggregate.ll");
 
-        assert_eq!(
-            find_single_llvm_ir(&dir).expect("single IR artifact should be discovered"),
-            expected
-        );
+        aggregate_llvm_ir(&dir, &output).expect("multiple IR modules should aggregate");
+        let aggregate = fs::read_to_string(&output).expect("aggregate should be readable");
+        let a = aggregate.find("define void @a() {}").expect("a module missing");
+        let z = aggregate.find("define void @z() {}").expect("z module missing");
+        assert!(a < z, "normalized modules should be sorted by content");
+        assert!(!aggregate.contains("ModuleID"));
+        assert!(!aggregate.contains("source_filename"));
         let _ = fs::remove_dir_all(dir);
     }
 
