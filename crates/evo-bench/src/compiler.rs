@@ -87,7 +87,8 @@ where
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    String::from_utf8(output.stdout).map_err(|error| format!("command output was not UTF-8: {error}"))
+    String::from_utf8(output.stdout)
+        .map_err(|error| format!("command output was not UTF-8: {error}"))
 }
 
 fn normalize_llvm_ir(input: &str) -> String {
