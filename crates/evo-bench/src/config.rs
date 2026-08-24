@@ -31,9 +31,9 @@ impl CaseConfig {
                 continue;
             }
 
-            let (key, value) = line.split_once('=').ok_or_else(|| {
-                format!("{}:{}: expected key=value", path.display(), index + 1)
-            })?;
+            let (key, value) = line
+                .split_once('=')
+                .ok_or_else(|| format!("{}:{}: expected key=value", path.display(), index + 1))?;
             let key = key.trim();
             let value = value.trim();
 
@@ -50,9 +50,7 @@ impl CaseConfig {
                 "warmup" => warmup = Some(parse_usize(&path, index, key, value)?),
                 "samples" => samples = Some(parse_usize(&path, index, key, value)?),
                 "timeout_ms" => timeout_ms = Some(parse_u64(&path, index, key, value)?),
-                "max_relative_mad" => {
-                    max_relative_mad = Some(parse_f64(&path, index, key, value)?)
-                }
+                "max_relative_mad" => max_relative_mad = Some(parse_f64(&path, index, key, value)?),
                 _ => {
                     return Err(format!(
                         "{}:{}: unknown config key {key:?}",
@@ -109,33 +107,21 @@ fn required<T>(value: Option<T>, key: &str, path: &Path) -> Result<T, String> {
 }
 
 fn parse_usize(path: &Path, index: usize, key: &str, value: &str) -> Result<usize, String> {
-    value.parse::<usize>().map_err(|error| {
-        format!(
-            "{}:{}: invalid {key}: {error}",
-            path.display(),
-            index + 1
-        )
-    })
+    value
+        .parse::<usize>()
+        .map_err(|error| format!("{}:{}: invalid {key}: {error}", path.display(), index + 1))
 }
 
 fn parse_u64(path: &Path, index: usize, key: &str, value: &str) -> Result<u64, String> {
-    value.parse::<u64>().map_err(|error| {
-        format!(
-            "{}:{}: invalid {key}: {error}",
-            path.display(),
-            index + 1
-        )
-    })
+    value
+        .parse::<u64>()
+        .map_err(|error| format!("{}:{}: invalid {key}: {error}", path.display(), index + 1))
 }
 
 fn parse_f64(path: &Path, index: usize, key: &str, value: &str) -> Result<f64, String> {
-    value.parse::<f64>().map_err(|error| {
-        format!(
-            "{}:{}: invalid {key}: {error}",
-            path.display(),
-            index + 1
-        )
-    })
+    value
+        .parse::<f64>()
+        .map_err(|error| format!("{}:{}: invalid {key}: {error}", path.display(), index + 1))
 }
 
 #[cfg(test)]
