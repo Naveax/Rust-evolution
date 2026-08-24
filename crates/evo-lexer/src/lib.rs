@@ -93,10 +93,10 @@ impl<'a> Lexer<'a> {
             let column = self.column;
             match ch {
                 ' ' | '\t' | '\r' => {
-                    self.bump();
+                    let _ = self.bump();
                 }
                 '\n' => {
-                    self.bump();
+                    let _ = self.bump();
                     tokens.push(Token {
                         kind: TokenKind::Newline,
                         span: Span {
@@ -181,14 +181,14 @@ impl<'a> Lexer<'a> {
             if ch == '\n' {
                 break;
             }
-            self.bump();
+            let _ = self.bump();
         }
     }
 
     fn lex_number(&mut self) -> Result<Token, LexError> {
         let (start, _, line, column) = self.bump().expect("number requires input");
         while matches!(self.peek(), Some((_, ch)) if ch.is_ascii_digit()) {
-            self.bump();
+            let _ = self.bump();
         }
         let end = self.peek().map_or(self.source.len(), |(byte, _)| byte);
         let text = &self.source[start..end];
@@ -215,7 +215,7 @@ impl<'a> Lexer<'a> {
     fn lex_identifier(&mut self) -> Token {
         let (start, _, line, column) = self.bump().expect("identifier requires input");
         while matches!(self.peek(), Some((_, ch)) if is_ident_continue(ch)) {
-            self.bump();
+            let _ = self.bump();
         }
         let end = self.peek().map_or(self.source.len(), |(byte, _)| byte);
         let text = &self.source[start..end];
@@ -264,7 +264,7 @@ impl<'a> Lexer<'a> {
                 });
             }
             if ch == '\\' {
-                self.bump();
+                let _ = self.bump();
                 let Some((escape_byte, escape, escape_line, escape_column)) = self.bump() else {
                     return Err(LexError {
                         message: "unterminated escape sequence".to_owned(),
@@ -297,7 +297,7 @@ impl<'a> Lexer<'a> {
                 value.push(decoded);
                 continue;
             }
-            self.bump();
+            let _ = self.bump();
             value.push(ch);
         }
 
