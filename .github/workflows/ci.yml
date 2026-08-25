@@ -54,9 +54,9 @@ jobs:
           path: target/evo-bench-smoke/
           if-no-files-found: error
 
-      - name: Runtime repeat probe
+      - name: Runtime repeat performance gate
         if: matrix.os == 'ubuntu-latest'
-        run: cargo run -p evo-bench -- run benchmarks/cases/runtime-repeat-v0 --out target/evo-bench-runtime-repeat --report-only
+        run: cargo run -p evo-bench -- run benchmarks/cases/runtime-repeat-v0 --out target/evo-bench-runtime-repeat
 
       - name: Upload runtime repeat report
         if: matrix.os == 'ubuntu-latest'
