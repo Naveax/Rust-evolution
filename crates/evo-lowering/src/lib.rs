@@ -145,7 +145,8 @@ impl Analyzer {
                             span: statement.span,
                         });
                     }
-                    self.bindings.insert(name.clone(), BindingState { value_type });
+                    self.bindings
+                        .insert(name.clone(), BindingState { value_type });
                     StmtKind::Let {
                         name: name.clone(),
                         mutable: false,
@@ -183,9 +184,7 @@ impl Analyzer {
     fn lower_expr(&self, expr: &SyntaxExpr) -> Result<(Expr, ValueType), LowerError> {
         let (kind, value_type) = match &expr.kind {
             SyntaxExprKind::Integer(value) => (ExprKind::Integer(*value), ValueType::Integer),
-            SyntaxExprKind::String(value) => {
-                (ExprKind::String(value.clone()), ValueType::String)
-            }
+            SyntaxExprKind::String(value) => (ExprKind::String(value.clone()), ValueType::String),
             SyntaxExprKind::Identifier(name) => {
                 let binding = self.bindings.get(name).ok_or_else(|| LowerError {
                     message: format!("use of local {name:?} before definition"),
@@ -202,10 +201,7 @@ impl Analyzer {
                         span: expr.span,
                     });
                 }
-                (
-                    ExprKind::UnaryMinus(Box::new(inner)),
-                    ValueType::Integer,
-                )
+                (ExprKind::UnaryMinus(Box::new(inner)), ValueType::Integer)
             }
             SyntaxExprKind::Binary { left, op, right } => {
                 let (left, left_type) = self.lower_expr(left)?;
@@ -263,10 +259,9 @@ mod tests {
 
     #[test]
     fn infers_mutability_for_reassignment_inside_repeat() {
-        let program = lower_source(
-            "n = input_int\nsum = 0\nrepeat n\nsum = sum + 1\nend\nprint sum\n",
-        )
-        .expect("lowering should succeed");
+        let program =
+            lower_source("n = input_int\nsum = 0\nrepeat n\nsum = sum + 1\nend\nprint sum\n")
+                .expect("lowering should succeed");
 
         assert!(matches!(
             &program.statements[0].kind,
