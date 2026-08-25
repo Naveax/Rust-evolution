@@ -1,70 +1,148 @@
+use evo_lexer::Span;
 use evo_lowering::{BinaryOp, Expr, ExprKind, Program, Stmt, StmtKind};
-use std::fmt::Write as _;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceMapping {
+    pub generated_start_line: usize,
+    pub generated_end_line: usize,
+    pub source_span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedRust {
+    pub source: String,
+    pub mappings: Vec<SourceMapping>,
+}
+
+impl GeneratedRust {
+    #[must_use]
+    pub fn source_span_for_line(&self, generated_line: usize) -> Option<Span> {
+        self.mappings
+            .iter()
+            .find(|mapping| {
+                generated_line >= mapping.generated_start_line
+                    && generated_line <= mapping.generated_end_line
+            })
+            .map(|mapping| mapping.source_span)
+    }
+}
 
 #[must_use]
 pub fn generate_lowered_rust(program: &Program) -> String {
-    let mut output = String::new();
-    if program_uses_input_int(program) {
-        output.push_str(concat!(
-            "fn __evo_input_int() -> i64 {\n",
-            "    let mut __evo_input = String::new();\n",
-            "    std::io::stdin()\n",
-            "        .read_line(&mut __evo_input)\n",
-            "        .expect(\"failed to read integer input\");\n",
-            "    __evo_input\n",
-            "        .trim()\n",
-            "        .parse::<i64>()\n",
-            "        .expect(\"expected signed integer input\")\n",
-            "}\n\n",
-        ));
-    }
-
-    output.push_str("fn main() {\n");
-    for statement in &program.statements {
-        write_statement(&mut output, statement, 1);
-    }
-    output.push_str("}\n");
-    output
+    generate_lowered_rust_with_map(program).source
 }
 
-fn write_statement(output: &mut String, statement: &Stmt, indent: usize) {
-    let padding = "    ".repeat(indent);
-    match &statement.kind {
-        StmtKind::Let {
-            name,
-            mutable,
-            expr,
-        } => {
-            let mutable = if *mutable { "mut " } else { "" };
-            let _ = writeln!(
-                output,
-                "{padding}let {mutable}{} = {};",
-                generated_identifier(name),
-                render_expr(expr)
-            );
+#[must_use]
+pub fn generate_lowered_rust_with_map(program: &Program) -> GeneratedRust {
+    Generator::new().generate(program)
+}
+
+struct Generator {
+    source: String,
+    mappings: Vec<SourceMapping>,
+    next_line: usize,
+}
+
+impl Generator {
+    fn new() -> Self {
+        Self {
+            source: String::new(),
+            mappings: Vec::new(),
+            next_line: 1,
         }
-        StmtKind::Assign { name, expr } => {
-            let _ = writeln!(
-                output,
-                "{padding}{} = {};",
-                generated_identifier(name),
-                render_expr(expr)
-            );
+    }
+
+    fn generate(mut self, program: &Program) -> GeneratedRust {
+        if program_uses_input_int(program) {
+            self.push_unmapped(concat!(
+                "fn __evo_input_int() -> i64 {\n",
+                "    let mut __evo_input = String::new();\n",
+                "    std::io::stdin()\n",
+                "        .read_line(&mut __evo_input)\n",
+                "        .expect(\"failed to read integer input\");\n",
+                "    __evo_input\n",
+                "        .trim()\n",
+                "        .parse::<i64>()\n",
+                "        .expect(\"expected signed integer input\")\n",
+                "}\n\n",
+            ));
         }
-        StmtKind::Print(expr) => {
-            let _ = writeln!(
-                output,
-                "{padding}println!(\"{{}}\", {});",
-                render_expr(expr)
-            );
+
+        self.push_unmapped("fn main() {\n");
+        for statement in &program.statements {
+            self.write_statement(statement, 1);
         }
-        StmtKind::Repeat { count, body } => {
-            let _ = writeln!(output, "{padding}for _ in 0..{} {{", render_expr(count));
-            for statement in body {
-                write_statement(output, statement, indent + 1);
+        self.push_unmapped("}\n");
+
+        GeneratedRust {
+            source: self.source,
+            mappings: self.mappings,
+        }
+    }
+
+    fn write_statement(&mut self, statement: &Stmt, indent: usize) {
+        let padding = "    ".repeat(indent);
+        match &statement.kind {
+            StmtKind::Let {
+                name,
+                mutable,
+                expr,
+            } => {
+                let mutable = if *mutable { "mut " } else { "" };
+                self.push_mapped_line(
+                    format!(
+                        "{padding}let {mutable}{} = {};\n",
+                        generated_identifier(name),
+                        render_expr(expr)
+                    ),
+                    statement.span,
+                );
             }
-            let _ = writeln!(output, "{padding}}}");
+            StmtKind::Assign { name, expr } => {
+                self.push_mapped_line(
+                    format!(
+                        "{padding}{} = {};\n",
+                        generated_identifier(name),
+                        render_expr(expr)
+                    ),
+                    statement.span,
+                );
+            }
+            StmtKind::Print(expr) => {
+                self.push_mapped_line(
+                    format!("{padding}println!(\"{{}}\", {});\n", render_expr(expr)),
+                    statement.span,
+                );
+            }
+            StmtKind::Repeat { count, body } => {
+                self.push_mapped_line(
+                    format!("{padding}for _ in 0..{} {{\n", render_expr(count)),
+                    statement.span,
+                );
+                for statement in body {
+                    self.write_statement(statement, indent + 1);
+                }
+                self.push_mapped_line(format!("{padding}}}\n"), statement.span);
+            }
         }
+    }
+
+    fn push_unmapped(&mut self, text: &str) {
+        self.source.push_str(text);
+        self.next_line += text.bytes().filter(|byte| *byte == b'\n').count();
+    }
+
+    fn push_mapped_line(&mut self, line: String, source_span: Span) {
+        debug_assert!(line.ends_with('\n'));
+        debug_assert_eq!(line.bytes().filter(|byte| *byte == b'\n').count(), 1);
+        let generated_line = self.next_line;
+        self.source.push_str(&line);
+        self.mappings.push(SourceMapping {
+            generated_start_line: generated_line,
+            generated_end_line: generated_line,
+            source_span,
+        });
+        self.next_line += 1;
     }
 }
 
@@ -125,7 +203,7 @@ fn expr_uses_input_int(expr: &Expr) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::generate_lowered_rust;
+    use super::{generate_lowered_rust, generate_lowered_rust_with_map};
     use evo_lexer::lex;
     use evo_lowering::lower;
     use evo_parser::parse;
@@ -135,10 +213,13 @@ mod tests {
         parse(&tokens).expect("parsing should succeed")
     }
 
-    fn compile_source(source: &str) -> String {
+    fn lower_source(source: &str) -> evo_lowering::Program {
         let syntax = parse_source(source);
-        let lowered = lower(&syntax).expect("lowering should succeed");
-        generate_lowered_rust(&lowered)
+        lower(&syntax).expect("lowering should succeed")
+    }
+
+    fn compile_source(source: &str) -> String {
+        generate_lowered_rust(&lower_source(source))
     }
 
     #[test]
@@ -153,6 +234,72 @@ mod tests {
                 "}\n"
             )
         );
+    }
+
+    #[test]
+    fn mapped_api_preserves_exact_generated_source() {
+        let program = lower_source("x = 1\ny = 1\nprint x + y\n");
+        let plain = generate_lowered_rust(&program);
+        let mapped = generate_lowered_rust_with_map(&program);
+        assert_eq!(mapped.source, plain);
+    }
+
+    #[test]
+    fn simple_statement_lines_map_back_to_source_spans() {
+        let program = lower_source("x = 1\nprint x\n");
+        let generated = generate_lowered_rust_with_map(&program);
+
+        assert_eq!(generated.source_span_for_line(1), None);
+        assert_eq!(generated.source_span_for_line(2).map(|span| span.line), Some(1));
+        assert_eq!(generated.source_span_for_line(3).map(|span| span.line), Some(2));
+        assert_eq!(generated.source_span_for_line(4), None);
+        assert_eq!(generated.source_span_for_line(999), None);
+    }
+
+    #[test]
+    fn reassignment_line_maps_to_reassignment_span() {
+        let program = lower_source("x = 1\nx = x + 1\n");
+        let generated = generate_lowered_rust_with_map(&program);
+
+        assert_eq!(generated.source_span_for_line(2).map(|span| span.line), Some(1));
+        assert_eq!(generated.source_span_for_line(3).map(|span| span.line), Some(2));
+    }
+
+    #[test]
+    fn nested_repeat_keeps_inner_statement_mappings() {
+        let program = lower_source(
+            "x = 0\nrepeat 2\nrepeat 3\nx = x + 1\nend\nend\n",
+        );
+        let generated = generate_lowered_rust_with_map(&program);
+
+        assert_eq!(generated.source_span_for_line(2).map(|span| span.line), Some(1));
+        assert_eq!(generated.source_span_for_line(3).map(|span| span.line), Some(2));
+        assert_eq!(generated.source_span_for_line(4).map(|span| span.line), Some(3));
+        assert_eq!(generated.source_span_for_line(5).map(|span| span.line), Some(4));
+        assert_eq!(generated.source_span_for_line(6).map(|span| span.line), Some(3));
+        assert_eq!(generated.source_span_for_line(7).map(|span| span.line), Some(2));
+        assert_eq!(generated.source_span_for_line(8), None);
+    }
+
+    #[test]
+    fn runtime_input_helper_and_main_wrapper_are_unmapped() {
+        let program = lower_source("value = input_int\nprint value\n");
+        let generated = generate_lowered_rust_with_map(&program);
+        let first_mapped_line = generated
+            .mappings
+            .first()
+            .expect("user statements should be mapped")
+            .generated_start_line;
+
+        for line in 1..first_mapped_line {
+            assert_eq!(generated.source_span_for_line(line), None, "line {line}");
+        }
+        assert_eq!(
+            generated.source_span_for_line(first_mapped_line).map(|span| span.line),
+            Some(1)
+        );
+        let final_line = generated.source.lines().count();
+        assert_eq!(generated.source_span_for_line(final_line), None);
     }
 
     #[test]
