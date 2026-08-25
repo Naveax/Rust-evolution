@@ -165,7 +165,12 @@ fn render_rustc_failure(program: &LoadedProgram, source_path: &Path, stderr: &st
             .generated
             .source_span_for_line(diagnostic.generated_line)
     {
-        return render_error(source_path, &program.source, &diagnostic.message, source_span);
+        return render_error(
+            source_path,
+            &program.source,
+            &diagnostic.message,
+            source_span,
+        );
     }
 
     let stderr = stderr.trim();
@@ -283,9 +288,7 @@ mod tests {
 
     #[test]
     fn ignores_non_error_short_diagnostics() {
-        assert!(
-            parse_rustc_short_error("main.rs:2:1: warning: unused variable: `x`\n").is_none()
-        );
+        assert!(parse_rustc_short_error("main.rs:2:1: warning: unused variable: `x`\n").is_none());
     }
 
     #[test]
