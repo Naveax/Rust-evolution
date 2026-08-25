@@ -6,6 +6,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static IR_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+const IR_SOURCE_FILE_NAME: &str = "benchmark.rs";
 
 pub(crate) fn rustc_program() -> OsString {
     env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc"))
@@ -35,11 +36,21 @@ pub(crate) fn compile_llvm_ir(rustc: &OsStr, source: &Path, output: &Path) -> Re
         .map_err(|error| format!("failed to create {}: {error}", work_dir.display()))?;
 
     let result = (|| {
-        let mut command = rustc_base_command(rustc, source);
+        let canonical_source = work_dir.join(IR_SOURCE_FILE_NAME);
+        fs::copy(source, &canonical_source).map_err(|error| {
+            format!(
+                "failed to stage {} as {} for LLVM comparison: {error}",
+                source.display(),
+                canonical_source.display()
+            )
+        })?;
+
+        let mut command = rustc_base_command(rustc, Path::new(IR_SOURCE_FILE_NAME));
         command
+            .current_dir(&work_dir)
             .arg("--emit=llvm-ir")
             .arg("--out-dir")
-            .arg(&work_dir);
+            .arg(".");
         run_compile_command(command, "LLVM IR")?;
         aggregate_llvm_ir(&work_dir, output)
     })();
@@ -213,12 +224,19 @@ fn normalize_rust_symbol_hashes(line: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{aggregate_llvm_ir, normalize_llvm_ir, normalize_rust_symbol_hashes};
+    use super::{
+        IR_SOURCE_FILE_NAME, aggregate_llvm_ir, normalize_llvm_ir, normalize_rust_symbol_hashes,
+    };
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn uses_canonical_source_name_for_ir_comparison() {
+        assert_eq!(IR_SOURCE_FILE_NAME, "benchmark.rs");
+    }
 
     #[test]
     fn normalizes_rust_symbol_hashes() {
