@@ -4,7 +4,8 @@ use std::fmt::Write as _;
 
 #[must_use]
 pub fn generate_rust(program: &SyntaxProgram) -> String {
-    let lowered = lower(program).expect("program must pass semantic lowering before code generation");
+    let lowered =
+        lower(program).expect("program must pass semantic lowering before code generation");
     generate_lowered_rust(&lowered)
 }
 
@@ -12,20 +13,18 @@ pub fn generate_rust(program: &SyntaxProgram) -> String {
 pub fn generate_lowered_rust(program: &Program) -> String {
     let mut output = String::new();
     if program_uses_input_int(program) {
-        output.push_str(
-            concat!(
-                "fn __evo_input_int() -> i64 {\n",
-                "    let mut __evo_input = String::new();\n",
-                "    std::io::stdin()\n",
-                "        .read_line(&mut __evo_input)\n",
-                "        .expect(\"failed to read integer input\");\n",
-                "    __evo_input\n",
-                "        .trim()\n",
-                "        .parse::<i64>()\n",
-                "        .expect(\"expected signed integer input\")\n",
-                "}\n\n",
-            ),
-        );
+        output.push_str(concat!(
+            "fn __evo_input_int() -> i64 {\n",
+            "    let mut __evo_input = String::new();\n",
+            "    std::io::stdin()\n",
+            "        .read_line(&mut __evo_input)\n",
+            "        .expect(\"failed to read integer input\");\n",
+            "    __evo_input\n",
+            "        .trim()\n",
+            "        .parse::<i64>()\n",
+            "        .expect(\"expected signed integer input\")\n",
+            "}\n\n",
+        ));
     }
 
     output.push_str("fn main() {\n");
@@ -61,7 +60,11 @@ fn write_statement(output: &mut String, statement: &Stmt, indent: usize) {
             );
         }
         StmtKind::Print(expr) => {
-            let _ = writeln!(output, "{padding}println!(\"{{}}\", {});", render_expr(expr));
+            let _ = writeln!(
+                output,
+                "{padding}println!(\"{{}}\", {});",
+                render_expr(expr)
+            );
         }
         StmtKind::Repeat { count, body } => {
             let _ = writeln!(output, "{padding}for _ in 0..{} {{", render_expr(count));
@@ -162,10 +165,16 @@ mod tests {
 
     #[test]
     fn lowers_runtime_input_repeat_and_inferred_mutability() {
+        let source = concat!(
+            "n = input_int\n",
+            "sum = 0\n",
+            "repeat n\n",
+            "sum = sum + 1\n",
+            "end\n",
+            "print sum\n"
+        );
         assert_eq!(
-            compile_source(
-                "n = input_int\nsum = 0\nrepeat n\nsum = sum + 1\nend\nprint sum\n",
-            ),
+            compile_source(source),
             concat!(
                 "fn __evo_input_int() -> i64 {\n",
                 "    let mut __evo_input = String::new();\n",
