@@ -191,6 +191,20 @@ mod tests {
     }
 
     #[test]
+    fn zero_and_one_repeat_counts_lower_directly_to_ranges() {
+        let generated = compile_source("repeat 0\nend\nrepeat 1\nend\n");
+        assert!(generated.contains("for _ in 0..0 {"));
+        assert!(generated.contains("for _ in 0..1 {"));
+    }
+
+    #[test]
+    fn input_int_has_explicit_parse_failure_contract() {
+        let generated = compile_source("value = input_int\nprint value\n");
+        assert!(generated.contains(".parse::<i64>()"));
+        assert!(generated.contains(".expect(\"expected signed integer input\")"));
+    }
+
+    #[test]
     fn nested_repeat_uses_plain_rust_ranges_without_allocation() {
         let generated = compile_source("x = 0\nrepeat 2\nrepeat 3\nx = x + 1\nend\nend\n");
         assert_eq!(generated.matches("for _ in 0..").count(), 2);

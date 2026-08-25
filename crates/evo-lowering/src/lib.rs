@@ -292,6 +292,59 @@ mod tests {
     }
 
     #[test]
+    fn same_type_reassignment_marks_first_binding_mutable() {
+        let program = lower_source("x = 1\nx = 2\n").expect("lowering should succeed");
+        assert!(matches!(
+            &program.statements[0].kind,
+            StmtKind::Let {
+                name,
+                mutable: true,
+                ..
+            } if name == "x"
+        ));
+        assert!(matches!(
+            &program.statements[1].kind,
+            StmtKind::Assign { name, .. } if name == "x"
+        ));
+    }
+
+    #[test]
+    fn infers_multiple_mutable_locals() {
+        let program = lower_source(
+            "a = 0\nb = 0\nrepeat 2\na = a + 1\nb = b + 2\nend\n",
+        )
+        .expect("lowering should succeed");
+
+        assert!(matches!(
+            &program.statements[0].kind,
+            StmtKind::Let {
+                name,
+                mutable: true,
+                ..
+            } if name == "a"
+        ));
+        assert!(matches!(
+            &program.statements[1].kind,
+            StmtKind::Let {
+                name,
+                mutable: true,
+                ..
+            } if name == "b"
+        ));
+        let StmtKind::Repeat { body, .. } = &program.statements[2].kind else {
+            panic!("expected repeat statement");
+        };
+        assert!(matches!(
+            &body[0].kind,
+            StmtKind::Assign { name, .. } if name == "a"
+        ));
+        assert!(matches!(
+            &body[1].kind,
+            StmtKind::Assign { name, .. } if name == "b"
+        ));
+    }
+
+    #[test]
     fn rejects_use_before_definition() {
         let error = lower_source("x = x + 1\n").expect_err("undefined read should fail");
         assert!(error.message.contains("before definition"));
