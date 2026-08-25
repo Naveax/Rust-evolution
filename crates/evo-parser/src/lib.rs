@@ -17,6 +17,7 @@ pub struct Stmt {
 pub enum StmtKind {
     Bind { name: String, expr: Expr },
     Print(Expr),
+    Repeat { count: Expr, body: Vec<Stmt> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +31,7 @@ pub enum ExprKind {
     Integer(i64),
     String(String),
     Identifier(String),
+    InputInt,
     UnaryMinus(Box<Expr>),
     Binary {
         left: Box<Expr>,
@@ -88,10 +90,11 @@ impl<'a> Parser<'a> {
         let mut statements = Vec::new();
         self.skip_newlines();
         while !self.is_eof() {
-            let statement = self.parse_statement()?;
-            if !matches!(self.current().kind, TokenKind::Newline | TokenKind::Eof) {
-                return Err(self.error_here("expected end of line after statement"));
+            if matches!(self.current().kind, TokenKind::End) {
+                return Err(self.error_here("unexpected 'end' without matching 'repeat'"));
             }
+            let statement = self.parse_statement()?;
+            self.require_statement_terminator()?;
             statements.push(statement);
             self.skip_newlines();
         }
@@ -109,6 +112,8 @@ impl<'a> Parser<'a> {
                     span,
                 })
             }
+            TokenKind::Repeat => self.parse_repeat(),
+            TokenKind::End => Err(self.error_here("unexpected 'end' without matching 'repeat'")),
             TokenKind::Identifier(name) => {
                 let start = self.advance().span;
                 if !matches!(self.current().kind, TokenKind::Equal) {
@@ -122,8 +127,34 @@ impl<'a> Parser<'a> {
                     span,
                 })
             }
-            _ => Err(self.error_here("expected binding or 'print' statement")),
+            _ => Err(self.error_here("expected binding, 'print', or 'repeat' statement")),
         }
+    }
+
+    fn parse_repeat(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.advance().span;
+        let count = self.parse_expression()?;
+        if !matches!(self.current().kind, TokenKind::Newline) {
+            return Err(self.error_here("expected end of line after repeat count"));
+        }
+        self.skip_newlines();
+
+        let mut body = Vec::new();
+        while !matches!(self.current().kind, TokenKind::End) {
+            if self.is_eof() {
+                return Err(self.error_here("missing 'end' for repeat block"));
+            }
+            let statement = self.parse_statement()?;
+            self.require_statement_terminator()?;
+            body.push(statement);
+            self.skip_newlines();
+        }
+
+        let close = self.advance().span;
+        Ok(Stmt {
+            kind: StmtKind::Repeat { count, body },
+            span: start.join(close),
+        })
     }
 
     fn parse_expression(&mut self) -> Result<Expr, ParseError> {
@@ -204,6 +235,10 @@ impl<'a> Parser<'a> {
                 kind: ExprKind::Identifier(name),
                 span: token.span,
             }),
+            TokenKind::InputInt => Ok(Expr {
+                kind: ExprKind::InputInt,
+                span: token.span,
+            }),
             TokenKind::LParen => {
                 let mut expr = self.parse_expression()?;
                 if !matches!(self.current().kind, TokenKind::RParen) {
@@ -217,6 +252,14 @@ impl<'a> Parser<'a> {
                 message: "expected expression".to_owned(),
                 span: token.span,
             }),
+        }
+    }
+
+    fn require_statement_terminator(&self) -> Result<(), ParseError> {
+        if matches!(self.current().kind, TokenKind::Newline | TokenKind::Eof) {
+            Ok(())
+        } else {
+            Err(self.error_here("expected end of line after statement"))
         }
     }
 
@@ -280,8 +323,29 @@ mod tests {
                     ..
                 }
             )),
-            StmtKind::Bind { .. } => panic!("expected print statement"),
+            _ => panic!("expected print statement"),
         }
+    }
+
+    #[test]
+    fn parses_runtime_input_and_nested_repeat_blocks() {
+        let program = parse_source(
+            "n = input_int\nsum = 0\nrepeat n\nrepeat 2\nsum = sum + 1\nend\nend\nprint sum\n",
+        );
+        assert!(matches!(
+            &program.statements[0].kind,
+            StmtKind::Bind {
+                expr: super::Expr {
+                    kind: ExprKind::InputInt,
+                    ..
+                },
+                ..
+            }
+        ));
+        let StmtKind::Repeat { body, .. } = &program.statements[2].kind else {
+            panic!("expected repeat statement");
+        };
+        assert!(matches!(&body[0].kind, StmtKind::Repeat { .. }));
     }
 
     #[test]
@@ -308,5 +372,19 @@ mod tests {
         let tokens = lex("x 1\n").expect("lexing should succeed");
         let error = parse(&tokens).expect_err("invalid binding should fail");
         assert!(error.message.contains("expected '='"));
+    }
+
+    #[test]
+    fn rejects_missing_repeat_end() {
+        let tokens = lex("repeat 2\nprint 1\n").expect("lexing should succeed");
+        let error = parse(&tokens).expect_err("unterminated repeat should fail");
+        assert!(error.message.contains("missing 'end'"));
+    }
+
+    #[test]
+    fn rejects_unmatched_end() {
+        let tokens = lex("end\n").expect("lexing should succeed");
+        let error = parse(&tokens).expect_err("unmatched end should fail");
+        assert!(error.message.contains("unexpected 'end'"));
     }
 }

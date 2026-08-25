@@ -25,6 +25,12 @@ These crates should be created only when needed; the architecture is a boundary 
 
 Parsing should not silently decide ownership or performance policy. Syntax becomes AST first; semantics/lowering remains a separate inspectable stage.
 
+### Mutability inference v0
+
+The current lowering pass infers `mut` only from same-type reassignment in the v0 scalar/string value model. This is not ownership or borrow analysis. New locals inside `repeat` are rejected in v0 so zero-iteration loops cannot create maybe-uninitialized bindings observable afterward.
+
+When owned or move-sensitive types arrive, this analysis must grow to track definite initialization, moves, borrows and control-flow joins before inferring mutation. Ergonomic syntax must not weaken Rust ownership or permit use-after-move or maybe-uninitialized states.
+
 ### Source spans
 
 Every important AST node should retain source location information so rustc/generated-code errors can be mapped back to Evolution source.

@@ -1,18 +1,15 @@
 [package]
-name = "evo-bench"
+name = "evo-lowering"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
-[[bin]]
-name = "evo-bench"
-path = "src/main.rs"
-
 [dependencies]
-evo-codegen-rust = { path = "../evo-codegen-rust" }
 evo-lexer = { path = "../evo-lexer" }
-evo-lowering = { path = "../evo-lowering" }
 evo-parser = { path = "../evo-parser" }
+
+[dev-dependencies]
+evo-lexer = { path = "../evo-lexer" }
 
 [lints]
 workspace = true

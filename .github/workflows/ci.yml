@@ -54,5 +54,17 @@ jobs:
           path: target/evo-bench-smoke/
           if-no-files-found: error
 
+      - name: Runtime repeat performance gate
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo run -p evo-bench -- run benchmarks/cases/runtime-repeat-v0 --out target/evo-bench-runtime-repeat
+
+      - name: Upload runtime repeat report
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-bench-runtime-repeat-ubuntu-latest
+          path: target/evo-bench-runtime-repeat/
+          if-no-files-found: error
+
       - name: Release build
         run: cargo build --workspace --release
