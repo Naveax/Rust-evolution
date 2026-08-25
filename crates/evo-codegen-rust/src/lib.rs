@@ -203,7 +203,7 @@ fn expr_uses_input_int(expr: &Expr) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{generate_lowered_rust, generate_lowered_rust_with_map};
+    use super::{GeneratedRust, generate_lowered_rust, generate_lowered_rust_with_map};
     use evo_lexer::lex;
     use evo_lowering::lower;
     use evo_parser::parse;
@@ -220,6 +220,10 @@ mod tests {
 
     fn compile_source(source: &str) -> String {
         generate_lowered_rust(&lower_source(source))
+    }
+
+    fn mapped_source_line(generated: &GeneratedRust, line: usize) -> Option<usize> {
+        generated.source_span_for_line(line).map(|span| span.line)
     }
 
     #[test]
@@ -250,8 +254,8 @@ mod tests {
         let generated = generate_lowered_rust_with_map(&program);
 
         assert_eq!(generated.source_span_for_line(1), None);
-        assert_eq!(generated.source_span_for_line(2).map(|span| span.line), Some(1));
-        assert_eq!(generated.source_span_for_line(3).map(|span| span.line), Some(2));
+        assert_eq!(mapped_source_line(&generated, 2), Some(1));
+        assert_eq!(mapped_source_line(&generated, 3), Some(2));
         assert_eq!(generated.source_span_for_line(4), None);
         assert_eq!(generated.source_span_for_line(999), None);
     }
@@ -261,23 +265,21 @@ mod tests {
         let program = lower_source("x = 1\nx = x + 1\n");
         let generated = generate_lowered_rust_with_map(&program);
 
-        assert_eq!(generated.source_span_for_line(2).map(|span| span.line), Some(1));
-        assert_eq!(generated.source_span_for_line(3).map(|span| span.line), Some(2));
+        assert_eq!(mapped_source_line(&generated, 2), Some(1));
+        assert_eq!(mapped_source_line(&generated, 3), Some(2));
     }
 
     #[test]
     fn nested_repeat_keeps_inner_statement_mappings() {
-        let program = lower_source(
-            "x = 0\nrepeat 2\nrepeat 3\nx = x + 1\nend\nend\n",
-        );
+        let program = lower_source("x = 0\nrepeat 2\nrepeat 3\nx = x + 1\nend\nend\n");
         let generated = generate_lowered_rust_with_map(&program);
 
-        assert_eq!(generated.source_span_for_line(2).map(|span| span.line), Some(1));
-        assert_eq!(generated.source_span_for_line(3).map(|span| span.line), Some(2));
-        assert_eq!(generated.source_span_for_line(4).map(|span| span.line), Some(3));
-        assert_eq!(generated.source_span_for_line(5).map(|span| span.line), Some(4));
-        assert_eq!(generated.source_span_for_line(6).map(|span| span.line), Some(3));
-        assert_eq!(generated.source_span_for_line(7).map(|span| span.line), Some(2));
+        assert_eq!(mapped_source_line(&generated, 2), Some(1));
+        assert_eq!(mapped_source_line(&generated, 3), Some(2));
+        assert_eq!(mapped_source_line(&generated, 4), Some(3));
+        assert_eq!(mapped_source_line(&generated, 5), Some(4));
+        assert_eq!(mapped_source_line(&generated, 6), Some(3));
+        assert_eq!(mapped_source_line(&generated, 7), Some(2));
         assert_eq!(generated.source_span_for_line(8), None);
     }
 
@@ -294,10 +296,7 @@ mod tests {
         for line in 1..first_mapped_line {
             assert_eq!(generated.source_span_for_line(line), None, "line {line}");
         }
-        assert_eq!(
-            generated.source_span_for_line(first_mapped_line).map(|span| span.line),
-            Some(1)
-        );
+        assert_eq!(mapped_source_line(&generated, first_mapped_line), Some(1));
         let final_line = generated.source.lines().count();
         assert_eq!(generated.source_span_for_line(final_line), None);
     }
