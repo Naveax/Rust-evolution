@@ -1,0 +1,6 @@
+n = input_int
+state = n
+repeat n
+state = state / 2 + 1
+end
+print state
