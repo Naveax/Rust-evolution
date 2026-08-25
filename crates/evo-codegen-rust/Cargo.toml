@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+evo-lowering = { path = "../evo-lowering" }
 evo-parser = { path = "../evo-parser" }
 
 [dev-dependencies]
