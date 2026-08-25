@@ -1,4 +1,4 @@
-use evo_codegen_rust::generate_lowered_rust;
+use evo_codegen_rust::{GeneratedRust, generate_lowered_rust_with_map};
 use evo_diagnostics::render_error;
 use evo_lexer::lex;
 use evo_lowering::lower;
@@ -6,9 +6,24 @@ use evo_parser::parse;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[derive(Debug)]
+struct LoadedProgram {
+    source: String,
+    generated: GeneratedRust,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RustcShortError {
+    generated_path: String,
+    generated_line: usize,
+    generated_column: usize,
+    message: String,
+}
 
 fn main() {
     if let Err(error) = run_cli() {
@@ -35,8 +50,8 @@ fn run_cli() -> Result<(), String> {
         }
         "emit-rust" => {
             reject_extra_args(args)?;
-            let generated = load_program(&source_path)?;
-            print!("{generated}");
+            let program = load_program(&source_path)?;
+            print!("{}", program.generated.source);
             Ok(())
         }
         "build" => {
@@ -44,15 +59,15 @@ fn run_cli() -> Result<(), String> {
                 .next()
                 .map_or_else(|| default_output_path(&source_path), PathBuf::from);
             reject_extra_args(args)?;
-            let generated = load_program(&source_path)?;
-            compile_rust(&generated, &output)?;
+            let program = load_program(&source_path)?;
+            compile_rust(&program, &source_path, &output)?;
             println!("{}", output.display());
             Ok(())
         }
         "run" => {
             reject_extra_args(args)?;
-            let generated = load_program(&source_path)?;
-            run_generated(&generated)
+            let program = load_program(&source_path)?;
+            run_generated(&program, &source_path)
         }
         _ => Err(usage()),
     }
@@ -70,7 +85,7 @@ fn reject_extra_args(mut args: impl Iterator<Item = String>) -> Result<(), Strin
     }
 }
 
-fn load_program(path: &Path) -> Result<String, String> {
+fn load_program(path: &Path) -> Result<LoadedProgram, String> {
     let source = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let tokens =
@@ -79,15 +94,16 @@ fn load_program(path: &Path) -> Result<String, String> {
         parse(&tokens).map_err(|error| render_error(path, &source, &error.message, error.span))?;
     let program =
         lower(&syntax).map_err(|error| render_error(path, &source, &error.message, error.span))?;
-    Ok(generate_lowered_rust(&program))
+    let generated = generate_lowered_rust_with_map(&program);
+    Ok(LoadedProgram { source, generated })
 }
 
-fn compile_rust(generated: &str, output: &Path) -> Result<(), String> {
+fn compile_rust(program: &LoadedProgram, source_path: &Path, output: &Path) -> Result<(), String> {
     let work_dir = unique_temp_dir("compile")?;
     fs::create_dir_all(&work_dir)
         .map_err(|error| format!("failed to create {}: {error}", work_dir.display()))?;
-    let source_path = work_dir.join("main.rs");
-    fs::write(&source_path, generated)
+    let generated_path = work_dir.join("main.rs");
+    fs::write(&generated_path, &program.generated.source)
         .map_err(|error| format!("failed to write generated Rust: {error}"))?;
 
     if let Some(parent) = output
@@ -99,32 +115,108 @@ fn compile_rust(generated: &str, output: &Path) -> Result<(), String> {
     }
 
     let rustc = env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc"));
-    let status = Command::new(rustc)
-        .arg(&source_path)
+    let result = Command::new(rustc)
+        .arg(&generated_path)
         .arg("--edition=2024")
+        .arg("--error-format=short")
         .arg("-C")
         .arg("opt-level=3")
         .arg("-C")
         .arg("codegen-units=1")
         .arg("-o")
         .arg(output)
-        .status()
-        .map_err(|error| format!("failed to execute rustc: {error}"))?;
+        .output()
+        .map_err(|error| format!("failed to execute rustc: {error}"));
+
+    let compile_result = match result {
+        Ok(result) if result.status.success() => {
+            forward_rustc_output(&result.stdout, &result.stderr)?;
+            Ok(())
+        }
+        Ok(result) => {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            Err(render_rustc_failure(program, source_path, &stderr))
+        }
+        Err(error) => Err(error),
+    };
 
     let _ = fs::remove_dir_all(&work_dir);
-    if status.success() {
-        Ok(())
+    compile_result
+}
+
+fn forward_rustc_output(stdout: &[u8], stderr: &[u8]) -> Result<(), String> {
+    if !stdout.is_empty() {
+        io::stdout()
+            .write_all(stdout)
+            .map_err(|error| format!("failed to forward rustc stdout: {error}"))?;
+    }
+    if !stderr.is_empty() {
+        io::stderr()
+            .write_all(stderr)
+            .map_err(|error| format!("failed to forward rustc stderr: {error}"))?;
+    }
+    Ok(())
+}
+
+fn render_rustc_failure(program: &LoadedProgram, source_path: &Path, stderr: &str) -> String {
+    if let Some(diagnostic) = parse_rustc_short_error(stderr)
+        && diagnostic.generated_path.ends_with("main.rs")
+        && let Some(source_span) = program
+            .generated
+            .source_span_for_line(diagnostic.generated_line)
+    {
+        return render_error(source_path, &program.source, &diagnostic.message, source_span);
+    }
+
+    let stderr = stderr.trim();
+    if stderr.is_empty() {
+        "rustc failed without diagnostics".to_owned()
     } else {
-        Err(format!("rustc failed with {status}"))
+        format!("rustc failed:\n{stderr}")
     }
 }
 
-fn run_generated(generated: &str) -> Result<(), String> {
+fn parse_rustc_short_error(stderr: &str) -> Option<RustcShortError> {
+    stderr.lines().find_map(parse_rustc_short_error_line)
+}
+
+fn parse_rustc_short_error_line(line: &str) -> Option<RustcShortError> {
+    let error_marker = line.find(": error")?;
+    let location = &line[..error_marker];
+    let diagnostic = &line[error_marker + 2..];
+
+    let mut location_parts = location.rsplitn(3, ':');
+    let generated_column = location_parts.next()?.parse().ok()?;
+    let generated_line = location_parts.next()?.parse().ok()?;
+    let generated_path = location_parts.next()?.to_owned();
+
+    let message = diagnostic
+        .split_once(": ")
+        .map_or(diagnostic, |(_, message)| message)
+        .trim();
+    if message.is_empty() {
+        return None;
+    }
+
+    Some(RustcShortError {
+        generated_path,
+        generated_line,
+        generated_column,
+        message: message.to_owned(),
+    })
+}
+
+fn run_generated(program: &LoadedProgram, source_path: &Path) -> Result<(), String> {
     let work_dir = unique_temp_dir("run")?;
     fs::create_dir_all(&work_dir)
         .map_err(|error| format!("failed to create {}: {error}", work_dir.display()))?;
     let binary = work_dir.join(format!("program{}", env::consts::EXE_SUFFIX));
-    compile_rust(generated, &binary)?;
+    let compile_result = compile_rust(program, source_path, &binary);
+    if let Err(error) = compile_result {
+        let _ = fs::remove_dir_all(&work_dir);
+        return Err(error);
+    }
+
     let status = Command::new(&binary)
         .status()
         .map_err(|error| format!("failed to execute generated binary: {error}"))?;
@@ -152,4 +244,64 @@ fn default_output_path(source: &Path) -> PathBuf {
         output.set_extension(env::consts::EXE_SUFFIX.trim_start_matches('.'));
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LoadedProgram, parse_rustc_short_error, render_rustc_failure};
+    use evo_codegen_rust::GeneratedRust;
+    use std::path::Path;
+
+    #[test]
+    fn parses_unix_rustc_short_error() {
+        let parsed = parse_rustc_short_error(
+            "/tmp/rust-evolution/main.rs:3:15: error[E0308]: mismatched types\n",
+        )
+        .expect("diagnostic should parse");
+
+        assert_eq!(parsed.generated_path, "/tmp/rust-evolution/main.rs");
+        assert_eq!(parsed.generated_line, 3);
+        assert_eq!(parsed.generated_column, 15);
+        assert_eq!(parsed.message, "mismatched types");
+    }
+
+    #[test]
+    fn parses_windows_drive_colon_from_the_right() {
+        let parsed = parse_rustc_short_error(
+            r"C:\Users\runner\Temp\rust-evolution\main.rs:12:7: error[E0308]: mismatched types",
+        )
+        .expect("diagnostic should parse");
+
+        assert_eq!(
+            parsed.generated_path,
+            r"C:\Users\runner\Temp\rust-evolution\main.rs"
+        );
+        assert_eq!(parsed.generated_line, 12);
+        assert_eq!(parsed.generated_column, 7);
+        assert_eq!(parsed.message, "mismatched types");
+    }
+
+    #[test]
+    fn ignores_non_error_short_diagnostics() {
+        assert!(
+            parse_rustc_short_error("main.rs:2:1: warning: unused variable: `x`\n").is_none()
+        );
+    }
+
+    #[test]
+    fn unmapped_rustc_error_preserves_raw_fallback() {
+        let program = LoadedProgram {
+            source: "x = 1\n".to_owned(),
+            generated: GeneratedRust {
+                source: "fn main() {}\n".to_owned(),
+                mappings: Vec::new(),
+            },
+        };
+        let stderr = "/tmp/generated/main.rs:1:1: error: internal generated error\n";
+        let rendered = render_rustc_failure(&program, Path::new("sample.evo"), stderr);
+
+        assert!(rendered.starts_with("rustc failed:\n"));
+        assert!(rendered.contains("main.rs:1:1"));
+        assert!(rendered.contains("internal generated error"));
+    }
 }

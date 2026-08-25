@@ -80,3 +80,54 @@ fn check_renders_lowering_error_at_evolution_source() {
     assert!(stderr.contains("1 | x = x + 1"), "{stderr}");
     assert!(stderr.contains("  |     ^"), "{stderr}");
 }
+
+#[test]
+fn build_remaps_rustc_type_error_to_evolution_source() {
+    let dir = temp_dir("rustc-build-remap");
+    fs::create_dir_all(&dir).expect("temporary directory should be created");
+    let source = dir.join("type-mismatch.evo");
+    let binary = dir.join("type-mismatch-output");
+    fs::write(&source, "x = 1\nx = \"text\"\nprint x\n").expect("source should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_evo"))
+        .arg("build")
+        .arg(&source)
+        .arg(&binary)
+        .output()
+        .expect("evo build should run");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let location = format!(" --> {}:2:1", source.display());
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("mismatched types"), "{stderr}");
+    assert!(stderr.contains(&location), "{stderr}");
+    assert!(stderr.contains("2 | x = \"text\""), "{stderr}");
+    assert!(stderr.contains("  | ^"), "{stderr}");
+    assert!(!stderr.contains("main.rs:"), "{stderr}");
+}
+
+#[test]
+fn run_uses_the_same_rustc_error_remap_path() {
+    let dir = temp_dir("rustc-run-remap");
+    fs::create_dir_all(&dir).expect("temporary directory should be created");
+    let source = dir.join("type-mismatch.evo");
+    fs::write(&source, "x = 1\nx = \"text\"\nprint x\n").expect("source should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_evo"))
+        .arg("run")
+        .arg(&source)
+        .output()
+        .expect("evo run should run");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let location = format!(" --> {}:2:1", source.display());
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("mismatched types"), "{stderr}");
+    assert!(stderr.contains(&location), "{stderr}");
+    assert!(stderr.contains("2 | x = \"text\""), "{stderr}");
+    assert!(!stderr.contains("main.rs:"), "{stderr}");
+}
