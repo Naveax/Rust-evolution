@@ -1,0 +1,15 @@
+[package]
+name = "evo-lowering"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+evo-lexer = { path = "../evo-lexer" }
+evo-parser = { path = "../evo-parser" }
+
+[dev-dependencies]
+evo-lexer = { path = "../evo-lexer" }
+
+[lints]
+workspace = true
