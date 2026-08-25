@@ -310,10 +310,8 @@ mod tests {
 
     #[test]
     fn infers_multiple_mutable_locals() {
-        let program = lower_source(
-            "a = 0\nb = 0\nrepeat 2\na = a + 1\nb = b + 2\nend\n",
-        )
-        .expect("lowering should succeed");
+        let program = lower_source("a = 0\nb = 0\nrepeat 2\na = a + 1\nb = b + 2\nend\n")
+            .expect("lowering should succeed");
 
         assert!(matches!(
             &program.statements[0].kind,
