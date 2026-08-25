@@ -176,6 +176,7 @@ impl<'a> Parser<'a> {
                 }
                 self.advance();
             }
+            self.skip_newlines();
         }
 
         statements
