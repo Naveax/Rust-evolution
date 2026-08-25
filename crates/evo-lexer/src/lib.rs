@@ -29,6 +29,9 @@ pub enum TokenKind {
     Integer(i64),
     StringLiteral(String),
     Print,
+    Repeat,
+    End,
+    InputInt,
     Plus,
     Minus,
     Star,
@@ -219,10 +222,12 @@ impl<'a> Lexer<'a> {
         }
         let end = self.peek().map_or(self.source.len(), |(byte, _)| byte);
         let text = &self.source[start..end];
-        let kind = if text == "print" {
-            TokenKind::Print
-        } else {
-            TokenKind::Identifier(text.to_owned())
+        let kind = match text {
+            "print" => TokenKind::Print,
+            "repeat" => TokenKind::Repeat,
+            "end" => TokenKind::End,
+            "input_int" => TokenKind::InputInt,
+            _ => TokenKind::Identifier(text.to_owned()),
         };
         Token {
             kind,
@@ -340,6 +345,27 @@ mod tests {
                 TokenKind::Identifier("x".to_owned()),
                 TokenKind::Plus,
                 TokenKind::Integer(1),
+                TokenKind::Newline,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenizes_runtime_workload_keywords() {
+        let tokens = lex("n = input_int\nrepeat n\nend\n").expect("lexing should succeed");
+        let kinds: Vec<_> = tokens.into_iter().map(|token| token.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Identifier("n".to_owned()),
+                TokenKind::Equal,
+                TokenKind::InputInt,
+                TokenKind::Newline,
+                TokenKind::Repeat,
+                TokenKind::Identifier("n".to_owned()),
+                TokenKind::Newline,
+                TokenKind::End,
                 TokenKind::Newline,
                 TokenKind::Eof,
             ]
