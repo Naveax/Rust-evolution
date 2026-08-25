@@ -1,4 +1,5 @@
 use evo_codegen_rust::generate_lowered_rust;
+use evo_diagnostics::render_error;
 use evo_lexer::lex;
 use evo_lowering::lower;
 use evo_parser::parse;
@@ -11,7 +12,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
     if let Err(error) = run_cli() {
-        eprintln!("error: {error}");
+        if error.starts_with("error: ") {
+            eprintln!("{error}");
+        } else {
+            eprintln!("error: {error}");
+        }
         process::exit(1);
     }
 }
@@ -68,9 +73,12 @@ fn reject_extra_args(mut args: impl Iterator<Item = String>) -> Result<(), Strin
 fn load_program(path: &Path) -> Result<String, String> {
     let source = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    let tokens = lex(&source).map_err(|error| error.to_string())?;
-    let syntax = parse(&tokens).map_err(|error| error.to_string())?;
-    let program = lower(&syntax).map_err(|error| error.to_string())?;
+    let tokens = lex(&source)
+        .map_err(|error| render_error(path, &source, &error.message, error.span))?;
+    let syntax = parse(&tokens)
+        .map_err(|error| render_error(path, &source, &error.message, error.span))?;
+    let program = lower(&syntax)
+        .map_err(|error| render_error(path, &source, &error.message, error.span))?;
     Ok(generate_lowered_rust(&program))
 }
 
