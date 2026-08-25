@@ -17,10 +17,7 @@ pub fn render_error(path: &Path, source: &str, message: &str, span: Span) -> Str
     let before = source.get(line_start..start).unwrap_or_default();
     let visual_start = visual_width(before, 0);
     let visual_end = if underline_end > start {
-        visual_width(
-            source.get(line_start..underline_end).unwrap_or_default(),
-            0,
-        )
+        visual_width(source.get(line_start..underline_end).unwrap_or_default(), 0)
     } else {
         visual_start + 1
     };
@@ -96,12 +93,7 @@ mod tests {
     fn renders_lexical_error_with_source_context() {
         let source = "print @\n";
         let error = lex(source).expect_err("invalid character should fail lexing");
-        let rendered = render_error(
-            Path::new("sample.evo"),
-            source,
-            &error.message,
-            error.span,
-        );
+        let rendered = render_error(Path::new("sample.evo"), source, &error.message, error.span);
 
         assert!(rendered.starts_with("error: "));
         assert!(rendered.contains(" --> sample.evo:1:7"));
