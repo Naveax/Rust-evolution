@@ -3,11 +3,14 @@ mod config;
 mod execution;
 
 use compiler::{
-    compare_normalized_ir, compile_binary, compile_llvm_ir, parse_host_target, rustc_program,
-    rustc_verbose,
+    compare_binary_bytes, compare_normalized_ir, compile_binary, compile_llvm_ir, parse_host_target,
+    rustc_program, rustc_verbose,
 };
 use config::{CaseConfig, safe_file_name};
-use evo_bench::{SampleStats, Verdict, compare_samples, measurement_is_stable, summarize};
+use evo_bench::{
+    SampleStats, Verdict, classify_with_binary_parity, compare_samples, measurement_is_stable,
+    summarize,
+};
 use evo_codegen_rust::generate_lowered_rust;
 use evo_lexer::lex;
 use evo_lowering::lower;
@@ -18,10 +21,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const MEASUREMENT_MODE: &str = "process-wall-clock";
 const TIMING_OUTPUT_POLICY: &str =
     "correctness captures stdout/stderr; timed samples redirect both streams to null symmetrically";
+const BINARY_PARITY_BASIS: &str = "byte-identical-binary-parity";
+const TIMING_BASIS: &str = "timing-median-ratio";
 
 #[derive(Debug)]
 struct Correctness {
@@ -37,7 +42,9 @@ struct Measurement {
     evolution_stats: SampleStats,
     stable: bool,
     ratio: f64,
+    timing_verdict: Verdict,
     verdict: Verdict,
+    verdict_basis: &'static str,
 }
 
 #[derive(Debug)]
@@ -48,6 +55,7 @@ struct RunReport {
     correctness: Correctness,
     measurement: Option<Measurement>,
     normalized_llvm_ir_equal: bool,
+    binary_equal: bool,
     reference_binary_bytes: u64,
     evolution_binary_bytes: u64,
 }
@@ -166,6 +174,7 @@ fn run_case(case_dir: &Path, output_dir: &Path, config: CaseConfig) -> Result<Ru
     )?;
 
     let normalized_llvm_ir_equal = compare_normalized_ir(&reference_ir, &evolution_ir)?;
+    let binary_equal = compare_binary_bytes(&reference_binary, &evolution_binary)?;
     let reference_binary_bytes = file_len(&reference_binary)?;
     let evolution_binary_bytes = file_len(&evolution_binary)?;
 
@@ -177,6 +186,7 @@ fn run_case(case_dir: &Path, output_dir: &Path, config: CaseConfig) -> Result<Ru
             &expected_stdout,
             &expected_stderr,
             &config,
+            binary_equal,
         )?)
     } else {
         None
@@ -189,6 +199,7 @@ fn run_case(case_dir: &Path, output_dir: &Path, config: CaseConfig) -> Result<Ru
         correctness,
         measurement,
         normalized_llvm_ir_equal,
+        binary_equal,
         reference_binary_bytes,
         evolution_binary_bytes,
     })
@@ -269,6 +280,7 @@ fn measure(
     expected_stdout: &[u8],
     expected_stderr: &[u8],
     config: &CaseConfig,
+    binary_equal: bool,
 ) -> Result<Measurement, String> {
     for index in 0..config.warmup {
         if index % 2 == 0 {
@@ -316,6 +328,12 @@ fn measure(
     let stable = measurement_is_stable(reference_stats, evolution_stats, config.max_relative_mad);
     let comparison = compare_samples(&reference_samples_ns, &evolution_samples_ns, true, stable)
         .map_err(|error| format!("failed to compare samples: {error:?}"))?;
+    let verdict = classify_with_binary_parity(true, binary_equal, stable, comparison.performance_ratio);
+    let verdict_basis = if binary_equal {
+        BINARY_PARITY_BASIS
+    } else {
+        TIMING_BASIS
+    };
 
     Ok(Measurement {
         reference_samples_ns,
@@ -324,7 +342,9 @@ fn measure(
         evolution_stats,
         stable,
         ratio: comparison.performance_ratio,
-        verdict: comparison.verdict,
+        timing_verdict: comparison.verdict,
+        verdict,
+        verdict_basis,
     })
 }
 
@@ -365,6 +385,9 @@ fn write_reports(output_dir: &Path, report: &RunReport) -> Result<(), String> {
 fn render_json(report: &RunReport) -> String {
     let measurement = report.measurement.as_ref();
     let verdict = measurement.map_or("FAIL".to_owned(), |value| value.verdict.to_string());
+    let timing_verdict =
+        measurement.map_or("FAIL".to_owned(), |value| value.timing_verdict.to_string());
+    let verdict_basis = measurement.map_or("correctness", |value| value.verdict_basis);
     let stable = measurement.is_some_and(|value| value.stable);
     let ratio = measurement.map_or("null".to_owned(), |value| format!("{:.9}", value.ratio));
     let reference_stats = measurement.map(|value| value.reference_stats);
@@ -387,8 +410,11 @@ fn render_json(report: &RunReport) -> String {
             "  \"correctness_reason\": {reason},\n",
             "  \"stable_measurement\": {stable},\n",
             "  \"performance_ratio\": {ratio},\n",
+            "  \"timing_verdict\": {timing_verdict},\n",
             "  \"verdict\": {verdict},\n",
+            "  \"verdict_basis\": {verdict_basis},\n",
             "  \"normalized_llvm_ir_equal\": {ir_equal},\n",
+            "  \"binary_equal\": {binary_equal},\n",
             "  \"reference_binary_bytes\": {reference_binary_bytes},\n",
             "  \"evolution_binary_bytes\": {evolution_binary_bytes},\n",
             "  \"reference_stats\": {reference_stats},\n",
@@ -409,8 +435,11 @@ fn render_json(report: &RunReport) -> String {
         reason = json_string(&report.correctness.reason),
         stable = stable,
         ratio = ratio,
+        timing_verdict = json_string(&timing_verdict),
         verdict = json_string(&verdict),
+        verdict_basis = json_string(verdict_basis),
         ir_equal = report.normalized_llvm_ir_equal,
+        binary_equal = report.binary_equal,
         reference_binary_bytes = report.reference_binary_bytes,
         evolution_binary_bytes = report.evolution_binary_bytes,
         reference_stats = stats_json(reference_stats),
@@ -464,6 +493,10 @@ fn render_markdown(report: &RunReport) -> String {
         report.normalized_llvm_ir_equal
     ));
     text.push_str(&format!(
+        "- Exact binary equal: **{}**\n",
+        report.binary_equal
+    ));
+    text.push_str(&format!(
         "- Binary size: reference {} B, evolution {} B\n",
         report.reference_binary_bytes, report.evolution_binary_bytes
     ));
@@ -471,7 +504,15 @@ fn render_markdown(report: &RunReport) -> String {
     if let Some(measurement) = &report.measurement {
         text.push_str(&format!("- Verdict: **{}**\n", measurement.verdict));
         text.push_str(&format!(
-            "- Performance ratio `T_evolution / T_reference`: **{:.9}**\n",
+            "- Verdict basis: `{}`\n",
+            measurement.verdict_basis
+        ));
+        text.push_str(&format!(
+            "- Timing-only verdict: **{}**\n",
+            measurement.timing_verdict
+        ));
+        text.push_str(&format!(
+            "- Observed performance ratio `T_evolution / T_reference`: **{:.9}**\n",
             measurement.ratio
         ));
         text.push_str(&format!(
@@ -507,7 +548,7 @@ fn render_markdown(report: &RunReport) -> String {
     }
 
     text.push_str("\n## Measurement policy\n\n");
-    text.push_str("Correctness is checked before timing. Correctness and warmup executions use timeout-controlled file capture. Timed samples use blocking process waits without polling; stdout/stderr are redirected to the platform null device on both sides. Reference and Evolution execution order alternates by sample. Unstable measurements are INCONCLUSIVE rather than PASS. The hard runtime contract remains `T_evolution <= T_reference_rust`.\n");
+    text.push_str("Correctness is checked before timing. Reference and Evolution sources are staged under the same canonical `benchmark.rs` identity before rustc compilation. Exact byte-identical executables are deterministic runtime parity proof: observed wall-clock samples and their timing-only verdict remain reported, but scheduler noise cannot turn the same executable into a regression. When binaries differ, the hard timing gate remains unchanged: stable `T_evolution / T_reference <= 1.00` is PASS, a stable ratio above 1.00 is FAIL, and unstable measurements are INCONCLUSIVE. Correctness and warmup executions use timeout-controlled file capture. Timed samples use blocking process waits without polling; stdout/stderr are redirected to the platform null device on both sides, and execution order alternates by sample.\n");
     text
 }
 
@@ -533,6 +574,7 @@ fn print_summary(report: &RunReport) {
         "normalized LLVM IR equal: {}",
         report.normalized_llvm_ir_equal
     );
+    println!("exact binary equal: {}", report.binary_equal);
     if let Some(measurement) = &report.measurement {
         println!(
             "reference median: {:.0} ns",
@@ -542,8 +584,10 @@ fn print_summary(report: &RunReport) {
             "evolution median: {:.0} ns",
             measurement.evolution_stats.median_ns
         );
-        println!("ratio: {:.9}", measurement.ratio);
+        println!("observed ratio: {:.9}", measurement.ratio);
         println!("stable: {}", measurement.stable);
+        println!("timing verdict: {}", measurement.timing_verdict);
+        println!("verdict basis: {}", measurement.verdict_basis);
         println!("verdict: {}", measurement.verdict);
     } else {
         println!("verdict: FAIL (correctness)");

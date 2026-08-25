@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-static IR_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
-const IR_SOURCE_FILE_NAME: &str = "benchmark.rs";
+static BUILD_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+const CANONICAL_SOURCE_FILE_NAME: &str = "benchmark.rs";
 
 pub(crate) fn rustc_program() -> OsString {
     env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc"))
@@ -25,27 +25,33 @@ pub(crate) fn parse_host_target(rustc_verbose: &str) -> Result<String, String> {
 }
 
 pub(crate) fn compile_binary(rustc: &OsStr, source: &Path, output: &Path) -> Result<(), String> {
-    let mut command = rustc_base_command(rustc, source);
-    command.arg("-o").arg(output);
-    run_compile_command(command, "binary")
+    let work_dir = unique_build_dir(output, "bin")?;
+    fs::create_dir_all(&work_dir)
+        .map_err(|error| format!("failed to create {}: {error}", work_dir.display()))?;
+
+    let absolute_output = absolute_path(output)?;
+    let result = (|| {
+        stage_canonical_source(source, &work_dir, "binary comparison")?;
+        let mut command = rustc_base_command(rustc, Path::new(CANONICAL_SOURCE_FILE_NAME));
+        command
+            .current_dir(&work_dir)
+            .arg("-o")
+            .arg(&absolute_output);
+        run_compile_command(command, "binary")
+    })();
+
+    let _ = fs::remove_dir_all(&work_dir);
+    result
 }
 
 pub(crate) fn compile_llvm_ir(rustc: &OsStr, source: &Path, output: &Path) -> Result<(), String> {
-    let work_dir = unique_ir_dir(output)?;
+    let work_dir = unique_build_dir(output, "ir")?;
     fs::create_dir_all(&work_dir)
         .map_err(|error| format!("failed to create {}: {error}", work_dir.display()))?;
 
     let result = (|| {
-        let canonical_source = work_dir.join(IR_SOURCE_FILE_NAME);
-        fs::copy(source, &canonical_source).map_err(|error| {
-            format!(
-                "failed to stage {} as {} for LLVM comparison: {error}",
-                source.display(),
-                canonical_source.display()
-            )
-        })?;
-
-        let mut command = rustc_base_command(rustc, Path::new(IR_SOURCE_FILE_NAME));
+        stage_canonical_source(source, &work_dir, "LLVM comparison")?;
+        let mut command = rustc_base_command(rustc, Path::new(CANONICAL_SOURCE_FILE_NAME));
         command
             .current_dir(&work_dir)
             .arg("--emit=llvm-ir")
@@ -59,6 +65,14 @@ pub(crate) fn compile_llvm_ir(rustc: &OsStr, source: &Path, output: &Path) -> Re
     result
 }
 
+pub(crate) fn compare_binary_bytes(reference: &Path, evolution: &Path) -> Result<bool, String> {
+    let reference_bytes = fs::read(reference)
+        .map_err(|error| format!("failed to read {}: {error}", reference.display()))?;
+    let evolution_bytes = fs::read(evolution)
+        .map_err(|error| format!("failed to read {}: {error}", evolution.display()))?;
+    Ok(reference_bytes == evolution_bytes)
+}
+
 pub(crate) fn compare_normalized_ir(reference: &Path, evolution: &Path) -> Result<bool, String> {
     let reference_text = fs::read_to_string(reference)
         .map_err(|error| format!("failed to read {}: {error}", reference.display()))?;
@@ -67,10 +81,32 @@ pub(crate) fn compare_normalized_ir(reference: &Path, evolution: &Path) -> Resul
     Ok(normalize_llvm_ir(&reference_text) == normalize_llvm_ir(&evolution_text))
 }
 
-fn unique_ir_dir(output: &Path) -> Result<PathBuf, String> {
+fn stage_canonical_source(source: &Path, work_dir: &Path, purpose: &str) -> Result<(), String> {
+    let canonical_source = work_dir.join(CANONICAL_SOURCE_FILE_NAME);
+    fs::copy(source, &canonical_source).map_err(|error| {
+        format!(
+            "failed to stage {} as {} for {purpose}: {error}",
+            source.display(),
+            canonical_source.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn absolute_path(path: &Path) -> Result<PathBuf, String> {
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        env::current_dir()
+            .map(|current_dir| current_dir.join(path))
+            .map_err(|error| format!("failed to resolve {}: {error}", path.display()))
+    }
+}
+
+fn unique_build_dir(output: &Path, kind: &str) -> Result<PathBuf, String> {
     let parent = output.parent().ok_or_else(|| {
         format!(
-            "LLVM IR output path has no parent directory: {}",
+            "compiler output path has no parent directory: {}",
             output.display()
         )
     })?;
@@ -78,9 +114,9 @@ fn unique_ir_dir(output: &Path) -> Result<PathBuf, String> {
         .file_stem()
         .and_then(OsStr::to_str)
         .unwrap_or("artifact");
-    let counter = IR_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let counter = BUILD_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     Ok(parent.join(format!(
-        ".evo-bench-ir-{stem}-{}-{counter}",
+        ".evo-bench-{kind}-{stem}-{}-{counter}",
         std::process::id()
     )))
 }
@@ -225,7 +261,8 @@ fn normalize_rust_symbol_hashes(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        IR_SOURCE_FILE_NAME, aggregate_llvm_ir, normalize_llvm_ir, normalize_rust_symbol_hashes,
+        CANONICAL_SOURCE_FILE_NAME, aggregate_llvm_ir, normalize_llvm_ir,
+        normalize_rust_symbol_hashes,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -234,8 +271,8 @@ mod tests {
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
-    fn uses_canonical_source_name_for_ir_comparison() {
-        assert_eq!(IR_SOURCE_FILE_NAME, "benchmark.rs");
+    fn uses_canonical_source_name_for_compiler_comparisons() {
+        assert_eq!(CANONICAL_SOURCE_FILE_NAME, "benchmark.rs");
     }
 
     #[test]

@@ -87,6 +87,22 @@ pub fn classify(correctness: bool, stable_measurement: bool, performance_ratio: 
 }
 
 #[must_use]
+pub fn classify_with_binary_parity(
+    correctness: bool,
+    binaries_identical: bool,
+    stable_measurement: bool,
+    performance_ratio: f64,
+) -> Verdict {
+    if !correctness {
+        return Verdict::Fail;
+    }
+    if binaries_identical {
+        return Verdict::Pass;
+    }
+    classify(correctness, stable_measurement, performance_ratio)
+}
+
+#[must_use]
 pub fn summarize(samples: &[u128]) -> Option<SampleStats> {
     if samples.is_empty() {
         return None;
@@ -162,7 +178,8 @@ fn median_sorted_f64(values: &[f64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        CompareError, Verdict, classify, compare_samples, measurement_is_stable, summarize,
+        CompareError, Verdict, classify, classify_with_binary_parity, compare_samples,
+        measurement_is_stable, summarize,
     };
 
     #[test]
@@ -181,6 +198,30 @@ mod tests {
     #[test]
     fn repeatable_regression_is_a_fail() {
         assert_eq!(classify(true, true, 1.000_001), Verdict::Fail);
+    }
+
+    #[test]
+    fn byte_identical_binary_is_deterministic_parity() {
+        assert_eq!(
+            classify_with_binary_parity(true, true, true, 1.05),
+            Verdict::Pass
+        );
+    }
+
+    #[test]
+    fn binary_parity_never_overrides_incorrect_output() {
+        assert_eq!(
+            classify_with_binary_parity(false, true, true, 0.5),
+            Verdict::Fail
+        );
+    }
+
+    #[test]
+    fn non_identical_binary_keeps_hard_timing_gate() {
+        assert_eq!(
+            classify_with_binary_parity(true, false, true, 1.000_001),
+            Verdict::Fail
+        );
     }
 
     #[test]
