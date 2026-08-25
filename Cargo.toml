@@ -2,6 +2,7 @@
 members = [
     "crates/evo-lexer",
     "crates/evo-parser",
+    "crates/evo-lowering",
     "crates/evo-codegen-rust",
     "crates/evo-bench",
     "crates/evo-cli",
