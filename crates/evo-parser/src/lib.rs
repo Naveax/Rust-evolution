@@ -582,7 +582,11 @@ mod tests {
         assert_eq!(errors.len(), 2);
         assert_eq!(errors[0].span.line, 1);
         assert_eq!(errors[1].span.line, 2);
-        assert!(errors.iter().all(|error| error.message.contains("expected '='")));
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.message.contains("expected '='"))
+        );
     }
 
     #[test]
