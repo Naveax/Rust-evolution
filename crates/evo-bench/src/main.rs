@@ -8,8 +8,9 @@ use compiler::{
 };
 use config::{CaseConfig, safe_file_name};
 use evo_bench::{SampleStats, Verdict, compare_samples, measurement_is_stable, summarize};
-use evo_codegen_rust::generate_rust;
+use evo_codegen_rust::generate_lowered_rust;
 use evo_lexer::lex;
+use evo_lowering::lower;
 use evo_parser::parse;
 use execution::{Execution, execute_with_timeout, measure_blocking};
 use std::env;
@@ -127,8 +128,9 @@ fn run_case(case_dir: &Path, output_dir: &Path, config: CaseConfig) -> Result<Ru
         )
     })?;
     let tokens = lex(&evolution_source).map_err(|error| error.to_string())?;
-    let program = parse(&tokens).map_err(|error| error.to_string())?;
-    let generated_rust = generate_rust(&program);
+    let syntax = parse(&tokens).map_err(|error| error.to_string())?;
+    let program = lower(&syntax).map_err(|error| error.to_string())?;
+    let generated_rust = generate_lowered_rust(&program);
     let generated_path = output_dir.join("generated.rs");
     fs::write(&generated_path, &generated_rust)
         .map_err(|error| format!("failed to write {}: {error}", generated_path.display()))?;

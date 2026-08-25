@@ -1,13 +1,5 @@
-use evo_lowering::{BinaryOp, Expr, ExprKind, Program, Stmt, StmtKind, lower};
-use evo_parser::Program as SyntaxProgram;
+use evo_lowering::{BinaryOp, Expr, ExprKind, Program, Stmt, StmtKind};
 use std::fmt::Write as _;
-
-#[must_use]
-pub fn generate_rust(program: &SyntaxProgram) -> String {
-    let lowered =
-        lower(program).expect("program must pass semantic lowering before code generation");
-    generate_lowered_rust(&lowered)
-}
 
 #[must_use]
 pub fn generate_lowered_rust(program: &Program) -> String {
@@ -133,7 +125,7 @@ fn expr_uses_input_int(expr: &Expr) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{generate_lowered_rust, generate_rust};
+    use super::generate_lowered_rust;
     use evo_lexer::lex;
     use evo_lowering::lower;
     use evo_parser::parse;
@@ -223,13 +215,5 @@ mod tests {
     fn escapes_strings_using_rust_debug_literal_rules() {
         let generated = compile_source("print \"hello\\nworld\"\n");
         assert!(generated.contains("\"hello\\nworld\""));
-    }
-
-    #[test]
-    fn compatibility_generator_uses_semantic_lowering() {
-        let syntax = parse_source("x = 1\nx = x + 1\n");
-        let generated = generate_rust(&syntax);
-        assert!(generated.contains("let mut __evo_x = 1;"));
-        assert!(generated.contains("__evo_x = (__evo_x + 1);"));
     }
 }

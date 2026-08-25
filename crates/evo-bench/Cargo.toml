@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 evo-codegen-rust = { path = "../evo-codegen-rust" }
 evo-lexer = { path = "../evo-lexer" }
+evo-lowering = { path = "../evo-lowering" }
 evo-parser = { path = "../evo-parser" }
 
 [lints]
