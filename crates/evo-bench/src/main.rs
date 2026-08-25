@@ -3,8 +3,8 @@ mod config;
 mod execution;
 
 use compiler::{
-    compare_binary_bytes, compare_normalized_ir, compile_binary, compile_llvm_ir, parse_host_target,
-    rustc_program, rustc_verbose,
+    compare_binary_bytes, compare_normalized_ir, compile_binary, compile_llvm_ir,
+    parse_host_target, rustc_program, rustc_verbose,
 };
 use config::{CaseConfig, safe_file_name};
 use evo_bench::{
@@ -328,7 +328,8 @@ fn measure(
     let stable = measurement_is_stable(reference_stats, evolution_stats, config.max_relative_mad);
     let comparison = compare_samples(&reference_samples_ns, &evolution_samples_ns, true, stable)
         .map_err(|error| format!("failed to compare samples: {error:?}"))?;
-    let verdict = classify_with_binary_parity(true, binary_equal, stable, comparison.performance_ratio);
+    let verdict =
+        classify_with_binary_parity(true, binary_equal, stable, comparison.performance_ratio);
     let verdict_basis = if binary_equal {
         BINARY_PARITY_BASIS
     } else {
