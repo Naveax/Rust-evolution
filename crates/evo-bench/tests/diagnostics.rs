@@ -53,5 +53,8 @@ fn invalid_evolution_source_uses_recovered_source_diagnostics() {
     assert!(stderr.contains("1 | x 1"), "{stderr}");
     assert!(stderr.contains("2 | y 2"), "{stderr}");
     assert!(!stderr.contains("failed to execute rustc"), "{stderr}");
-    assert!(!generated_exists, "parser failure must not emit generated Rust");
+    assert!(
+        !generated_exists,
+        "parser failure must not emit generated Rust"
+    );
 }
