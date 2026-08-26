@@ -90,8 +90,8 @@ fn load_program(path: &Path) -> Result<LoadedProgram, String> {
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let tokens =
         lex(&source).map_err(|error| render_error(path, &source, &error.message, error.span))?;
-    let syntax = parse_recovering(&tokens)
-        .map_err(|errors| render_parse_errors(path, &source, &errors))?;
+    let syntax =
+        parse_recovering(&tokens).map_err(|errors| render_parse_errors(path, &source, &errors))?;
     let program =
         lower(&syntax).map_err(|error| render_error(path, &source, &error.message, error.span))?;
     let generated = generate_lowered_rust_with_map(&program);
