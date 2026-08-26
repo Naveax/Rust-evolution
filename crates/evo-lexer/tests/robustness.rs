@@ -26,8 +26,8 @@ const SEEDS: &[&str] = &[
 ];
 
 const INSERT_CHARS: &[char] = &[
-    'a', 'z', '0', '9', '_', ' ', '\n', '\t', '=', '+', '-', '*', '/', '(', ')', '#', '"',
-    '\\', '@', '$', '%', '☃', 'é',
+    'a', 'z', '0', '9', '_', ' ', '\n', '\t', '=', '+', '-', '*', '/', '(', ')', '#', '"', '\\',
+    '@', '$', '%', '☃', 'é',
 ];
 
 const FRAGMENTS: &[&str] = &[
@@ -143,7 +143,10 @@ fn focused_recovery_regressions_remain_bounded_and_ordered() {
 }
 
 fn validate_tokens(source: &str, tokens: &[Token], context: &str) {
-    assert!(!tokens.is_empty(), "valid lexing returned no tokens\n{context}");
+    assert!(
+        !tokens.is_empty(),
+        "valid lexing returned no tokens\n{context}"
+    );
     assert_eq!(
         tokens
             .iter()
@@ -153,14 +156,24 @@ fn validate_tokens(source: &str, tokens: &[Token], context: &str) {
         "valid token stream must contain exactly one EOF\n{context}"
     );
     let eof = tokens.last().expect("tokens are non-empty");
-    assert!(matches!(eof.kind, TokenKind::Eof), "EOF must be last\n{context}");
-    assert_eq!(eof.span.start, source.len(), "EOF start mismatch\n{context}");
+    assert!(
+        matches!(eof.kind, TokenKind::Eof),
+        "EOF must be last\n{context}"
+    );
+    assert_eq!(
+        eof.span.start,
+        source.len(),
+        "EOF start mismatch\n{context}"
+    );
     assert_eq!(eof.span.end, source.len(), "EOF end mismatch\n{context}");
 
     let mut previous_start = 0usize;
     for token in tokens {
         let span = token.span;
-        assert!(span.start <= span.end, "token span reversed: {span:?}\n{context}");
+        assert!(
+            span.start <= span.end,
+            "token span reversed: {span:?}\n{context}"
+        );
         assert!(
             span.end <= source.len(),
             "token span escapes source: {span:?}, source_len={}\n{context}",
@@ -183,7 +196,10 @@ fn validate_tokens(source: &str, tokens: &[Token], context: &str) {
 }
 
 fn validate_errors(source: &str, errors: &[LexError], context: &str) {
-    assert!(!errors.is_empty(), "recovery returned empty errors\n{context}");
+    assert!(
+        !errors.is_empty(),
+        "recovery returned empty errors\n{context}"
+    );
     assert!(
         errors.len() <= RECOVERY_ERROR_CAP,
         "recovery exceeded {RECOVERY_ERROR_CAP}-error cap: {}\n{context}",
@@ -193,7 +209,10 @@ fn validate_errors(source: &str, errors: &[LexError], context: &str) {
     let mut previous_start = 0usize;
     for error in errors {
         let span = error.span;
-        assert!(span.start <= span.end, "error span reversed: {span:?}\n{context}");
+        assert!(
+            span.start <= span.end,
+            "error span reversed: {span:?}\n{context}"
+        );
         assert!(
             span.end <= source.len(),
             "error span escapes source: {span:?}, source_len={}\n{context}",
