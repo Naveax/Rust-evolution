@@ -49,11 +49,12 @@ pub struct Parameter {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeName {
     Int,
     Bool,
     String,
+    Named(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +89,13 @@ pub struct Expr {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedFieldValue {
+    pub name: String,
+    pub value: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprKind {
     Integer(i64),
     String(String),
@@ -96,6 +104,14 @@ pub enum ExprKind {
     Call {
         name: String,
         arguments: Vec<Expr>,
+    },
+    Construct {
+        name: String,
+        fields: Vec<NamedFieldValue>,
+    },
+    FieldAccess {
+        base: Box<Expr>,
+        field: String,
     },
     InputInt,
     LogicalNot(Box<Expr>),
@@ -486,8 +502,9 @@ impl<'a> Parser<'a> {
             TokenKind::TypeInt => Ok(TypeName::Int),
             TokenKind::TypeBool => Ok(TypeName::Bool),
             TokenKind::TypeString => Ok(TypeName::String),
+            TokenKind::Identifier(name) => Ok(TypeName::Named(name)),
             _ => Err(ParseError {
-                message: "expected type name: int, bool, or string".to_owned(),
+                message: "expected type name".to_owned(),
                 span: token.span,
             }),
         }
@@ -930,7 +947,30 @@ impl<'a> Parser<'a> {
                 span,
             });
         }
-        self.parse_primary()
+        self.parse_postfix()
+    }
+
+    fn parse_postfix(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_primary()?;
+        while matches!(self.current().kind, TokenKind::Dot) {
+            self.advance();
+            let field_token = self.advance();
+            let TokenKind::Identifier(field) = field_token.kind else {
+                return Err(ParseError {
+                    message: "expected field name after '.'".to_owned(),
+                    span: field_token.span,
+                });
+            };
+            let span = expr.span.join(field_token.span);
+            expr = Expr {
+                kind: ExprKind::FieldAccess {
+                    base: Box::new(expr),
+                    field,
+                },
+                span,
+            };
+        }
+        Ok(expr)
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
@@ -960,7 +1000,7 @@ impl<'a> Parser<'a> {
             TokenKind::LParen => {
                 let mut expr = self.parse_expression()?;
                 if !matches!(self.current().kind, TokenKind::RParen) {
-                    return Err(self.error_here("expected ')'"));
+                    return Err(self.error_here("expected ')'") );
                 }
                 let close = self.advance().span;
                 expr.span = token.span.join(close);
@@ -981,6 +1021,11 @@ impl<'a> Parser<'a> {
             });
         }
         self.advance();
+
+        if self.named_field_value_starts_here() {
+            return self.parse_named_construction(name, start);
+        }
+
         let mut arguments = Vec::new();
         if !matches!(self.current().kind, TokenKind::RParen) {
             loop {
@@ -1002,6 +1047,55 @@ impl<'a> Parser<'a> {
             kind: ExprKind::Call { name, arguments },
             span: start.join(close),
         })
+    }
+
+    fn parse_named_construction(&mut self, name: String, start: Span) -> Result<Expr, ParseError> {
+        let mut fields = Vec::new();
+        loop {
+            let field_name_token = self.advance();
+            let TokenKind::Identifier(field_name) = field_name_token.kind else {
+                return Err(ParseError {
+                    message: "expected field name in record construction".to_owned(),
+                    span: field_name_token.span,
+                });
+            };
+            self.expect_kind(TokenKind::Equal, "expected '=' after constructor field name")?;
+            let value = self.parse_expression()?;
+            let span = field_name_token.span.join(value.span);
+            fields.push(NamedFieldValue {
+                name: field_name,
+                value,
+                span,
+            });
+
+            if !matches!(self.current().kind, TokenKind::Comma) {
+                break;
+            }
+            self.advance();
+            if matches!(self.current().kind, TokenKind::RParen) {
+                return Err(self.error_here("expected constructor field after ','"));
+            }
+            if !self.named_field_value_starts_here() {
+                return Err(self.error_here("expected named constructor field"));
+            }
+        }
+
+        if !matches!(self.current().kind, TokenKind::RParen) {
+            return Err(self.error_here("expected ')' after record construction"));
+        }
+        let close = self.advance().span;
+        Ok(Expr {
+            kind: ExprKind::Construct { name, fields },
+            span: start.join(close),
+        })
+    }
+
+    fn named_field_value_starts_here(&self) -> bool {
+        matches!(self.current().kind, TokenKind::Identifier(_))
+            && self
+                .tokens
+                .get(self.index + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Equal))
     }
 
     fn require_statement_terminator(&self) -> Result<(), ParseError> {
@@ -1192,6 +1286,66 @@ mod tests {
             parse_source("print add(2, 3)\nfn add(a int, b int) int\nreturn a + b\nend\n");
         assert_eq!(program.functions.len(), 1);
         assert_eq!(program.statements.len(), 1);
+    }
+
+    #[test]
+    fn parses_named_record_types_in_function_signatures() {
+        let program = parse_source(
+            "record Point\nx int\nend\nfn identity(point Point) Point\nreturn point\nend\n",
+        );
+        assert_eq!(
+            program.functions[0].parameters[0].type_name,
+            TypeName::Named("Point".to_owned())
+        );
+        assert_eq!(
+            program.functions[0].return_type,
+            TypeName::Named("Point".to_owned())
+        );
+    }
+
+    #[test]
+    fn parses_named_construction_and_chained_field_access() {
+        let program = parse_source(
+            "p = Point(x = 2, y = 3)\nprint p.x\nprint p.inner.value\n",
+        );
+
+        let StmtKind::Bind { expr, .. } = &program.statements[0].kind else {
+            panic!("expected binding");
+        };
+        let ExprKind::Construct { name, fields } = &expr.kind else {
+            panic!("expected record construction");
+        };
+        assert_eq!(name, "Point");
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].name, "x");
+        assert_eq!(fields[1].name, "y");
+
+        let StmtKind::Print(field_expr) = &program.statements[1].kind else {
+            panic!("expected print");
+        };
+        assert!(matches!(
+            field_expr.kind,
+            ExprKind::FieldAccess { ref field, .. } if field == "x"
+        ));
+
+        let StmtKind::Print(chained) = &program.statements[2].kind else {
+            panic!("expected chained print");
+        };
+        let ExprKind::FieldAccess { base, field } = &chained.kind else {
+            panic!("expected outer field access");
+        };
+        assert_eq!(field, "value");
+        assert!(matches!(
+            base.kind,
+            ExprKind::FieldAccess { ref field, .. } if field == "inner"
+        ));
+    }
+
+    #[test]
+    fn rejects_trailing_constructor_field_comma() {
+        let tokens = lex("p = Point(x = 1,)\n").expect("lexing should succeed");
+        let error = parse(&tokens).expect_err("trailing constructor comma should fail");
+        assert!(error.message.contains("constructor field"));
     }
 
     #[test]
