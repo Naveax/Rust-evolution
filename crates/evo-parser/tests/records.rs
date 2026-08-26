@@ -8,9 +8,8 @@ fn parse_source(source: &str) -> evo_parser::Program {
 
 #[test]
 fn named_constructor_and_parenthesized_field_access_are_public_ast() {
-    let program = parse_source(
-        "record Point\nx int\ny int\nend\np = Point(x = 1, y = 2)\nprint (p).x\n",
-    );
+    let program =
+        parse_source("record Point\nx int\ny int\nend\np = Point(x = 1, y = 2)\nprint (p).x\n");
 
     let StmtKind::Bind { expr, .. } = &program.statements[0].kind else {
         panic!("expected binding");
