@@ -140,9 +140,8 @@ fn run_case(case_dir: &Path, output_dir: &Path, config: CaseConfig) -> Result<Ru
             evolution_source_path.display()
         )
     })?;
-    let tokens = lex_recovering(&evolution_source).map_err(|errors| {
-        render_lex_errors(&evolution_source_path, &evolution_source, &errors)
-    })?;
+    let tokens = lex_recovering(&evolution_source)
+        .map_err(|errors| render_lex_errors(&evolution_source_path, &evolution_source, &errors))?;
     let syntax = parse_recovering(&tokens).map_err(|errors| {
         render_parse_errors(&evolution_source_path, &evolution_source, &errors)
     })?;
