@@ -1000,7 +1000,7 @@ impl<'a> Parser<'a> {
             TokenKind::LParen => {
                 let mut expr = self.parse_expression()?;
                 if !matches!(self.current().kind, TokenKind::RParen) {
-                    return Err(self.error_here("expected ')'") );
+                    return Err(self.error_here("expected ')'"));
                 }
                 let close = self.advance().span;
                 expr.span = token.span.join(close);
