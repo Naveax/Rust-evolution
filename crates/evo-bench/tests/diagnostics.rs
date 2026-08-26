@@ -92,7 +92,11 @@ fn lexical_errors_are_aggregated_before_parser_and_rustc() {
     let _ = fs::remove_dir_all(&dir);
 
     assert!(!output.status.success());
-    assert_eq!(stderr.matches("error: unexpected character").count(), 2, "{stderr}");
+    assert_eq!(
+        stderr.matches("error: unexpected character").count(),
+        2,
+        "{stderr}"
+    );
     assert!(stderr.contains(&first_location), "{stderr}");
     assert!(stderr.contains(&second_location), "{stderr}");
     assert!(stderr.contains("1 | print @"), "{stderr}");
