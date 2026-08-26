@@ -116,6 +116,7 @@ pub enum ValueType {
 #[derive(Debug, Clone, Copy)]
 struct BindingState {
     value_type: ValueType,
+    declaration_start: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -186,12 +187,7 @@ fn lower_function(
 
     for parameter in &function.parameters {
         let parameter_type = value_type(parameter.type_name);
-        analyzer.bindings.insert(
-            parameter.name.clone(),
-            BindingState {
-                value_type: parameter_type,
-            },
-        );
+        analyzer.define_binding(parameter.name.clone(), parameter_type, parameter.span.start);
         parameters.push(Parameter {
             name: parameter.name.clone(),
             value_type: parameter_type,
@@ -203,7 +199,9 @@ fn lower_function(
     let mut body = analyzer.lower_statements(&function.body)?;
     analyzer.apply_mutability(&mut body);
     for parameter in &mut parameters {
-        parameter.mutable = analyzer.mutable_bindings.contains(&parameter.name);
+        parameter.mutable = analyzer
+            .mutable_declarations
+            .contains(&parameter.span.start);
     }
 
     if !block_always_returns(&body) {
@@ -266,9 +264,8 @@ fn type_label(value_type: ValueType) -> &'static str {
 }
 
 struct Analyzer<'a> {
-    bindings: HashMap<String, BindingState>,
-    mutable_bindings: HashSet<String>,
-    control_depth: usize,
+    scopes: Vec<HashMap<String, BindingState>>,
+    mutable_declarations: HashSet<usize>,
     function_signatures: &'a HashMap<String, FunctionSignature>,
     expected_return: Option<ValueType>,
 }
@@ -279,12 +276,39 @@ impl<'a> Analyzer<'a> {
         expected_return: Option<ValueType>,
     ) -> Self {
         Self {
-            bindings: HashMap::new(),
-            mutable_bindings: HashSet::new(),
-            control_depth: 0,
+            scopes: vec![HashMap::new()],
+            mutable_declarations: HashSet::new(),
             function_signatures,
             expected_return,
         }
+    }
+
+    fn visible_binding(&self, name: &str) -> Option<BindingState> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
+    }
+
+    fn define_binding(&mut self, name: String, value_type: ValueType, declaration_start: usize) {
+        self.scopes
+            .last_mut()
+            .expect("analyzer always has a lexical scope")
+            .insert(
+                name,
+                BindingState {
+                    value_type,
+                    declaration_start,
+                },
+            );
+    }
+
+    fn lower_child_scope(&mut self, statements: &[SyntaxStmt]) -> Result<Vec<Stmt>, LowerError> {
+        self.scopes.push(HashMap::new());
+        let result = self.lower_statements(statements);
+        let popped = self.scopes.pop();
+        debug_assert!(popped.is_some());
+        result
     }
 
     fn lower_statements(&mut self, statements: &[SyntaxStmt]) -> Result<Vec<Stmt>, LowerError> {
@@ -298,7 +322,7 @@ impl<'a> Analyzer<'a> {
         let kind = match &statement.kind {
             SyntaxStmtKind::Bind { name, expr } => {
                 let (expr, expression_type) = self.lower_expr(expr)?;
-                if let Some(binding) = self.bindings.get(name).copied() {
+                if let Some(binding) = self.visible_binding(name) {
                     if binding.value_type != expression_type {
                         return Err(LowerError {
                             message: format!(
@@ -307,26 +331,13 @@ impl<'a> Analyzer<'a> {
                             span: statement.span,
                         });
                     }
-                    self.mutable_bindings.insert(name.clone());
+                    self.mutable_declarations.insert(binding.declaration_start);
                     StmtKind::Assign {
                         name: name.clone(),
                         expr,
                     }
                 } else {
-                    if self.control_depth > 0 {
-                        return Err(LowerError {
-                            message: format!(
-                                "local {name:?} must be defined before entering a control-flow block"
-                            ),
-                            span: statement.span,
-                        });
-                    }
-                    self.bindings.insert(
-                        name.clone(),
-                        BindingState {
-                            value_type: expression_type,
-                        },
-                    );
+                    self.define_binding(name.clone(), expression_type, statement.span.start);
                     StmtKind::Let {
                         name: name.clone(),
                         mutable: false,
@@ -364,13 +375,8 @@ impl<'a> Analyzer<'a> {
                         span: count.span,
                     });
                 }
-                self.control_depth += 1;
-                let body_result = self.lower_statements(body);
-                self.control_depth -= 1;
-                StmtKind::Repeat {
-                    count,
-                    body: body_result?,
-                }
+                let body = self.lower_child_scope(body)?;
+                StmtKind::Repeat { count, body }
             }
             SyntaxStmtKind::If {
                 condition,
@@ -384,18 +390,12 @@ impl<'a> Analyzer<'a> {
                         span: condition.span,
                     });
                 }
-                self.control_depth += 1;
-                let then_result = self.lower_statements(then_body);
-                let else_result = if then_result.is_ok() {
-                    self.lower_statements(else_body)
-                } else {
-                    Ok(Vec::new())
-                };
-                self.control_depth -= 1;
+                let then_body = self.lower_child_scope(then_body)?;
+                let else_body = self.lower_child_scope(else_body)?;
                 StmtKind::If {
                     condition,
-                    then_body: then_result?,
-                    else_body: else_result?,
+                    then_body,
+                    else_body,
                 }
             }
         };
@@ -412,8 +412,10 @@ impl<'a> Analyzer<'a> {
             SyntaxExprKind::String(value) => (ExprKind::String(value.clone()), ValueType::String),
             SyntaxExprKind::Bool(value) => (ExprKind::Bool(*value), ValueType::Bool),
             SyntaxExprKind::Identifier(name) => {
-                let binding = self.bindings.get(name).ok_or_else(|| LowerError {
-                    message: format!("use of local {name:?} before definition"),
+                let binding = self.visible_binding(name).ok_or_else(|| LowerError {
+                    message: format!(
+                        "use of local {name:?} before definition or outside its scope"
+                    ),
                     span: expr.span,
                 })?;
                 (ExprKind::Local(name.clone()), binding.value_type)
@@ -553,7 +555,7 @@ impl<'a> Analyzer<'a> {
         for statement in statements {
             match &mut statement.kind {
                 StmtKind::Let { name, mutable, .. } => {
-                    *mutable = self.mutable_bindings.contains(name);
+                    *mutable = self.mutable_declarations.contains(&statement.span.start);
                 }
                 StmtKind::Repeat { body, .. } => self.apply_mutability(body),
                 StmtKind::If {
@@ -670,5 +672,130 @@ mod tests {
                 .expect("existing top-level program should lower");
         assert!(program.functions.is_empty());
         assert_eq!(program.statements.len(), 4);
+    }
+}
+
+#[cfg(test)]
+mod block_local_scope_tests {
+    use super::{StmtKind, lower};
+    use evo_lexer::lex;
+    use evo_parser::parse;
+
+    fn lower_source(source: &str) -> Result<super::Program, super::LowerError> {
+        let tokens = lex(source).expect("lexing should succeed");
+        let syntax = parse(&tokens).expect("parsing should succeed");
+        lower(&syntax)
+    }
+
+    #[test]
+    fn if_local_is_usable_only_inside_branch() {
+        let program = lower_source("if true\ninside = 1\nprint inside\nend\n")
+            .expect("branch local should lower");
+        let StmtKind::If { then_body, .. } = &program.statements[0].kind else {
+            panic!("expected if statement");
+        };
+        assert!(matches!(&then_body[0].kind, StmtKind::Let { name, .. } if name == "inside"));
+
+        let error = lower_source("if true\ninside = 1\nend\nprint inside\n")
+            .expect_err("branch local must not leak");
+        assert!(error.message.contains("outside its scope"));
+    }
+
+    #[test]
+    fn sibling_branches_get_independent_local_bindings() {
+        let program = lower_source(
+            "flag = true\nif flag\ntemp = 1\nprint temp\nelse\ntemp = 2\ntemp = temp + 1\nprint temp\nend\n",
+        )
+        .expect("sibling locals should lower independently");
+        let StmtKind::If {
+            then_body,
+            else_body,
+            ..
+        } = &program.statements[1].kind
+        else {
+            panic!("expected if statement");
+        };
+        assert!(matches!(
+            &then_body[0].kind,
+            StmtKind::Let {
+                name,
+                mutable: false,
+                ..
+            } if name == "temp"
+        ));
+        assert!(matches!(
+            &else_body[0].kind,
+            StmtKind::Let {
+                name,
+                mutable: true,
+                ..
+            } if name == "temp"
+        ));
+    }
+
+    #[test]
+    fn repeat_local_can_reassign_and_does_not_escape() {
+        let program =
+            lower_source("x = 0\nrepeat 2\ntemp = x + 1\ntemp = temp + 1\nx = x + temp\nend\n")
+                .expect("repeat local should lower");
+        assert!(matches!(
+            &program.statements[0].kind,
+            StmtKind::Let {
+                name,
+                mutable: true,
+                ..
+            } if name == "x"
+        ));
+        let StmtKind::Repeat { body, .. } = &program.statements[1].kind else {
+            panic!("expected repeat statement");
+        };
+        assert!(matches!(
+            &body[0].kind,
+            StmtKind::Let {
+                name,
+                mutable: true,
+                ..
+            } if name == "temp"
+        ));
+
+        let error = lower_source("repeat 1\ntemp = 1\nend\nprint temp\n")
+            .expect_err("repeat local must not leak");
+        assert!(error.message.contains("outside its scope"));
+    }
+
+    #[test]
+    fn nested_child_can_read_parent_block_local_but_not_leak_back() {
+        lower_source("if true\na = 1\nif true\nb = a + 1\nprint b\nend\nprint a\nend\n")
+            .expect("nested child should read parent block local");
+
+        let error = lower_source("if true\na = 1\nif true\nb = a + 1\nend\nprint b\nend\n")
+            .expect_err("nested child local must not leak to parent");
+        assert!(error.message.contains("outside its scope"));
+    }
+
+    #[test]
+    fn function_control_flow_uses_lexical_child_scopes() {
+        lower_source(
+            "fn choose(flag bool, x int) int\nif flag\ny = x + 1\nreturn y\nelse\nz = x - 1\nreturn z\nend\nend\nprint choose(true, 2)\n",
+        )
+        .expect("function block locals should lower");
+    }
+
+    #[test]
+    fn visible_outer_name_remains_reassignment_not_shadowing() {
+        let program = lower_source("x = 1\nif true\nx = 2\nend\n")
+            .expect("visible outer assignment should lower");
+        assert!(matches!(
+            &program.statements[0].kind,
+            StmtKind::Let {
+                name,
+                mutable: true,
+                ..
+            } if name == "x"
+        ));
+        let StmtKind::If { then_body, .. } = &program.statements[1].kind else {
+            panic!("expected if statement");
+        };
+        assert!(matches!(&then_body[0].kind, StmtKind::Assign { name, .. } if name == "x"));
     }
 }
