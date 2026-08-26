@@ -15,7 +15,7 @@ use evo_codegen_rust::generate_lowered_rust;
 use evo_diagnostics::render_error;
 use evo_lexer::lex;
 use evo_lowering::lower;
-use evo_parser::parse;
+use evo_parser::parse_recovering;
 use execution::{Execution, execute_with_timeout, measure_blocking};
 use std::env;
 use std::fs;
@@ -148,13 +148,8 @@ fn run_case(case_dir: &Path, output_dir: &Path, config: CaseConfig) -> Result<Ru
             error.span,
         )
     })?;
-    let syntax = parse(&tokens).map_err(|error| {
-        render_error(
-            &evolution_source_path,
-            &evolution_source,
-            &error.message,
-            error.span,
-        )
+    let syntax = parse_recovering(&tokens).map_err(|errors| {
+        render_parse_errors(&evolution_source_path, &evolution_source, &errors)
     })?;
     let program = lower(&syntax).map_err(|error| {
         render_error(
@@ -229,6 +224,14 @@ fn run_case(case_dir: &Path, output_dir: &Path, config: CaseConfig) -> Result<Ru
         reference_binary_bytes,
         evolution_binary_bytes,
     })
+}
+
+fn render_parse_errors(path: &Path, source: &str, errors: &[evo_parser::ParseError]) -> String {
+    errors
+        .iter()
+        .map(|error| render_error(path, source, &error.message, error.span))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn check_correctness(
