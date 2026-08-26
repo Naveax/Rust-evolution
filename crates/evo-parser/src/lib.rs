@@ -1143,9 +1143,7 @@ fn comparison_operator(kind: &TokenKind) -> Option<BinaryOp> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        BinaryOp, ExprKind, RecordFieldType, StmtKind, TypeName, parse, parse_recovering,
-    };
+    use super::{BinaryOp, ExprKind, RecordFieldType, StmtKind, TypeName, parse, parse_recovering};
     use evo_lexer::lex;
 
     fn parse_source(source: &str) -> super::Program {
@@ -1173,7 +1171,10 @@ mod tests {
             program.records[1].fields[0].type_name,
             RecordFieldType::Named("Point".to_owned())
         );
-        assert_eq!(program.records[1].fields[1].type_name, RecordFieldType::Bool);
+        assert_eq!(
+            program.records[1].fields[1].type_name,
+            RecordFieldType::Bool
+        );
         assert_eq!(
             program.records[1].fields[2].type_name,
             RecordFieldType::String
@@ -1192,8 +1193,7 @@ mod tests {
 
     #[test]
     fn rejects_declaration_after_executable_statement() {
-        let tokens = lex("x = 1\nrecord Late\nvalue int\nend\n")
-            .expect("lexing should succeed");
+        let tokens = lex("x = 1\nrecord Late\nvalue int\nend\n").expect("lexing should succeed");
         let error = parse(&tokens).expect_err("late declaration should fail");
         assert!(error.message.contains("before executable"));
     }
