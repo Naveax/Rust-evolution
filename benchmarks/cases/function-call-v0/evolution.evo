@@ -1,0 +1,15 @@
+fn step(x int) int
+if x > 1 and not (x == 7)
+return x / 2
+else
+return x + 3
+end
+end
+n = input_int
+x = input_int
+sum = 0
+repeat n
+x = step(x)
+sum = sum + x
+end
+print sum
