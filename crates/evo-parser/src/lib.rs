@@ -1188,7 +1188,8 @@ mod tests {
 
     #[test]
     fn preserves_existing_function_placement_compatibility() {
-        let program = parse_source("print add(2, 3)\nfn add(a int, b int) int\nreturn a + b\nend\n");
+        let program =
+            parse_source("print add(2, 3)\nfn add(a int, b int) int\nreturn a + b\nend\n");
         assert_eq!(program.functions.len(), 1);
         assert_eq!(program.statements.len(), 1);
     }
