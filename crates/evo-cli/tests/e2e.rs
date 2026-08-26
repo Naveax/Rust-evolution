@@ -102,7 +102,11 @@ fn check_reports_multiple_lexer_errors_in_one_run() {
     let _ = fs::remove_dir_all(&dir);
 
     assert!(!output.status.success());
-    assert_eq!(stderr.matches("error: unexpected character").count(), 2, "{stderr}");
+    assert_eq!(
+        stderr.matches("error: unexpected character").count(),
+        2,
+        "{stderr}"
+    );
     assert!(stderr.contains(&first_location), "{stderr}");
     assert!(stderr.contains(&second_location), "{stderr}");
     assert!(stderr.contains("1 | print @"), "{stderr}");
@@ -130,7 +134,11 @@ fn build_stops_before_parser_and_rustc_when_lexer_errors_exist() {
     let _ = fs::remove_dir_all(&dir);
 
     assert!(!output.status.success());
-    assert_eq!(stderr.matches("error: unexpected character").count(), 2, "{stderr}");
+    assert_eq!(
+        stderr.matches("error: unexpected character").count(),
+        2,
+        "{stderr}"
+    );
     assert!(!stderr.contains("expected expression"), "{stderr}");
     assert!(!stderr.contains("failed to execute rustc"), "{stderr}");
     assert!(!binary_exists, "lexer failure must not produce a binary");
