@@ -4,7 +4,7 @@ use std::process::{self, Command};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
-fn invalid_evolution_source_uses_shared_source_diagnostic() {
+fn invalid_evolution_source_uses_recovered_source_diagnostics() {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be valid")
@@ -13,6 +13,7 @@ fn invalid_evolution_source_uses_shared_source_diagnostic() {
     fs::create_dir_all(&dir).expect("temporary directory should be created");
 
     let evolution = dir.join("evolution.evo");
+    let out = dir.join("out");
     fs::write(
         dir.join("case.conf"),
         concat!(
@@ -24,7 +25,7 @@ fn invalid_evolution_source_uses_shared_source_diagnostic() {
         ),
     )
     .expect("config should be written");
-    fs::write(&evolution, "x 1\n").expect("Evolution source should be written");
+    fs::write(&evolution, "x 1\ny 2\n").expect("Evolution source should be written");
     fs::write(dir.join("reference.rs"), "fn main() {}\n").expect("reference should be written");
     fs::write(dir.join("expected.stdout"), "").expect("expected stdout should be written");
 
@@ -32,18 +33,25 @@ fn invalid_evolution_source_uses_shared_source_diagnostic() {
         .arg("run")
         .arg(&dir)
         .arg("--out")
-        .arg(dir.join("out"))
+        .arg(&out)
         .arg("--report-only")
+        .env("RUSTC", "evo-rustc-must-not-run")
         .output()
         .expect("evo-bench should run");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let location = format!(" --> {}:1:3", evolution.display());
+    let first_location = format!(" --> {}:1:3", evolution.display());
+    let second_location = format!(" --> {}:2:3", evolution.display());
+    let generated = out.join("generated.rs");
+    let generated_exists = generated.exists();
     let _ = fs::remove_dir_all(&dir);
 
     assert!(!output.status.success());
-    assert!(stderr.contains("error: expected '='"), "{stderr}");
-    assert!(stderr.contains(&location), "{stderr}");
+    assert_eq!(stderr.matches("error: expected '='").count(), 2, "{stderr}");
+    assert!(stderr.contains(&first_location), "{stderr}");
+    assert!(stderr.contains(&second_location), "{stderr}");
     assert!(stderr.contains("1 | x 1"), "{stderr}");
-    assert!(stderr.contains("  |   ^"), "{stderr}");
+    assert!(stderr.contains("2 | y 2"), "{stderr}");
+    assert!(!stderr.contains("failed to execute rustc"), "{stderr}");
+    assert!(!generated_exists, "parser failure must not emit generated Rust");
 }
