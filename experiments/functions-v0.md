@@ -68,11 +68,11 @@ print add(2, 3)
 
 Current type names for signatures are:
 
-- `int` -> `i64`
-- `bool` -> Rust `bool`
-- `string` -> owned Rust `String` for v0 function parameters/returns
+- `int` -> Rust `i64`;
+- `bool` -> Rust `bool`;
+- `string` -> Rust `&'static str` in functions v0.
 
-The exact string ownership strategy is intentionally conservative. Calls pass/return owned values in v0; borrow/reference syntax is a later ownership ergonomics slice.
+The current language can only construct string values from source literals, so `&'static str` preserves existing zero-allocation string behavior. This is intentionally a bootstrap ABI, not the long-term ownership model for strings. Once runtime-produced/owned strings exist, string parameter/return ownership must be revisited explicitly rather than silently adding clones or allocations.
 
 ## Semantic policy
 
@@ -112,11 +112,11 @@ The accepted implementation should lower to the equivalent Rust shape:
 
 ```rust
 fn __evo_fn_add(__evo_a: i64, __evo_b: i64) -> i64 {
-    (__evo_a + __evo_b)
+    return (__evo_a + __evo_b);
 }
 ```
 
-or an equivalent direct `return` form. Calls become direct static Rust calls. No heap allocation, boxing, vtable, registry, interpreter, or runtime dispatch is permitted solely to support named functions.
+Calls become direct static Rust calls. No heap allocation, boxing, vtable, registry, interpreter, or runtime dispatch is permitted solely to support named functions.
 
 ## Acceptance evidence
 
