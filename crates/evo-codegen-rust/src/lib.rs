@@ -124,6 +124,28 @@ impl Generator {
                 }
                 self.push_mapped_line(format!("{padding}}}\n"), statement.span);
             }
+            StmtKind::If {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                self.push_mapped_line(
+                    format!("{padding}if {} {{\n", render_expr(condition)),
+                    statement.span,
+                );
+                for statement in then_body {
+                    self.write_statement(statement, indent + 1);
+                }
+                if else_body.is_empty() {
+                    self.push_mapped_line(format!("{padding}}}\n"), statement.span);
+                } else {
+                    self.push_mapped_line(format!("{padding}}} else {{\n"), statement.span);
+                    for statement in else_body {
+                        self.write_statement(statement, indent + 1);
+                    }
+                    self.push_mapped_line(format!("{padding}}}\n"), statement.span);
+                }
+            }
         }
     }
 
@@ -150,6 +172,7 @@ fn render_expr(expr: &Expr) -> String {
     match &expr.kind {
         ExprKind::Integer(value) => value.to_string(),
         ExprKind::String(value) => format!("{value:?}"),
+        ExprKind::Bool(value) => value.to_string(),
         ExprKind::Local(name) => generated_identifier(name),
         ExprKind::InputInt => "__evo_input_int()".to_owned(),
         ExprKind::UnaryMinus(inner) => format!("(-{})", render_expr(inner)),
@@ -168,6 +191,12 @@ const fn render_binary_op(op: BinaryOp) -> &'static str {
         BinaryOp::Subtract => "-",
         BinaryOp::Multiply => "*",
         BinaryOp::Divide => "/",
+        BinaryOp::Equal => "==",
+        BinaryOp::NotEqual => "!=",
+        BinaryOp::Less => "<",
+        BinaryOp::LessEqual => "<=",
+        BinaryOp::Greater => ">",
+        BinaryOp::GreaterEqual => ">=",
     }
 }
 
@@ -187,6 +216,15 @@ fn statement_uses_input_int(statement: &Stmt) -> bool {
         StmtKind::Repeat { count, body } => {
             expr_uses_input_int(count) || body.iter().any(statement_uses_input_int)
         }
+        StmtKind::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            expr_uses_input_int(condition)
+                || then_body.iter().any(statement_uses_input_int)
+                || else_body.iter().any(statement_uses_input_int)
+        }
     }
 }
 
@@ -197,7 +235,7 @@ fn expr_uses_input_int(expr: &Expr) -> bool {
         ExprKind::Binary { left, right, .. } => {
             expr_uses_input_int(left) || expr_uses_input_int(right)
         }
-        ExprKind::Integer(_) | ExprKind::String(_) | ExprKind::Local(_) => false,
+        ExprKind::Integer(_) | ExprKind::String(_) | ExprKind::Bool(_) | ExprKind::Local(_) => false,
     }
 }
 
@@ -238,6 +276,43 @@ mod tests {
                 "}\n"
             )
         );
+    }
+
+    #[test]
+    fn generates_plain_rust_if_else_and_comparisons() {
+        assert_eq!(
+            compile_source("x = 1\nif x >= 1\nprint true\nelse\nprint false\nend\n"),
+            concat!(
+                "fn main() {\n",
+                "    let __evo_x = 1;\n",
+                "    if (__evo_x >= 1) {\n",
+                "        println!(\"{}\", true);\n",
+                "    } else {\n",
+                "        println!(\"{}\", false);\n",
+                "    }\n",
+                "}\n"
+            )
+        );
+    }
+
+    #[test]
+    fn if_without_else_does_not_emit_synthetic_else_block() {
+        let generated = compile_source("flag = true\nif flag\nprint 1\nend\n");
+        assert!(generated.contains("if __evo_flag {"));
+        assert!(!generated.contains("else"));
+    }
+
+    #[test]
+    fn conditional_source_map_preserves_nested_statement_lines() {
+        let program = lower_source("x = 1\nif x > 0\nprint true\nelse\nprint false\nend\n");
+        let generated = generate_lowered_rust_with_map(&program);
+        assert_eq!(mapped_source_line(&generated, 2), Some(1));
+        assert_eq!(mapped_source_line(&generated, 3), Some(2));
+        assert_eq!(mapped_source_line(&generated, 4), Some(3));
+        assert_eq!(mapped_source_line(&generated, 5), Some(2));
+        assert_eq!(mapped_source_line(&generated, 6), Some(5));
+        assert_eq!(mapped_source_line(&generated, 7), Some(2));
+        assert_eq!(generated.source_span_for_line(8), None);
     }
 
     #[test]
