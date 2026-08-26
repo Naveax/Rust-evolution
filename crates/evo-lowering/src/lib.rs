@@ -554,7 +554,7 @@ impl<'a> Analyzer<'a> {
     fn apply_mutability(&self, statements: &mut [Stmt]) {
         for statement in statements {
             match &mut statement.kind {
-                StmtKind::Let { name, mutable, .. } => {
+                StmtKind::Let { mutable, .. } => {
                     *mutable = self.mutable_declarations.contains(&statement.span.start);
                 }
                 StmtKind::Repeat { body, .. } => self.apply_mutability(body),
