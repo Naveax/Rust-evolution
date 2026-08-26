@@ -146,7 +146,10 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
 }
 
 fn is_expression_prefix(kind: &TokenKind) -> bool {
-    matches!(kind, TokenKind::Print | TokenKind::Repeat | TokenKind::If)
+    matches!(
+        kind,
+        TokenKind::Print | TokenKind::Repeat | TokenKind::If | TokenKind::Not
+    )
 }
 
 fn is_unary_minus(tokens: &[&Token], index: usize) -> bool {
@@ -175,6 +178,8 @@ fn is_binary_operator(kind: &TokenKind, unary_minus: bool) -> bool {
             | TokenKind::LessEqual
             | TokenKind::Greater
             | TokenKind::GreaterEqual
+            | TokenKind::And
+            | TokenKind::Or
     ) || (matches!(kind, TokenKind::Minus) && !unary_minus)
 }
 
@@ -212,6 +217,20 @@ mod tests {
             "end\n"
         );
         assert_eq!(format(source), expected);
+    }
+
+    #[test]
+    fn formats_logical_keywords_with_canonical_spacing() {
+        let source = "if(true and not(false)or true)\nprint true\nend\n";
+        let expected = "if (true and not (false) or true)\n    print true\nend\n";
+        assert_eq!(format(source), expected);
+    }
+
+    #[test]
+    fn logical_formatter_is_idempotent() {
+        let source = "if true and not (false or true)\nprint false\nend\n";
+        let once = format(source);
+        assert_eq!(format(&once), once);
     }
 
     #[test]
