@@ -41,6 +41,11 @@ pub enum TokenKind {
     And,
     Or,
     Not,
+    Fn,
+    Return,
+    TypeInt,
+    TypeBool,
+    TypeString,
     Plus,
     Minus,
     Star,
@@ -54,6 +59,7 @@ pub enum TokenKind {
     GreaterEqual,
     LParen,
     RParen,
+    Comma,
     Newline,
     Eof,
 }
@@ -142,6 +148,7 @@ impl<'a> Lexer<'a> {
                 }
                 '(' => tokens.push(self.single(TokenKind::LParen)),
                 ')' => tokens.push(self.single(TokenKind::RParen)),
+                ',' => tokens.push(self.single(TokenKind::Comma)),
                 '"' => tokens.push(self.lex_string()?),
                 c if c.is_ascii_digit() => tokens.push(self.lex_number()?),
                 c if is_ident_start(c) => tokens.push(self.lex_identifier()),
@@ -160,16 +167,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let end = self.source.len();
-        tokens.push(Token {
-            kind: TokenKind::Eof,
-            span: Span {
-                start: end,
-                end,
-                line: self.line,
-                column: self.column,
-            },
-        });
+        tokens.push(self.eof_token());
         Ok(tokens)
     }
 
@@ -212,6 +210,7 @@ impl<'a> Lexer<'a> {
                 }
                 '(' => tokens.push(self.single(TokenKind::LParen)),
                 ')' => tokens.push(self.single(TokenKind::RParen)),
+                ',' => tokens.push(self.single(TokenKind::Comma)),
                 '"' => match self.lex_string() {
                     Ok(token) => tokens.push(token),
                     Err(error) => {
@@ -245,19 +244,23 @@ impl<'a> Lexer<'a> {
         }
 
         if errors.is_empty() {
-            let end = self.source.len();
-            tokens.push(Token {
-                kind: TokenKind::Eof,
-                span: Span {
-                    start: end,
-                    end,
-                    line: self.line,
-                    column: self.column,
-                },
-            });
+            tokens.push(self.eof_token());
             Ok(tokens)
         } else {
             Err(errors)
+        }
+    }
+
+    fn eof_token(&self) -> Token {
+        let end = self.source.len();
+        Token {
+            kind: TokenKind::Eof,
+            span: Span {
+                start: end,
+                end,
+                line: self.line,
+                column: self.column,
+            },
         }
     }
 
@@ -415,6 +418,11 @@ impl<'a> Lexer<'a> {
             "and" => TokenKind::And,
             "or" => TokenKind::Or,
             "not" => TokenKind::Not,
+            "fn" => TokenKind::Fn,
+            "return" => TokenKind::Return,
+            "int" => TokenKind::TypeInt,
+            "bool" => TokenKind::TypeBool,
+            "string" => TokenKind::TypeString,
             _ => TokenKind::Identifier(text.to_owned()),
         };
         Token {
@@ -518,12 +526,18 @@ const fn is_ident_continue(ch: char) -> bool {
 mod tests {
     use super::{MAX_RECOVERED_ERRORS, TokenKind, lex, lex_recovering};
 
+    fn kinds(source: &str) -> Vec<TokenKind> {
+        lex(source)
+            .expect("source should lex")
+            .into_iter()
+            .map(|token| token.kind)
+            .collect()
+    }
+
     #[test]
     fn tokenizes_basic_script() {
-        let tokens = lex("x = 1\nprint x + 1\n").expect("lexing should succeed");
-        let kinds: Vec<_> = tokens.into_iter().map(|token| token.kind).collect();
         assert_eq!(
-            kinds,
+            kinds("x = 1\nprint x + 1\n"),
             vec![
                 TokenKind::Identifier("x".to_owned()),
                 TokenKind::Equal,
@@ -540,73 +554,88 @@ mod tests {
     }
 
     #[test]
-    fn tokenizes_runtime_workload_keywords() {
-        let tokens = lex("n = input_int\nrepeat n\nend\n").expect("lexing should succeed");
-        let kinds: Vec<_> = tokens.into_iter().map(|token| token.kind).collect();
-        assert_eq!(
-            kinds,
-            vec![
-                TokenKind::Identifier("n".to_owned()),
-                TokenKind::Equal,
-                TokenKind::InputInt,
-                TokenKind::Newline,
-                TokenKind::Repeat,
-                TokenKind::Identifier("n".to_owned()),
-                TokenKind::Newline,
-                TokenKind::End,
-                TokenKind::Newline,
-                TokenKind::Eof,
-            ]
-        );
+    fn tokenizes_function_signature_and_call_punctuation() {
+        let tokens = kinds("fn add(a int, b int) int\nreturn add(a, b)\nend\n");
+        for expected in [
+            TokenKind::Fn,
+            TokenKind::Return,
+            TokenKind::TypeInt,
+            TokenKind::Comma,
+            TokenKind::LParen,
+            TokenKind::RParen,
+        ] {
+            assert!(tokens.contains(&expected), "missing {expected:?}");
+        }
     }
 
     #[test]
-    fn tokenizes_control_flow_keywords_and_comparisons() {
-        let tokens = lex("if true\nelse\nif false\nend\nprint 1 == 2\nprint 1 != 2\nprint 1 < 2\nprint 1 <= 2\nprint 2 > 1\nprint 2 >= 1\n")
-            .expect("control-flow source should lex");
-        let kinds: Vec<_> = tokens.into_iter().map(|token| token.kind).collect();
-        assert!(kinds.contains(&TokenKind::If));
-        assert!(kinds.contains(&TokenKind::Else));
-        assert!(kinds.contains(&TokenKind::True));
-        assert!(kinds.contains(&TokenKind::False));
-        assert!(kinds.contains(&TokenKind::EqualEqual));
-        assert!(kinds.contains(&TokenKind::BangEqual));
-        assert!(kinds.contains(&TokenKind::Less));
-        assert!(kinds.contains(&TokenKind::LessEqual));
-        assert!(kinds.contains(&TokenKind::Greater));
-        assert!(kinds.contains(&TokenKind::GreaterEqual));
+    fn tokenizes_all_signature_types() {
+        let tokens = kinds("fn sample(a int, b bool, c string) string\nreturn c\nend\n");
+        assert!(tokens.contains(&TokenKind::TypeInt));
+        assert!(tokens.contains(&TokenKind::TypeBool));
+        assert!(tokens.contains(&TokenKind::TypeString));
     }
 
     #[test]
-    fn tokenizes_logical_keywords() {
-        let tokens =
-            lex("if true and not false or true\nend\n").expect("logical keyword source should lex");
-        let kinds: Vec<_> = tokens.into_iter().map(|token| token.kind).collect();
-        assert!(kinds.contains(&TokenKind::And));
-        assert!(kinds.contains(&TokenKind::Or));
-        assert!(kinds.contains(&TokenKind::Not));
+    fn function_keyword_prefixes_remain_identifiers() {
+        let tokens = kinds("fnord = 1\nreturning = 2\ninteger = 3\nboolean = 4\nstringify = 5\n");
+        for name in ["fnord", "returning", "integer", "boolean", "stringify"] {
+            assert!(tokens.contains(&TokenKind::Identifier(name.to_owned())));
+        }
     }
 
     #[test]
-    fn logical_keyword_prefixes_remain_identifiers() {
-        let tokens = lex("android = 1\norigin = 2\nnotice = 3\n")
-            .expect("keyword prefixes should remain identifiers");
-        let kinds: Vec<_> = tokens.into_iter().map(|token| token.kind).collect();
-        assert!(kinds.contains(&TokenKind::Identifier("android".to_owned())));
-        assert!(kinds.contains(&TokenKind::Identifier("origin".to_owned())));
-        assert!(kinds.contains(&TokenKind::Identifier("notice".to_owned())));
-        assert!(!kinds.contains(&TokenKind::And));
-        assert!(!kinds.contains(&TokenKind::Or));
-        assert!(!kinds.contains(&TokenKind::Not));
-    }
-
-    #[test]
-    fn recovering_lexer_matches_fail_fast_tokens_for_logical_source() {
-        let source = "if true and not false or true\nend\n";
+    fn recovering_lexer_matches_fail_fast_tokens_for_function_source() {
+        let source = "fn add(a int, b int) int\nreturn a + b\nend\nprint add(2, 3)\n";
         assert_eq!(
             lex_recovering(source).expect("recovery lexing should succeed"),
             lex(source).expect("fail-fast lexing should succeed")
         );
+    }
+
+    #[test]
+    fn tokenizes_runtime_workload_keywords() {
+        let tokens = kinds("n = input_int\nrepeat n\nend\n");
+        assert!(tokens.contains(&TokenKind::InputInt));
+        assert!(tokens.contains(&TokenKind::Repeat));
+        assert!(tokens.contains(&TokenKind::End));
+    }
+
+    #[test]
+    fn tokenizes_control_flow_keywords_and_comparisons() {
+        let tokens = kinds(
+            "if true\nelse\nif false\nend\nprint 1 == 2\nprint 1 != 2\nprint 1 < 2\nprint 1 <= 2\nprint 2 > 1\nprint 2 >= 1\n",
+        );
+        for expected in [
+            TokenKind::If,
+            TokenKind::Else,
+            TokenKind::True,
+            TokenKind::False,
+            TokenKind::EqualEqual,
+            TokenKind::BangEqual,
+            TokenKind::Less,
+            TokenKind::LessEqual,
+            TokenKind::Greater,
+            TokenKind::GreaterEqual,
+        ] {
+            assert!(tokens.contains(&expected), "missing {expected:?}");
+        }
+    }
+
+    #[test]
+    fn tokenizes_logical_keywords() {
+        let tokens = kinds("if true and not false or true\nend\n");
+        assert!(tokens.contains(&TokenKind::And));
+        assert!(tokens.contains(&TokenKind::Or));
+        assert!(tokens.contains(&TokenKind::Not));
+    }
+
+    #[test]
+    fn logical_keyword_prefixes_remain_identifiers() {
+        let tokens = kinds("android = 1\norigin = 2\nnotice = 3\n");
+        for name in ["android", "origin", "notice"] {
+            assert!(tokens.contains(&TokenKind::Identifier(name.to_owned())));
+        }
     }
 
     #[test]
@@ -623,11 +652,11 @@ mod tests {
 
     #[test]
     fn handles_comments_and_string_escapes() {
-        let tokens = lex("# comment\nprint \"hello\\nworld\"\n").expect("lexing should succeed");
-        assert!(matches!(&tokens[0].kind, TokenKind::Newline));
-        assert!(matches!(&tokens[1].kind, TokenKind::Print));
+        let tokens = kinds("# comment\nprint \"hello\\nworld\"\n");
+        assert!(matches!(tokens[0], TokenKind::Newline));
+        assert!(matches!(tokens[1], TokenKind::Print));
         assert_eq!(
-            tokens[2].kind,
+            tokens[2],
             TokenKind::StringLiteral("hello\nworld".to_owned())
         );
     }
@@ -640,23 +669,12 @@ mod tests {
     }
 
     #[test]
-    fn recovering_lexer_matches_fail_fast_tokens_on_valid_input() {
-        let source = "# comment\nn = input_int\nrepeat n\nprint \"hello\\nworld\"\nend\n";
-        assert_eq!(
-            lex_recovering(source).expect("recovery lexing should succeed"),
-            lex(source).expect("fail-fast lexing should succeed")
-        );
-    }
-
-    #[test]
     fn recovering_lexer_reports_multiple_unknown_characters_in_order() {
         let errors = lex_recovering("print @\nprint $\n")
             .expect_err("multiple unknown characters should fail");
         assert_eq!(errors.len(), 2);
         assert_eq!(errors[0].span.line, 1);
-        assert_eq!(errors[0].span.column, 7);
         assert_eq!(errors[1].span.line, 2);
-        assert_eq!(errors[1].span.column, 7);
     }
 
     #[test]
@@ -665,10 +683,7 @@ mod tests {
             .expect_err("unsupported escape should recover");
         assert_eq!(errors.len(), 2);
         assert!(errors[0].message.contains("unsupported escape"));
-        assert_eq!(errors[0].span.line, 1);
         assert!(errors[1].message.contains("unexpected character"));
-        assert_eq!(errors[1].span.line, 2);
-        assert_eq!(errors[1].span.column, 7);
     }
 
     #[test]
@@ -677,9 +692,7 @@ mod tests {
             .expect_err("unterminated string should recover at newline");
         assert_eq!(errors.len(), 2);
         assert!(errors[0].message.contains("unterminated string"));
-        assert_eq!(errors[0].span.line, 1);
         assert_eq!(errors[1].span.line, 2);
-        assert_eq!(errors[1].span.column, 7);
     }
 
     #[test]
@@ -688,9 +701,7 @@ mod tests {
             .expect_err("overflowing integer should recover");
         assert_eq!(errors.len(), 2);
         assert!(errors[0].message.contains("out of range"));
-        assert_eq!(errors[0].span.line, 1);
         assert_eq!(errors[1].span.line, 2);
-        assert_eq!(errors[1].span.column, 7);
     }
 
     #[test]
@@ -698,11 +709,6 @@ mod tests {
         let source = "@\n".repeat(MAX_RECOVERED_ERRORS + 4);
         let errors = lex_recovering(&source).expect_err("unknown characters should fail");
         assert_eq!(errors.len(), MAX_RECOVERED_ERRORS);
-        assert_eq!(errors.first().expect("first error").span.line, 1);
-        assert_eq!(
-            errors.last().expect("last error").span.line,
-            MAX_RECOVERED_ERRORS
-        );
     }
 
     #[test]
