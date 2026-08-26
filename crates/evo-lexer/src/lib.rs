@@ -32,13 +32,23 @@ pub enum TokenKind {
     StringLiteral(String),
     Print,
     Repeat,
+    If,
+    Else,
     End,
+    True,
+    False,
     InputInt,
     Plus,
     Minus,
     Star,
     Slash,
     Equal,
+    EqualEqual,
+    BangEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
     LParen,
     RParen,
     Newline,
@@ -121,7 +131,10 @@ impl<'a> Lexer<'a> {
                 '-' => tokens.push(self.single(TokenKind::Minus)),
                 '*' => tokens.push(self.single(TokenKind::Star)),
                 '/' => tokens.push(self.single(TokenKind::Slash)),
-                '=' => tokens.push(self.single(TokenKind::Equal)),
+                '=' => tokens.push(self.optional_equal(TokenKind::Equal, TokenKind::EqualEqual)),
+                '!' => tokens.push(self.bang_equal()?),
+                '<' => tokens.push(self.optional_equal(TokenKind::Less, TokenKind::LessEqual)),
+                '>' => tokens.push(self.optional_equal(TokenKind::Greater, TokenKind::GreaterEqual)),
                 '(' => tokens.push(self.single(TokenKind::LParen)),
                 ')' => tokens.push(self.single(TokenKind::RParen)),
                 '"' => tokens.push(self.lex_string()?),
@@ -183,7 +196,13 @@ impl<'a> Lexer<'a> {
                 '-' => tokens.push(self.single(TokenKind::Minus)),
                 '*' => tokens.push(self.single(TokenKind::Star)),
                 '/' => tokens.push(self.single(TokenKind::Slash)),
-                '=' => tokens.push(self.single(TokenKind::Equal)),
+                '=' => tokens.push(self.optional_equal(TokenKind::Equal, TokenKind::EqualEqual)),
+                '!' => match self.bang_equal() {
+                    Ok(token) => tokens.push(token),
+                    Err(error) => errors.push(error),
+                },
+                '<' => tokens.push(self.optional_equal(TokenKind::Less, TokenKind::LessEqual)),
+                '>' => tokens.push(self.optional_equal(TokenKind::Greater, TokenKind::GreaterEqual)),
                 '(' => tokens.push(self.single(TokenKind::LParen)),
                 ')' => tokens.push(self.single(TokenKind::RParen)),
                 '"' => match self.lex_string() {
@@ -265,6 +284,54 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn optional_equal(&mut self, single: TokenKind, with_equal: TokenKind) -> Token {
+        let (start, first, line, column) = self.bump().expect("operator requires input");
+        let mut end = start + first.len_utf8();
+        let kind = if matches!(self.peek(), Some((_, '='))) {
+            let (equal_start, equal, _, _) = self.bump().expect("peeked '='");
+            end = equal_start + equal.len_utf8();
+            with_equal
+        } else {
+            single
+        };
+        Token {
+            kind,
+            span: Span {
+                start,
+                end,
+                line,
+                column,
+            },
+        }
+    }
+
+    fn bang_equal(&mut self) -> Result<Token, LexError> {
+        let (start, bang, line, column) = self.bump().expect("'!' requires input");
+        let single_end = start + bang.len_utf8();
+        if matches!(self.peek(), Some((_, '='))) {
+            let (equal_start, equal, _, _) = self.bump().expect("peeked '='");
+            return Ok(Token {
+                kind: TokenKind::BangEqual,
+                span: Span {
+                    start,
+                    end: equal_start + equal.len_utf8(),
+                    line,
+                    column,
+                },
+            });
+        }
+
+        Err(LexError {
+            message: "expected '=' after '!'".to_owned(),
+            span: Span {
+                start,
+                end: single_end,
+                line,
+                column,
+            },
+        })
+    }
+
     fn skip_comment(&mut self) {
         while let Some((_, ch)) = self.peek() {
             if ch == '\n' {
@@ -332,7 +399,11 @@ impl<'a> Lexer<'a> {
         let kind = match text {
             "print" => TokenKind::Print,
             "repeat" => TokenKind::Repeat,
+            "if" => TokenKind::If,
+            "else" => TokenKind::Else,
             "end" => TokenKind::End,
+            "true" => TokenKind::True,
+            "false" => TokenKind::False,
             "input_int" => TokenKind::InputInt,
             _ => TokenKind::Identifier(text.to_owned()),
         };
@@ -477,6 +548,35 @@ mod tests {
                 TokenKind::Eof,
             ]
         );
+    }
+
+    #[test]
+    fn tokenizes_control_flow_keywords_and_comparisons() {
+        let tokens = lex("if true\nelse\nif false\nend\nprint 1 == 2\nprint 1 != 2\nprint 1 < 2\nprint 1 <= 2\nprint 2 > 1\nprint 2 >= 1\n")
+            .expect("control-flow source should lex");
+        let kinds: Vec<_> = tokens.into_iter().map(|token| token.kind).collect();
+        assert!(kinds.contains(&TokenKind::If));
+        assert!(kinds.contains(&TokenKind::Else));
+        assert!(kinds.contains(&TokenKind::True));
+        assert!(kinds.contains(&TokenKind::False));
+        assert!(kinds.contains(&TokenKind::EqualEqual));
+        assert!(kinds.contains(&TokenKind::BangEqual));
+        assert!(kinds.contains(&TokenKind::Less));
+        assert!(kinds.contains(&TokenKind::LessEqual));
+        assert!(kinds.contains(&TokenKind::Greater));
+        assert!(kinds.contains(&TokenKind::GreaterEqual));
+    }
+
+    #[test]
+    fn lone_bang_is_a_deterministic_error_and_recovery_makes_progress() {
+        let error = lex("print !\n").expect_err("lone bang should fail");
+        assert_eq!(error.message, "expected '=' after '!'");
+        assert_eq!(error.span.column, 7);
+
+        let errors = lex_recovering("!\n!\n").expect_err("lone bangs should recover");
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0].span.line, 1);
+        assert_eq!(errors[1].span.line, 2);
     }
 
     #[test]
