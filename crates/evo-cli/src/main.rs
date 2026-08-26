@@ -1,5 +1,6 @@
 use evo_codegen_rust::{GeneratedRust, generate_lowered_rust_with_map};
 use evo_diagnostics::render_error;
+use evo_formatter::format_source;
 use evo_lexer::lex_recovering;
 use evo_lowering::lower;
 use evo_parser::parse_recovering;
@@ -54,6 +55,15 @@ fn run_cli() -> Result<(), String> {
             print!("{}", program.generated.source);
             Ok(())
         }
+        "fmt" => {
+            let check = match args.next() {
+                None => false,
+                Some(value) if value == "--check" => true,
+                Some(_) => return Err(usage()),
+            };
+            reject_extra_args(args)?;
+            format_file(&source_path, check)
+        }
         "build" => {
             let output = args
                 .next()
@@ -74,13 +84,39 @@ fn run_cli() -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: evo <check|emit-rust|build|run> <file.evo> [build-output]".to_owned()
+    "usage: evo <check|emit-rust|fmt|build|run> <file.evo> [build-output|--check]".to_owned()
 }
 
 fn reject_extra_args(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     if args.next().is_some() {
         Err(usage())
     } else {
+        Ok(())
+    }
+}
+
+fn format_file(path: &Path, check: bool) -> Result<(), String> {
+    let source = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let tokens =
+        lex_recovering(&source).map_err(|errors| render_lex_errors(path, &source, &errors))?;
+    let _ =
+        parse_recovering(&tokens).map_err(|errors| render_parse_errors(path, &source, &errors))?;
+    let formatted = format_source(&source, &tokens);
+
+    if check {
+        if formatted == source {
+            println!("ok");
+            Ok(())
+        } else {
+            Err(format!("{} is not formatted", path.display()))
+        }
+    } else {
+        if formatted != source {
+            fs::write(path, formatted)
+                .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+        }
+        println!("{}", path.display());
         Ok(())
     }
 }
