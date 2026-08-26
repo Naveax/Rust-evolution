@@ -14,12 +14,12 @@ fn main() {
     let mut __evo_x = __evo_input_int();
     let mut __evo_sum = 0;
     for _ in 0..__evo_n {
-        if (__evo_x > 0) {
-            __evo_sum = (__evo_sum + __evo_x);
+        if (__evo_x > 1) {
+            __evo_x = (__evo_x / 2);
         } else {
-            __evo_sum = (__evo_sum - __evo_x);
+            __evo_x = (__evo_x + 3);
         }
-        __evo_x = (-__evo_x);
+        __evo_sum = (__evo_sum + __evo_x);
     }
     println!("{}", __evo_sum);
 }

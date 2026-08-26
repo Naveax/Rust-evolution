@@ -2,11 +2,11 @@ n = input_int
 x = input_int
 sum = 0
 repeat n
-if x > 0
-sum = sum + x
+if x > 1
+x = x / 2
 else
-sum = sum - x
+x = x + 3
 end
-x = -x
+sum = sum + x
 end
 print sum
