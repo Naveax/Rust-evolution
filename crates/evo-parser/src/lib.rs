@@ -17,9 +17,15 @@ pub struct Stmt {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StmtKind {
-    Bind { name: String, expr: Expr },
+    Bind {
+        name: String,
+        expr: Expr,
+    },
     Print(Expr),
-    Repeat { count: Expr, body: Vec<Stmt> },
+    Repeat {
+        count: Expr,
+        body: Vec<Stmt>,
+    },
     If {
         condition: Expr,
         then_body: Vec<Stmt>,
@@ -737,9 +743,8 @@ mod tests {
 
     #[test]
     fn parses_boolean_comparisons_and_if_else() {
-        let program = parse_source(
-            "x = 1\nif x + 2 * 3 >= 7\nprint true\nelse\nprint false\nend\n",
-        );
+        let program =
+            parse_source("x = 1\nif x + 2 * 3 >= 7\nprint true\nelse\nprint false\nend\n");
         let StmtKind::If {
             condition,
             then_body,
@@ -915,12 +920,10 @@ mod tests {
         assert_eq!(errors.len(), 2, "{errors:?}");
         assert_eq!(errors[0].span.line, 2);
         assert_eq!(errors[1].span.line, 6);
-        assert!(
-            errors.iter().all(|error| {
-                !error.message.contains("unexpected 'else'")
-                    && !error.message.contains("unexpected 'end'")
-            })
-        );
+        assert!(errors.iter().all(|error| {
+            !error.message.contains("unexpected 'else'")
+                && !error.message.contains("unexpected 'end'")
+        }));
     }
 
     #[test]

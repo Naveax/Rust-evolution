@@ -134,7 +134,9 @@ impl<'a> Lexer<'a> {
                 '=' => tokens.push(self.optional_equal(TokenKind::Equal, TokenKind::EqualEqual)),
                 '!' => tokens.push(self.bang_equal()?),
                 '<' => tokens.push(self.optional_equal(TokenKind::Less, TokenKind::LessEqual)),
-                '>' => tokens.push(self.optional_equal(TokenKind::Greater, TokenKind::GreaterEqual)),
+                '>' => {
+                    tokens.push(self.optional_equal(TokenKind::Greater, TokenKind::GreaterEqual))
+                }
                 '(' => tokens.push(self.single(TokenKind::LParen)),
                 ')' => tokens.push(self.single(TokenKind::RParen)),
                 '"' => tokens.push(self.lex_string()?),
@@ -202,7 +204,9 @@ impl<'a> Lexer<'a> {
                     Err(error) => errors.push(error),
                 },
                 '<' => tokens.push(self.optional_equal(TokenKind::Less, TokenKind::LessEqual)),
-                '>' => tokens.push(self.optional_equal(TokenKind::Greater, TokenKind::GreaterEqual)),
+                '>' => {
+                    tokens.push(self.optional_equal(TokenKind::Greater, TokenKind::GreaterEqual))
+                }
                 '(' => tokens.push(self.single(TokenKind::LParen)),
                 ')' => tokens.push(self.single(TokenKind::RParen)),
                 '"' => match self.lex_string() {

@@ -46,7 +46,9 @@ pub fn format_source(source: &str, tokens: &[Token]) -> String {
         }
         output.push('\n');
 
-        if first_kind.is_some_and(|kind| matches!(kind, TokenKind::Repeat | TokenKind::If | TokenKind::Else)) {
+        if first_kind
+            .is_some_and(|kind| matches!(kind, TokenKind::Repeat | TokenKind::If | TokenKind::Else))
+        {
             depth += 1;
         }
     }

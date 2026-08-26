@@ -244,10 +244,7 @@ impl Analyzer {
                 let (left, left_type) = self.lower_expr(left)?;
                 let (right, right_type) = self.lower_expr(right)?;
                 let result_type = match op {
-                    BinaryOp::Add
-                    | BinaryOp::Subtract
-                    | BinaryOp::Multiply
-                    | BinaryOp::Divide => {
+                    BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
                         if left_type != ValueType::Integer || right_type != ValueType::Integer {
                             return Err(LowerError {
                                 message: "arithmetic operators require integer operands".to_owned(),
@@ -259,7 +256,8 @@ impl Analyzer {
                     BinaryOp::Equal | BinaryOp::NotEqual => {
                         if left_type != right_type {
                             return Err(LowerError {
-                                message: "equality operands must have the same value type".to_owned(),
+                                message: "equality operands must have the same value type"
+                                    .to_owned(),
                                 span: expr.span,
                             });
                         }
@@ -389,10 +387,9 @@ mod tests {
 
     #[test]
     fn reassignments_in_conditional_branches_infer_mutability() {
-        let program = lower_source(
-            "x = 0\nflag = true\nif flag\nx = x + 1\nelse\nx = x - 1\nend\n",
-        )
-        .expect("branch reassignment should lower");
+        let program =
+            lower_source("x = 0\nflag = true\nif flag\nx = x + 1\nelse\nx = x - 1\nend\n")
+                .expect("branch reassignment should lower");
         assert!(matches!(
             &program.statements[0].kind,
             StmtKind::Let {
@@ -428,7 +425,8 @@ mod tests {
 
     #[test]
     fn rejects_non_boolean_if_condition() {
-        let error = lower_source("if 1\nprint 1\nend\n").expect_err("integer condition should fail");
+        let error =
+            lower_source("if 1\nprint 1\nend\n").expect_err("integer condition should fail");
         assert!(error.message.contains("if condition must be a boolean"));
     }
 
@@ -436,7 +434,11 @@ mod tests {
     fn rejects_new_binding_inside_conditional_branch() {
         let error = lower_source("if true\nx = 1\nend\n")
             .expect_err("branch-local definition should fail in v0");
-        assert!(error.message.contains("defined before entering a control-flow block"));
+        assert!(
+            error
+                .message
+                .contains("defined before entering a control-flow block")
+        );
     }
 
     #[test]
