@@ -171,11 +171,7 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
 fn is_expression_prefix(kind: &TokenKind) -> bool {
     matches!(
         kind,
-        TokenKind::Print
-            | TokenKind::Repeat
-            | TokenKind::If
-            | TokenKind::Not
-            | TokenKind::Return
+        TokenKind::Print | TokenKind::Repeat | TokenKind::If | TokenKind::Not | TokenKind::Return
     )
 }
 
@@ -195,8 +191,10 @@ fn is_unary_minus(tokens: &[&Token], index: usize) -> bool {
     }
 
     let previous = &tokens[index - 1].kind;
-    matches!(previous, TokenKind::Equal | TokenKind::LParen | TokenKind::Comma)
-        || is_expression_prefix(previous)
+    matches!(
+        previous,
+        TokenKind::Equal | TokenKind::LParen | TokenKind::Comma
+    ) || is_expression_prefix(previous)
         || is_binary_operator(previous, false)
 }
 
@@ -234,7 +232,8 @@ mod tests {
 
     #[test]
     fn formats_function_signature_body_return_and_calls() {
-        let source = "fn add(a int,b bool,c string)int\nreturn pick(a,c)\nend\nprint add(1,true,\"x\")\n";
+        let source =
+            "fn add(a int,b bool,c string)int\nreturn pick(a,c)\nend\nprint add(1,true,\"x\")\n";
         let expected = concat!(
             "fn add(a int, b bool, c string) int\n",
             "    return pick(a, c)\n",

@@ -419,10 +419,13 @@ impl<'a> Analyzer<'a> {
                 (ExprKind::Local(name.clone()), binding.value_type)
             }
             SyntaxExprKind::Call { name, arguments } => {
-                let signature = self.function_signatures.get(name).ok_or_else(|| LowerError {
-                    message: format!("unknown function {name:?}"),
-                    span: expr.span,
-                })?;
+                let signature = self
+                    .function_signatures
+                    .get(name)
+                    .ok_or_else(|| LowerError {
+                        message: format!("unknown function {name:?}"),
+                        span: expr.span,
+                    })?;
                 if arguments.len() != signature.parameter_types.len() {
                     return Err(LowerError {
                         message: format!(
@@ -434,10 +437,8 @@ impl<'a> Analyzer<'a> {
                     });
                 }
                 let mut lowered_arguments = Vec::with_capacity(arguments.len());
-                for (index, (argument, expected_type)) in arguments
-                    .iter()
-                    .zip(&signature.parameter_types)
-                    .enumerate()
+                for (index, (argument, expected_type)) in
+                    arguments.iter().zip(&signature.parameter_types).enumerate()
                 {
                     let (argument, actual_type) = self.lower_expr(argument)?;
                     if actual_type != *expected_type {
@@ -583,10 +584,9 @@ mod tests {
 
     #[test]
     fn lowers_forward_calls_and_explicit_signatures() {
-        let program = lower_source(
-            "print add(2, 3)\nfn add(a int, b int) int\nreturn a + b\nend\n",
-        )
-        .expect("forward call should lower");
+        let program =
+            lower_source("print add(2, 3)\nfn add(a int, b int) int\nreturn a + b\nend\n")
+                .expect("forward call should lower");
         assert_eq!(program.functions.len(), 1);
         assert_eq!(program.functions[0].return_type, ValueType::Integer);
         assert_eq!(program.functions[0].parameters.len(), 2);
@@ -606,10 +606,8 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_function_names() {
-        let error = lower_source(
-            "fn a() int\nreturn 1\nend\nfn a() int\nreturn 2\nend\n",
-        )
-        .expect_err("duplicate function should fail");
+        let error = lower_source("fn a() int\nreturn 1\nend\nfn a() int\nreturn 2\nend\n")
+            .expect_err("duplicate function should fail");
         assert!(error.message.contains("duplicate function"));
     }
 
@@ -625,19 +623,15 @@ mod tests {
         let error = lower_source("print missing(1)\n").expect_err("unknown call should fail");
         assert!(error.message.contains("unknown function"));
 
-        let error = lower_source(
-            "fn id(x int) int\nreturn x\nend\nprint id(1, 2)\n",
-        )
-        .expect_err("wrong arity should fail");
+        let error = lower_source("fn id(x int) int\nreturn x\nend\nprint id(1, 2)\n")
+            .expect_err("wrong arity should fail");
         assert!(error.message.contains("expects 1 arguments"));
     }
 
     #[test]
     fn rejects_wrong_argument_and_return_types() {
-        let error = lower_source(
-            "fn id(x int) int\nreturn x\nend\nprint id(true)\n",
-        )
-        .expect_err("wrong argument type should fail");
+        let error = lower_source("fn id(x int) int\nreturn x\nend\nprint id(true)\n")
+            .expect_err("wrong argument type should fail");
         assert!(error.message.contains("argument 1"));
 
         let error = lower_source("fn bad() int\nreturn true\nend\n")
@@ -651,10 +645,8 @@ mod tests {
             .expect_err("missing path return should fail");
         assert!(error.message.contains("every terminal path"));
 
-        lower_source(
-            "fn choose(flag bool) int\nif flag\nreturn 1\nelse\nreturn 2\nend\nend\n",
-        )
-        .expect("both branches return");
+        lower_source("fn choose(flag bool) int\nif flag\nreturn 1\nelse\nreturn 2\nend\nend\n")
+            .expect("both branches return");
     }
 
     #[test]
@@ -673,8 +665,9 @@ mod tests {
 
     #[test]
     fn existing_top_level_runtime_semantics_still_lower() {
-        let program = lower_source("n = input_int\nsum = 0\nrepeat n\nsum = sum + 1\nend\nprint sum\n")
-            .expect("existing top-level program should lower");
+        let program =
+            lower_source("n = input_int\nsum = 0\nrepeat n\nsum = sum + 1\nend\nprint sum\n")
+                .expect("existing top-level program should lower");
         assert!(program.functions.is_empty());
         assert_eq!(program.statements.len(), 4);
     }

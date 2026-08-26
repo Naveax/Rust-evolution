@@ -1,7 +1,5 @@
 use evo_lexer::Span;
-use evo_lowering::{
-    BinaryOp, Expr, ExprKind, Function, Program, Stmt, StmtKind, ValueType,
-};
+use evo_lowering::{BinaryOp, Expr, ExprKind, Function, Program, Stmt, StmtKind, ValueType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourceMapping {
@@ -345,9 +343,7 @@ mod tests {
     #[test]
     fn generates_direct_static_function_and_call() {
         assert_eq!(
-            compile_source(
-                "fn add(a int, b int) int\nreturn a + b\nend\nprint add(2, 3)\n",
-            ),
+            compile_source("fn add(a int, b int) int\nreturn a + b\nend\nprint add(2, 3)\n",),
             concat!(
                 "fn __evo_fn_add(__evo_a: i64, __evo_b: i64) -> i64 {\n",
                 "    return (__evo_a + __evo_b);\n",
@@ -396,7 +392,8 @@ mod tests {
 
     #[test]
     fn functions_use_no_runtime_dispatch_scaffolding() {
-        let generated = compile_source("fn add(a int, b int) int\nreturn a + b\nend\nprint add(1, 2)\n");
+        let generated =
+            compile_source("fn add(a int, b int) int\nreturn a + b\nend\nprint add(1, 2)\n");
         assert!(!generated.contains("Box<"));
         assert!(!generated.contains("dyn "));
         assert!(!generated.contains("HashMap"));

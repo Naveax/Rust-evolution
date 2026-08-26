@@ -41,10 +41,16 @@ pub struct Stmt {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StmtKind {
-    Bind { name: String, expr: Expr },
+    Bind {
+        name: String,
+        expr: Expr,
+    },
     Print(Expr),
     Return(Expr),
-    Repeat { count: Expr, body: Vec<Stmt> },
+    Repeat {
+        count: Expr,
+        body: Vec<Stmt>,
+    },
     If {
         condition: Expr,
         then_body: Vec<Stmt>,
@@ -64,7 +70,10 @@ pub enum ExprKind {
     String(String),
     Bool(bool),
     Identifier(String),
-    Call { name: String, arguments: Vec<Expr> },
+    Call {
+        name: String,
+        arguments: Vec<Expr>,
+    },
     InputInt,
     LogicalNot(Box<Expr>),
     UnaryMinus(Box<Expr>),
@@ -289,7 +298,9 @@ impl<'a> Parser<'a> {
         if self.is_eof() {
             return Err(self.error_here("missing 'end' for function"));
         }
-        let close = self.expect_kind(TokenKind::End, "missing 'end' for function")?.span;
+        let close = self
+            .expect_kind(TokenKind::End, "missing 'end' for function")?
+            .span;
         Ok(FunctionDef {
             name,
             parameters,
@@ -569,9 +580,10 @@ impl<'a> Parser<'a> {
                     span,
                 })
             }
-            _ => Err(self.error_here(
-                "expected binding, 'print', 'return', 'repeat', or 'if' statement",
-            )),
+            _ => {
+                Err(self
+                    .error_here("expected binding, 'print', 'return', 'repeat', or 'if' statement"))
+            }
         }
     }
 
@@ -1057,7 +1069,13 @@ mod tests {
             panic!("expected comparison");
         };
         assert_eq!(*op, BinaryOp::Equal);
-        assert!(matches!(left.kind, ExprKind::Binary { op: BinaryOp::Add, .. }));
+        assert!(matches!(
+            left.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Add,
+                ..
+            }
+        ));
     }
 
     #[test]
