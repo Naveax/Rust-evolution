@@ -1,3 +1,4 @@
+<!-- naveax-ci-execution-policy:v1 -->
 <!-- naveax-ci-execution-policy:v2 -->
 # Rust Evolution Agent / Continuation Contract
 
@@ -103,6 +104,8 @@ If dispatch frequency rises unexpectedly, stop new dispatches and diagnose the t
 CI is an asynchronous dependency, not the main work loop. Waiting for CI must not cause idling or duplicate dispatches.
 
 Maintain RUNNING, READY, BLOCKED, and DONE work states. When a CI-dependent task becomes BLOCKED, switch to another independent READY task.
+
+Normal scheduler target: up to 10 active independent workstreams and up to 50 queued READY work items, subject to repository safety and dependency constraints. Do not duplicate work merely to fill the queue.
 
 Useful work while CI runs includes source inspection, static analysis, tests, documentation, review, dependency analysis, security review, benchmark preparation, log analysis, and preparing the next patch without dispatching another equivalent run.
 
