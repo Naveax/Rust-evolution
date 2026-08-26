@@ -126,6 +126,14 @@ struct FunctionSignature {
 }
 
 pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
+    if let Some(record) = program.records.first() {
+        return Err(LowerError {
+            message: "record declarations are parsed but Records v0 semantic lowering is not implemented yet"
+                .to_owned(),
+            span: record.span,
+        });
+    }
+
     let signatures = collect_function_signatures(&program.functions)?;
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
@@ -582,6 +590,14 @@ mod tests {
         let tokens = lex(source).expect("lexing should succeed");
         let syntax = parse(&tokens).expect("parsing should succeed");
         lower(&syntax)
+    }
+
+    #[test]
+    fn rejects_parsed_records_until_semantic_lowering_lands() {
+        let error = lower_source("record Point\nx int\ny int\nend\nprint 1\n")
+            .expect_err("record declarations must not be silently ignored");
+        assert!(error.message.contains("Records v0 semantic lowering"));
+        assert_eq!(error.span.line, 1);
     }
 
     #[test]
