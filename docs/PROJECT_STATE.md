@@ -9,8 +9,38 @@ This file is the durable project handoff. New chats/agents should read `AGENTS.m
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
 - Rust toolchain: **1.98.0**
-- Current proven code baseline before the Omni/continuity documentation update: merge commit `dc92e892f37353bb38988b9310db1b354f3aefc7` (`feat: add functions v0 (#37)`).
-- Omni vision documentation was then added to `main` as docs-only commit `a34ab3e1b4e4239d637b4fe84b54d0d55c717346`.
+- Proven code baseline before the Omni/continuity documentation layer: merge commit `dc92e892f37353bb38988b9310db1b354f3aefc7` (`feat: add functions v0 (#37)`).
+- The Omni/continuity/governance files were added afterward as documentation/process updates on `main`.
+
+## Durable continuation infrastructure
+
+The repository now contains an explicit memory/handoff layer so a fresh chat can continue without reconstructing prior conversation history:
+
+- `AGENTS.md` — mandatory agent, CI, authority and continuation contract;
+- `docs/PROJECT_STATE.md` — this verified status snapshot;
+- `docs/NEXT_ACTION.md` — the single volatile continuation pointer;
+- `docs/CONTINUATION_PROTOCOL.md` — new-session recovery sequence;
+- `docs/HANDOFF_CHECKLIST.md` — end-of-session maintenance checklist;
+- `docs/DECISIONS.md` — durable architecture/language decisions;
+- `docs/README.md` — documentation map and authority rules;
+- `.github/CONTINUATION.md` — GitHub-visible quick continuation pointer;
+- `.github/pull_request_template.md` — correctness/safety/cost/performance/docs/handoff checklist;
+- open issue **#40** — living `META READ FIRST` continuation entry point.
+
+Fresh sessions should treat GitHub, not chat memory, as the source of truth.
+
+## Omni architecture integration
+
+The user-authored Omni/full-stack update has been integrated into the project architecture without pretending future domains are already implemented:
+
+- `docs/OMNI_VISION.md` — long-term scripting→kernel / CPU→GPU North Star;
+- `docs/COST_MODEL.md` — ZERO / EXPLICIT / MANAGED cost architecture;
+- `docs/PROFILE_MODEL.md` — Core / Profile/Capability / Library / Optional Runtime / Backend / Tooling classification;
+- `research/languages/README.md` — systematic external-language/ecosystem idea evaluation matrix.
+
+Authority hierarchy:
+
+`tests + main code > LANGUAGE_SPEC_V0 > current PR/CI evidence > PROJECT_STATE/NEXT_ACTION > DECISIONS > ROADMAP > OMNI_VISION`.
 
 ## Current implemented language surface on `main`
 
@@ -81,7 +111,7 @@ Durable details live in the corresponding GitHub issues/PRs and `docs/DECISIONS.
 
 ## Long-term direction
 
-`docs/OMNI_VISION.md` is now the long-term North Star. It expands the platform goal toward scripting, systems, web, GPU/graphics, data/AI/scientific, distributed, verified, embedded/kernel/driver, and hardware-oriented work.
+`docs/OMNI_VISION.md` is the long-term North Star. It expands the platform goal toward scripting, systems, web, GPU/graphics, data/AI/scientific, distributed, verified, embedded/kernel/driver, and hardware-oriented work.
 
 Important: **Omni Vision is not current implementation.** Current truth remains `LANGUAGE_SPEC_V0.md` + code/tests on `main`.
 
