@@ -20,6 +20,11 @@ pub enum StmtKind {
     Bind { name: String, expr: Expr },
     Print(Expr),
     Repeat { count: Expr, body: Vec<Stmt> },
+    If {
+        condition: Expr,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +37,7 @@ pub struct Expr {
 pub enum ExprKind {
     Integer(i64),
     String(String),
+    Bool(bool),
     Identifier(String),
     InputInt,
     UnaryMinus(Box<Expr>),
@@ -48,6 +54,12 @@ pub enum BinaryOp {
     Subtract,
     Multiply,
     Divide,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +88,32 @@ pub fn parse_recovering(tokens: &[Token]) -> Result<Program, Vec<ParseError>> {
     Parser::new(tokens).parse_program_recovering()
 }
 
+#[derive(Debug, Clone, Copy)]
+struct StopSet {
+    end: bool,
+    else_: bool,
+}
+
+impl StopSet {
+    const NONE: Self = Self {
+        end: false,
+        else_: false,
+    };
+    const END: Self = Self {
+        end: true,
+        else_: false,
+    };
+    const END_OR_ELSE: Self = Self {
+        end: true,
+        else_: true,
+    };
+
+    fn contains(self, kind: &TokenKind) -> bool {
+        (self.end && matches!(kind, TokenKind::End))
+            || (self.else_ && matches!(kind, TokenKind::Else))
+    }
+}
+
 struct Parser<'a> {
     tokens: &'a [Token],
     index: usize,
@@ -97,7 +135,10 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         while !self.is_eof() {
             if matches!(self.current().kind, TokenKind::End) {
-                return Err(self.error_here("unexpected 'end' without matching 'repeat'"));
+                return Err(self.error_here("unexpected 'end' without matching block"));
+            }
+            if matches!(self.current().kind, TokenKind::Else) {
+                return Err(self.error_here("unexpected 'else' without matching 'if'"));
             }
             let statement = self.parse_statement()?;
             self.require_statement_terminator()?;
@@ -115,7 +156,7 @@ impl<'a> Parser<'a> {
         }
 
         let mut errors = Vec::new();
-        let statements = self.parse_statements_recovering(false, &mut errors);
+        let statements = self.parse_statements_recovering(StopSet::NONE, &mut errors);
         if errors.is_empty() {
             Ok(Program { statements })
         } else {
@@ -125,45 +166,56 @@ impl<'a> Parser<'a> {
 
     fn parse_statements_recovering(
         &mut self,
-        stop_at_end: bool,
+        stop: StopSet,
         errors: &mut Vec<ParseError>,
     ) -> Vec<Stmt> {
         let mut statements = Vec::new();
         self.skip_newlines();
 
         while !self.is_eof() && errors.len() < MAX_RECOVERED_ERRORS {
+            if stop.contains(&self.current().kind) {
+                break;
+            }
+
             if matches!(self.current().kind, TokenKind::End) {
-                if stop_at_end {
-                    break;
-                }
                 self.record_error(
                     errors,
-                    self.error_here("unexpected 'end' without matching 'repeat'"),
+                    self.error_here("unexpected 'end' without matching block"),
                 );
                 self.advance();
-                self.synchronize_statement(false);
+                self.synchronize_statement(StopSet::NONE);
+                self.skip_newlines();
+                continue;
+            }
+            if matches!(self.current().kind, TokenKind::Else) {
+                self.record_error(
+                    errors,
+                    self.error_here("unexpected 'else' without matching 'if'"),
+                );
+                self.advance();
+                self.synchronize_statement(StopSet::NONE);
                 self.skip_newlines();
                 continue;
             }
 
             let start_index = self.index;
-            let statement = if matches!(self.current().kind, TokenKind::Repeat) {
-                self.parse_repeat_recovering(errors)
-            } else {
-                match self.parse_statement() {
+            let statement = match self.current().kind {
+                TokenKind::Repeat => self.parse_repeat_recovering(errors),
+                TokenKind::If => self.parse_if_recovering(errors),
+                _ => match self.parse_statement() {
                     Ok(statement) => Some(statement),
                     Err(error) => {
                         self.record_error(errors, error);
-                        self.synchronize_statement(stop_at_end);
+                        self.synchronize_statement(stop);
                         None
                     }
-                }
+                },
             };
 
             if let Some(statement) = statement {
                 if let Err(error) = self.require_statement_terminator() {
                     self.record_error(errors, error);
-                    self.synchronize_statement(stop_at_end);
+                    self.synchronize_statement(stop);
                 } else {
                     statements.push(statement);
                 }
@@ -171,7 +223,7 @@ impl<'a> Parser<'a> {
 
             self.skip_newlines();
             if self.index == start_index && !self.is_eof() {
-                if stop_at_end && matches!(self.current().kind, TokenKind::End) {
+                if stop.contains(&self.current().kind) {
                     break;
                 }
                 self.advance();
@@ -188,7 +240,7 @@ impl<'a> Parser<'a> {
             Ok(count) => count,
             Err(error) => {
                 self.record_error(errors, error);
-                let found_end = self.skip_invalid_repeat();
+                let found_end = self.skip_invalid_block();
                 if !found_end && errors.len() < MAX_RECOVERED_ERRORS {
                     self.record_error(errors, self.error_here("missing 'end' for repeat block"));
                 }
@@ -201,11 +253,11 @@ impl<'a> Parser<'a> {
                 errors,
                 self.error_here("expected end of line after repeat count"),
             );
-            self.synchronize_statement(true);
+            self.synchronize_statement(StopSet::END);
         }
         self.skip_newlines();
 
-        let body = self.parse_statements_recovering(true, errors);
+        let body = self.parse_statements_recovering(StopSet::END, errors);
         if errors.len() >= MAX_RECOVERED_ERRORS {
             return None;
         }
@@ -217,6 +269,69 @@ impl<'a> Parser<'a> {
         let close = self.advance().span;
         Some(Stmt {
             kind: StmtKind::Repeat { count, body },
+            span: start.join(close),
+        })
+    }
+
+    fn parse_if_recovering(&mut self, errors: &mut Vec<ParseError>) -> Option<Stmt> {
+        let start = self.advance().span;
+        let condition = match self.parse_expression() {
+            Ok(condition) => condition,
+            Err(error) => {
+                self.record_error(errors, error);
+                let found_end = self.skip_invalid_block();
+                if !found_end && errors.len() < MAX_RECOVERED_ERRORS {
+                    self.record_error(errors, self.error_here("missing 'end' for if block"));
+                }
+                return None;
+            }
+        };
+
+        if !matches!(self.current().kind, TokenKind::Newline) {
+            self.record_error(
+                errors,
+                self.error_here("expected end of line after if condition"),
+            );
+            self.synchronize_statement(StopSet::END_OR_ELSE);
+        }
+        self.skip_newlines();
+
+        let then_body = self.parse_statements_recovering(StopSet::END_OR_ELSE, errors);
+        if errors.len() >= MAX_RECOVERED_ERRORS {
+            return None;
+        }
+        if self.is_eof() {
+            self.record_error(errors, self.error_here("missing 'end' for if block"));
+            return None;
+        }
+
+        let else_body = if matches!(self.current().kind, TokenKind::Else) {
+            self.advance();
+            if !matches!(self.current().kind, TokenKind::Newline) {
+                self.record_error(errors, self.error_here("expected end of line after 'else'"));
+                self.synchronize_statement(StopSet::END);
+            }
+            self.skip_newlines();
+            let body = self.parse_statements_recovering(StopSet::END, errors);
+            if errors.len() >= MAX_RECOVERED_ERRORS {
+                return None;
+            }
+            if self.is_eof() {
+                self.record_error(errors, self.error_here("missing 'end' for if block"));
+                return None;
+            }
+            body
+        } else {
+            Vec::new()
+        };
+
+        let close = self.advance().span;
+        Some(Stmt {
+            kind: StmtKind::If {
+                condition,
+                then_body,
+                else_body,
+            },
             span: start.join(close),
         })
     }
@@ -233,7 +348,9 @@ impl<'a> Parser<'a> {
                 })
             }
             TokenKind::Repeat => self.parse_repeat(),
-            TokenKind::End => Err(self.error_here("unexpected 'end' without matching 'repeat'")),
+            TokenKind::If => self.parse_if(),
+            TokenKind::End => Err(self.error_here("unexpected 'end' without matching block")),
+            TokenKind::Else => Err(self.error_here("unexpected 'else' without matching 'if'")),
             TokenKind::Identifier(name) => {
                 let start = self.advance().span;
                 if !matches!(self.current().kind, TokenKind::Equal) {
@@ -247,7 +364,7 @@ impl<'a> Parser<'a> {
                     span,
                 })
             }
-            _ => Err(self.error_here("expected binding, 'print', or 'repeat' statement")),
+            _ => Err(self.error_here("expected binding, 'print', 'repeat', or 'if' statement")),
         }
     }
 
@@ -277,8 +394,79 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_if(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.advance().span;
+        let condition = self.parse_expression()?;
+        if !matches!(self.current().kind, TokenKind::Newline) {
+            return Err(self.error_here("expected end of line after if condition"));
+        }
+        self.skip_newlines();
+
+        let mut then_body = Vec::new();
+        while !matches!(self.current().kind, TokenKind::Else | TokenKind::End) {
+            if self.is_eof() {
+                return Err(self.error_here("missing 'end' for if block"));
+            }
+            let statement = self.parse_statement()?;
+            self.require_statement_terminator()?;
+            then_body.push(statement);
+            self.skip_newlines();
+        }
+
+        let mut else_body = Vec::new();
+        if matches!(self.current().kind, TokenKind::Else) {
+            self.advance();
+            if !matches!(self.current().kind, TokenKind::Newline) {
+                return Err(self.error_here("expected end of line after 'else'"));
+            }
+            self.skip_newlines();
+            while !matches!(self.current().kind, TokenKind::End) {
+                if self.is_eof() {
+                    return Err(self.error_here("missing 'end' for if block"));
+                }
+                let statement = self.parse_statement()?;
+                self.require_statement_terminator()?;
+                else_body.push(statement);
+                self.skip_newlines();
+            }
+        }
+
+        let close = self.advance().span;
+        Ok(Stmt {
+            kind: StmtKind::If {
+                condition,
+                then_body,
+                else_body,
+            },
+            span: start.join(close),
+        })
+    }
+
     fn parse_expression(&mut self) -> Result<Expr, ParseError> {
-        self.parse_add_sub()
+        self.parse_comparison()
+    }
+
+    fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
+        let left = self.parse_add_sub()?;
+        let Some(op) = comparison_operator(&self.current().kind) else {
+            return Ok(left);
+        };
+        self.advance();
+        let right = self.parse_add_sub()?;
+        let span = left.span.join(right.span);
+        let expression = Expr {
+            kind: ExprKind::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            },
+            span,
+        };
+
+        if comparison_operator(&self.current().kind).is_some() {
+            return Err(self.error_here("chained comparisons are not supported"));
+        }
+        Ok(expression)
     }
 
     fn parse_add_sub(&mut self) -> Result<Expr, ParseError> {
@@ -351,6 +539,14 @@ impl<'a> Parser<'a> {
                 kind: ExprKind::String(value),
                 span: token.span,
             }),
+            TokenKind::True => Ok(Expr {
+                kind: ExprKind::Bool(true),
+                span: token.span,
+            }),
+            TokenKind::False => Ok(Expr {
+                kind: ExprKind::Bool(false),
+                span: token.span,
+            }),
             TokenKind::Identifier(name) => Ok(Expr {
                 kind: ExprKind::Identifier(name),
                 span: token.span,
@@ -383,13 +579,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn synchronize_statement(&mut self, preserve_end: bool) {
+    fn synchronize_statement(&mut self, stop: StopSet) {
         if self.index > 0 {
             let previous = &self.tokens[self.index - 1].kind;
             if matches!(previous, TokenKind::Newline) {
                 return;
             }
-            if preserve_end && matches!(previous, TokenKind::End) {
+            if stop.contains(previous) {
                 self.index -= 1;
                 return;
             }
@@ -397,20 +593,20 @@ impl<'a> Parser<'a> {
 
         while !self.is_eof()
             && !matches!(self.current().kind, TokenKind::Newline)
-            && !(preserve_end && matches!(self.current().kind, TokenKind::End))
+            && !stop.contains(&self.current().kind)
         {
             self.advance();
         }
     }
 
-    fn skip_invalid_repeat(&mut self) -> bool {
-        self.synchronize_statement(false);
+    fn skip_invalid_block(&mut self) -> bool {
+        self.synchronize_statement(StopSet::END);
         self.skip_newlines();
         let mut depth = 1usize;
 
         while !self.is_eof() {
             match self.current().kind {
-                TokenKind::Repeat => {
+                TokenKind::Repeat | TokenKind::If => {
                     depth += 1;
                     self.advance();
                 }
@@ -418,7 +614,7 @@ impl<'a> Parser<'a> {
                     self.advance();
                     depth -= 1;
                     if depth == 0 {
-                        self.synchronize_statement(false);
+                        self.synchronize_statement(StopSet::NONE);
                         return true;
                     }
                 }
@@ -468,6 +664,18 @@ impl<'a> Parser<'a> {
             message: message.to_owned(),
             span: self.current().span,
         }
+    }
+}
+
+fn comparison_operator(kind: &TokenKind) -> Option<BinaryOp> {
+    match kind {
+        TokenKind::EqualEqual => Some(BinaryOp::Equal),
+        TokenKind::BangEqual => Some(BinaryOp::NotEqual),
+        TokenKind::Less => Some(BinaryOp::Less),
+        TokenKind::LessEqual => Some(BinaryOp::LessEqual),
+        TokenKind::Greater => Some(BinaryOp::Greater),
+        TokenKind::GreaterEqual => Some(BinaryOp::GreaterEqual),
+        _ => None,
     }
 }
 
@@ -528,6 +736,85 @@ mod tests {
     }
 
     #[test]
+    fn parses_boolean_comparisons_and_if_else() {
+        let program = parse_source(
+            "x = 1\nif x + 2 * 3 >= 7\nprint true\nelse\nprint false\nend\n",
+        );
+        let StmtKind::If {
+            condition,
+            then_body,
+            else_body,
+        } = &program.statements[1].kind
+        else {
+            panic!("expected if statement");
+        };
+        assert!(matches!(
+            &condition.kind,
+            ExprKind::Binary {
+                op: BinaryOp::GreaterEqual,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &then_body[0].kind,
+            StmtKind::Print(super::Expr {
+                kind: ExprKind::Bool(true),
+                ..
+            })
+        ));
+        assert!(matches!(
+            &else_body[0].kind,
+            StmtKind::Print(super::Expr {
+                kind: ExprKind::Bool(false),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn supports_nested_if_and_repeat_composition() {
+        let source = concat!(
+            "x = 1\n",
+            "repeat 2\n",
+            "if x > 0\n",
+            "repeat 1\n",
+            "print x\n",
+            "end\n",
+            "else\n",
+            "print 0\n",
+            "end\n",
+            "end\n"
+        );
+        parse_source(source);
+    }
+
+    #[test]
+    fn comparison_precedence_is_lower_than_arithmetic() {
+        let program = parse_source("print 1 + 2 * 3 == 7\n");
+        let StmtKind::Print(expr) = &program.statements[0].kind else {
+            panic!("expected print statement");
+        };
+        let ExprKind::Binary { left, op, .. } = &expr.kind else {
+            panic!("expected comparison");
+        };
+        assert_eq!(*op, BinaryOp::Equal);
+        assert!(matches!(
+            &left.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Add,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_chained_comparisons() {
+        let tokens = lex("print 1 < 2 < 3\n").expect("lexing should succeed");
+        let error = parse(&tokens).expect_err("chained comparison should fail");
+        assert!(error.message.contains("chained comparisons"));
+    }
+
+    #[test]
     fn respects_operator_precedence() {
         let program = parse_source("print 1 + 2 * 3\n");
         let StmtKind::Print(expr) = &program.statements[0].kind else {
@@ -561,6 +848,13 @@ mod tests {
     }
 
     #[test]
+    fn rejects_missing_if_end() {
+        let tokens = lex("if true\nprint 1\n").expect("lexing should succeed");
+        let error = parse(&tokens).expect_err("unterminated if should fail");
+        assert!(error.message.contains("missing 'end'"));
+    }
+
+    #[test]
     fn rejects_unmatched_end() {
         let tokens = lex("end\n").expect("lexing should succeed");
         let error = parse(&tokens).expect_err("unmatched end should fail");
@@ -568,8 +862,15 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unmatched_else() {
+        let tokens = lex("else\n").expect("lexing should succeed");
+        let error = parse(&tokens).expect_err("unmatched else should fail");
+        assert!(error.message.contains("unexpected 'else'"));
+    }
+
+    #[test]
     fn recovering_parser_matches_fail_fast_parser_on_valid_input() {
-        let source = "n = input_int\nsum = 0\nrepeat n\nsum = sum + 1\nend\nprint sum\n";
+        let source = "x = 1\nif x > 0\nprint true\nelse\nprint false\nend\n";
         let tokens = lex(source).expect("lexing should succeed");
         assert_eq!(
             parse_recovering(&tokens).expect("recovery parse should succeed"),
@@ -598,6 +899,48 @@ mod tests {
         assert_eq!(errors[1].span.line, 2);
         assert!(errors[0].message.contains("expected expression"));
         assert!(errors[1].message.contains("expected '='"));
+    }
+
+    #[test]
+    fn if_body_recovery_preserves_else_and_end_boundaries() {
+        let source = concat!(
+            "if true\n",
+            "x 1\n",
+            "else\n",
+            "print 2\n",
+            "end\n",
+            "y 2\n"
+        );
+        let errors = recover_source(source).expect_err("source should be invalid");
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert_eq!(errors[0].span.line, 2);
+        assert_eq!(errors[1].span.line, 6);
+        assert!(
+            errors.iter().all(|error| {
+                !error.message.contains("unexpected 'else'")
+                    && !error.message.contains("unexpected 'end'")
+            })
+        );
+    }
+
+    #[test]
+    fn nested_if_recovery_keeps_block_boundaries() {
+        let source = concat!(
+            "if true\n",
+            "if false\n",
+            "x 1\n",
+            "else\n",
+            "print 1\n",
+            "end\n",
+            "else\n",
+            "print 2\n",
+            "end\n",
+            "y 2\n"
+        );
+        let errors = recover_source(source).expect_err("source should be invalid");
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert_eq!(errors[0].span.line, 3);
+        assert_eq!(errors[1].span.line, 10);
     }
 
     #[test]
@@ -641,6 +984,14 @@ mod tests {
         let errors = recover_source("end\nx 1\n").expect_err("source should be invalid");
         assert_eq!(errors.len(), 2);
         assert!(errors[0].message.contains("unexpected 'end'"));
+        assert_eq!(errors[1].span.line, 2);
+    }
+
+    #[test]
+    fn recovering_parser_reports_unmatched_else_and_keeps_going() {
+        let errors = recover_source("else\nx 1\n").expect_err("source should be invalid");
+        assert_eq!(errors.len(), 2);
+        assert!(errors[0].message.contains("unexpected 'else'"));
         assert_eq!(errors[1].span.line, 2);
     }
 
