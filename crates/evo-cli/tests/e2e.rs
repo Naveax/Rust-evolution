@@ -58,6 +58,57 @@ fn check_rejects_invalid_source_with_parser_context() {
 }
 
 #[test]
+fn check_reports_multiple_parser_errors_in_one_run() {
+    let dir = temp_dir("multi-parser");
+    fs::create_dir_all(&dir).expect("temporary directory should be created");
+    let source = dir.join("multiple-invalid.evo");
+    fs::write(&source, "x 1\ny 2\n").expect("source should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_evo"))
+        .arg("check")
+        .arg(&source)
+        .output()
+        .expect("evo should run");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let first_location = format!(" --> {}:1:3", source.display());
+    let second_location = format!(" --> {}:2:3", source.display());
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(!output.status.success());
+    assert_eq!(stderr.matches("error: expected '='").count(), 2, "{stderr}");
+    assert!(stderr.contains(&first_location), "{stderr}");
+    assert!(stderr.contains(&second_location), "{stderr}");
+    assert!(stderr.contains("1 | x 1"), "{stderr}");
+    assert!(stderr.contains("2 | y 2"), "{stderr}");
+}
+
+#[test]
+fn build_stops_before_rustc_when_parser_errors_exist() {
+    let dir = temp_dir("parser-before-rustc");
+    fs::create_dir_all(&dir).expect("temporary directory should be created");
+    let source = dir.join("invalid-build.evo");
+    let binary = dir.join("must-not-exist");
+    fs::write(&source, "x 1\ny 2\n").expect("source should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_evo"))
+        .arg("build")
+        .arg(&source)
+        .arg(&binary)
+        .env("RUSTC", "evo-rustc-must-not-run")
+        .output()
+        .expect("evo build should run");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(!output.status.success());
+    assert_eq!(stderr.matches("error: expected '='").count(), 2, "{stderr}");
+    assert!(!stderr.contains("failed to execute rustc"), "{stderr}");
+    assert!(!binary.exists(), "parser failure must not produce a binary");
+}
+
+#[test]
 fn check_renders_lowering_error_at_evolution_source() {
     let dir = temp_dir("invalid-lowering");
     fs::create_dir_all(&dir).expect("temporary directory should be created");
