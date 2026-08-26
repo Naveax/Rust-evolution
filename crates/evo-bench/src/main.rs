@@ -13,7 +13,7 @@ use evo_bench::{
 };
 use evo_codegen_rust::generate_lowered_rust;
 use evo_diagnostics::render_error;
-use evo_lexer::lex;
+use evo_lexer::lex_recovering;
 use evo_lowering::lower;
 use evo_parser::parse_recovering;
 use execution::{Execution, execute_with_timeout, measure_blocking};
@@ -140,13 +140,8 @@ fn run_case(case_dir: &Path, output_dir: &Path, config: CaseConfig) -> Result<Ru
             evolution_source_path.display()
         )
     })?;
-    let tokens = lex(&evolution_source).map_err(|error| {
-        render_error(
-            &evolution_source_path,
-            &evolution_source,
-            &error.message,
-            error.span,
-        )
+    let tokens = lex_recovering(&evolution_source).map_err(|errors| {
+        render_lex_errors(&evolution_source_path, &evolution_source, &errors)
     })?;
     let syntax = parse_recovering(&tokens).map_err(|errors| {
         render_parse_errors(&evolution_source_path, &evolution_source, &errors)
@@ -224,6 +219,14 @@ fn run_case(case_dir: &Path, output_dir: &Path, config: CaseConfig) -> Result<Ru
         reference_binary_bytes,
         evolution_binary_bytes,
     })
+}
+
+fn render_lex_errors(path: &Path, source: &str, errors: &[evo_lexer::LexError]) -> String {
+    errors
+        .iter()
+        .map(|error| render_error(path, source, &error.message, error.span))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn render_parse_errors(path: &Path, source: &str, errors: &[evo_parser::ParseError]) -> String {
