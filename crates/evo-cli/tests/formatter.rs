@@ -16,11 +16,8 @@ fn fmt_formats_in_place_and_check_accepts_canonical_file() {
     let dir = temp_dir("in-place");
     fs::create_dir_all(&dir).expect("temp directory should be created");
     let source = dir.join("sample.evo");
-    fs::write(
-        &source,
-        "repeat 2# outer\nx= -1\nprint(x+2)# value\nend",
-    )
-    .expect("source should be written");
+    fs::write(&source, "repeat 2# outer\nx= -1\nprint(x+2)# value\nend")
+        .expect("source should be written");
 
     let format = Command::new(env!("CARGO_BIN_EXE_evo"))
         .arg("fmt")
