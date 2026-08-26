@@ -15,7 +15,6 @@ fn functions_v0_builds_and_runs_natively() {
     fs::write(
         &source_path,
         concat!(
-            "print banner()\n",
             "fn step(x int) int\n",
             "if x > 1 and not (x == 7)\n",
             "return x / 2\n",
@@ -33,6 +32,7 @@ fn functions_v0_builds_and_runs_natively() {
             "fn banner() string\n",
             "return \"functions-v0\"\n",
             "end\n",
+            "print banner()\n",
             "n = input_int\n",
             "x = input_int\n",
             "sum = 0\n",
