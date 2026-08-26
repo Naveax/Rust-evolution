@@ -579,8 +579,8 @@ mod tests {
 
     #[test]
     fn tokenizes_logical_keywords() {
-        let tokens = lex("if true and not false or true\nend\n")
-            .expect("logical keyword source should lex");
+        let tokens =
+            lex("if true and not false or true\nend\n").expect("logical keyword source should lex");
         let kinds: Vec<_> = tokens.into_iter().map(|token| token.kind).collect();
         assert!(kinds.contains(&TokenKind::And));
         assert!(kinds.contains(&TokenKind::Or));
