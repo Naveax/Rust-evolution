@@ -1,0 +1,15 @@
+n = input_int
+x = input_int
+sum = 0
+repeat n
+if x > 1
+temp = x / 2
+sum = sum + temp
+x = temp
+else
+temp = x + 3
+sum = sum + temp
+x = temp
+end
+end
+print sum
