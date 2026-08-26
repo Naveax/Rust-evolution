@@ -6,8 +6,31 @@ const MAX_RECOVERED_ERRORS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
+    pub records: Vec<RecordDef>,
     pub functions: Vec<FunctionDef>,
     pub statements: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordDef {
+    pub name: String,
+    pub fields: Vec<RecordField>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordField {
+    pub name: String,
+    pub type_name: RecordFieldType,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordFieldType {
+    Int,
+    Bool,
+    String,
+    Named(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,19 +193,31 @@ impl<'a> Parser<'a> {
     fn parse_program(mut self) -> Result<Program, ParseError> {
         if self.tokens.is_empty() {
             return Ok(Program {
+                records: Vec::new(),
                 functions: Vec::new(),
                 statements: Vec::new(),
             });
         }
 
+        let mut records = Vec::new();
         let mut functions = Vec::new();
         let mut statements = Vec::new();
+        let mut declaration_region = true;
         self.skip_newlines();
         while !self.is_eof() {
             match self.current().kind {
-                TokenKind::Fn => {
+                TokenKind::Record if declaration_region => {
+                    records.push(self.parse_record()?);
+                    self.require_statement_terminator()?;
+                }
+                TokenKind::Fn if declaration_region => {
                     functions.push(self.parse_function()?);
                     self.require_statement_terminator()?;
+                }
+                TokenKind::Record | TokenKind::Fn => {
+                    return Err(self.error_here(
+                        "top-level declarations must appear before executable statements",
+                    ));
                 }
                 TokenKind::End => {
                     return Err(self.error_here("unexpected 'end' without matching block"));
@@ -194,6 +229,7 @@ impl<'a> Parser<'a> {
                     return Err(self.error_here("'return' is only valid inside a function"));
                 }
                 _ => {
+                    declaration_region = false;
                     let statement = self.parse_statement()?;
                     self.require_statement_terminator()?;
                     statements.push(statement);
@@ -202,6 +238,7 @@ impl<'a> Parser<'a> {
             self.skip_newlines();
         }
         Ok(Program {
+            records,
             functions,
             statements,
         })
@@ -210,31 +247,77 @@ impl<'a> Parser<'a> {
     fn parse_program_recovering(mut self) -> Result<Program, Vec<ParseError>> {
         if self.tokens.is_empty() {
             return Ok(Program {
+                records: Vec::new(),
                 functions: Vec::new(),
                 statements: Vec::new(),
             });
         }
 
         let mut errors = Vec::new();
+        let mut records = Vec::new();
         let mut functions = Vec::new();
         let mut statements = Vec::new();
+        let mut declaration_region = true;
         self.skip_newlines();
 
         while !self.is_eof() && errors.len() < MAX_RECOVERED_ERRORS {
-            if matches!(self.current().kind, TokenKind::Fn) {
+            if matches!(self.current().kind, TokenKind::Record) {
                 let start_index = self.index;
-                match self.parse_function() {
-                    Ok(function) => {
-                        if let Err(error) = self.require_statement_terminator() {
+                if !declaration_region {
+                    self.record_error(
+                        &mut errors,
+                        self.error_here(
+                            "top-level declarations must appear before executable statements",
+                        ),
+                    );
+                    self.recover_record_definition();
+                } else {
+                    match self.parse_record() {
+                        Ok(record) => {
+                            if let Err(error) = self.require_statement_terminator() {
+                                self.record_error(&mut errors, error);
+                                self.synchronize_statement(StopSet::NONE);
+                            } else {
+                                records.push(record);
+                            }
+                        }
+                        Err(error) => {
                             self.record_error(&mut errors, error);
-                            self.synchronize_statement(StopSet::NONE);
-                        } else {
-                            functions.push(function);
+                            self.recover_record_definition();
                         }
                     }
-                    Err(error) => {
-                        self.record_error(&mut errors, error);
-                        self.recover_function_definition();
+                }
+                self.skip_newlines();
+                if self.index == start_index && !self.is_eof() {
+                    self.advance();
+                }
+                continue;
+            }
+
+            if matches!(self.current().kind, TokenKind::Fn) {
+                let start_index = self.index;
+                if !declaration_region {
+                    self.record_error(
+                        &mut errors,
+                        self.error_here(
+                            "top-level declarations must appear before executable statements",
+                        ),
+                    );
+                    self.recover_function_definition();
+                } else {
+                    match self.parse_function() {
+                        Ok(function) => {
+                            if let Err(error) = self.require_statement_terminator() {
+                                self.record_error(&mut errors, error);
+                                self.synchronize_statement(StopSet::NONE);
+                            } else {
+                                functions.push(function);
+                            }
+                        }
+                        Err(error) => {
+                            self.record_error(&mut errors, error);
+                            self.recover_function_definition();
+                        }
                     }
                 }
                 self.skip_newlines();
@@ -245,6 +328,7 @@ impl<'a> Parser<'a> {
             }
 
             if matches!(self.current().kind, TokenKind::Return) {
+                declaration_region = false;
                 self.record_error(
                     &mut errors,
                     self.error_here("'return' is only valid inside a function"),
@@ -254,6 +338,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
+            declaration_region = false;
             let before = self.index;
             let recovered = self.parse_statements_recovering(StopSet::NONE, &mut errors);
             statements.extend(recovered);
@@ -265,11 +350,75 @@ impl<'a> Parser<'a> {
 
         if errors.is_empty() {
             Ok(Program {
+                records,
                 functions,
                 statements,
             })
         } else {
             Err(errors)
+        }
+    }
+
+    fn parse_record(&mut self) -> Result<RecordDef, ParseError> {
+        let start = self
+            .expect_kind(TokenKind::Record, "expected 'record'")?
+            .span;
+        let name_token = self.advance();
+        let TokenKind::Identifier(name) = name_token.kind else {
+            return Err(ParseError {
+                message: "expected record name after 'record'".to_owned(),
+                span: name_token.span,
+            });
+        };
+        if !matches!(self.current().kind, TokenKind::Newline) {
+            return Err(self.error_here("expected end of line after record name"));
+        }
+        self.skip_newlines();
+
+        let mut fields = Vec::new();
+        while !matches!(self.current().kind, TokenKind::End) {
+            if self.is_eof() {
+                return Err(self.error_here("missing 'end' for record"));
+            }
+            let field_name_token = self.advance();
+            let TokenKind::Identifier(field_name) = field_name_token.kind else {
+                return Err(ParseError {
+                    message: "expected record field name".to_owned(),
+                    span: field_name_token.span,
+                });
+            };
+            let type_token = self.current().clone();
+            let type_name = self.parse_record_field_type()?;
+            fields.push(RecordField {
+                name: field_name,
+                type_name,
+                span: field_name_token.span.join(type_token.span),
+            });
+            self.require_statement_terminator()?;
+            self.skip_newlines();
+        }
+
+        let close = self
+            .expect_kind(TokenKind::End, "missing 'end' for record")?
+            .span;
+        Ok(RecordDef {
+            name,
+            fields,
+            span: start.join(close),
+        })
+    }
+
+    fn parse_record_field_type(&mut self) -> Result<RecordFieldType, ParseError> {
+        let token = self.advance();
+        match token.kind {
+            TokenKind::TypeInt => Ok(RecordFieldType::Int),
+            TokenKind::TypeBool => Ok(RecordFieldType::Bool),
+            TokenKind::TypeString => Ok(RecordFieldType::String),
+            TokenKind::Identifier(name) => Ok(RecordFieldType::Named(name)),
+            _ => Err(ParseError {
+                message: "expected record field type".to_owned(),
+                span: token.span,
+            }),
         }
     }
 
@@ -360,8 +509,8 @@ impl<'a> Parser<'a> {
             if self.is_eof() {
                 return Err(self.error_here("missing 'end' for function"));
             }
-            if matches!(self.current().kind, TokenKind::Fn) {
-                return Err(self.error_here("nested function definitions are not supported in v0"));
+            if matches!(self.current().kind, TokenKind::Fn | TokenKind::Record) {
+                return Err(self.error_here("nested declarations are not supported in v0"));
             }
             let statement = self.parse_statement()?;
             self.require_statement_terminator()?;
@@ -382,12 +531,18 @@ impl<'a> Parser<'a> {
             if stop.contains(&self.current().kind) {
                 break;
             }
-            if matches!(self.current().kind, TokenKind::Fn) {
-                self.record_error(
-                    errors,
-                    self.error_here("nested function definitions are not supported in v0"),
-                );
-                self.recover_function_definition();
+            if matches!(self.current().kind, TokenKind::Fn | TokenKind::Record) {
+                let message = if self.function_depth == 0 {
+                    "top-level declarations must appear before executable statements"
+                } else {
+                    "nested declarations are not supported in v0"
+                };
+                self.record_error(errors, self.error_here(message));
+                if matches!(self.current().kind, TokenKind::Record) {
+                    self.recover_record_definition();
+                } else {
+                    self.recover_function_definition();
+                }
                 self.skip_newlines();
                 continue;
             }
@@ -562,8 +717,8 @@ impl<'a> Parser<'a> {
             TokenKind::Return => Err(self.error_here("'return' is only valid inside a function")),
             TokenKind::Repeat => self.parse_repeat(),
             TokenKind::If => self.parse_if(),
-            TokenKind::Fn => {
-                Err(self.error_here("nested function definitions are not supported in v0"))
+            TokenKind::Fn | TokenKind::Record => {
+                Err(self.error_here("nested declarations are not supported in v0"))
             }
             TokenKind::End => Err(self.error_here("unexpected 'end' without matching block")),
             TokenKind::Else => Err(self.error_here("unexpected 'else' without matching 'if'")),
@@ -894,7 +1049,7 @@ impl<'a> Parser<'a> {
         let mut depth = 1usize;
         while !self.is_eof() {
             match self.current().kind {
-                TokenKind::Repeat | TokenKind::If | TokenKind::Fn => {
+                TokenKind::Repeat | TokenKind::If | TokenKind::Fn | TokenKind::Record => {
                     depth += 1;
                     self.advance();
                 }
@@ -915,6 +1070,12 @@ impl<'a> Parser<'a> {
     }
 
     fn recover_function_definition(&mut self) {
+        if !self.is_eof() {
+            let _ = self.skip_invalid_block();
+        }
+    }
+
+    fn recover_record_definition(&mut self) {
         if !self.is_eof() {
             let _ = self.skip_invalid_block();
         }
@@ -982,7 +1143,9 @@ fn comparison_operator(kind: &TokenKind) -> Option<BinaryOp> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BinaryOp, ExprKind, StmtKind, TypeName, parse, parse_recovering};
+    use super::{
+        BinaryOp, ExprKind, RecordFieldType, StmtKind, TypeName, parse, parse_recovering,
+    };
     use evo_lexer::lex;
 
     fn parse_source(source: &str) -> super::Program {
@@ -991,10 +1154,48 @@ mod tests {
     }
 
     #[test]
-    fn existing_top_level_program_has_no_functions() {
+    fn existing_top_level_program_has_no_declarations() {
         let program = parse_source("x = 1\nprint x\n");
+        assert!(program.records.is_empty());
         assert!(program.functions.is_empty());
         assert_eq!(program.statements.len(), 2);
+    }
+
+    #[test]
+    fn parses_record_fields_with_builtin_and_named_types() {
+        let program = parse_source(
+            "record Point\nx int\ny int\nend\nrecord Wrapper\npoint Point\nflag bool\nlabel string\nend\n",
+        );
+        assert_eq!(program.records.len(), 2);
+        assert_eq!(program.records[0].name, "Point");
+        assert_eq!(program.records[0].fields.len(), 2);
+        assert_eq!(
+            program.records[1].fields[0].type_name,
+            RecordFieldType::Named("Point".to_owned())
+        );
+        assert_eq!(program.records[1].fields[1].type_name, RecordFieldType::Bool);
+        assert_eq!(
+            program.records[1].fields[2].type_name,
+            RecordFieldType::String
+        );
+    }
+
+    #[test]
+    fn records_and_functions_may_interleave_before_executable_statements() {
+        let program = parse_source(
+            "record A\nvalue int\nend\nfn read() int\nreturn 1\nend\nrecord B\nvalue bool\nend\nprint read()\n",
+        );
+        assert_eq!(program.records.len(), 2);
+        assert_eq!(program.functions.len(), 1);
+        assert_eq!(program.statements.len(), 1);
+    }
+
+    #[test]
+    fn rejects_declaration_after_executable_statement() {
+        let tokens = lex("x = 1\nrecord Late\nvalue int\nend\n")
+            .expect("lexing should succeed");
+        let error = parse(&tokens).expect_err("late declaration should fail");
+        assert!(error.message.contains("before executable"));
     }
 
     #[test]
@@ -1036,11 +1237,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_nested_function_definition() {
-        let tokens = lex("fn outer() int\nfn inner() int\nreturn 1\nend\nreturn 2\nend\n")
+    fn rejects_nested_declaration() {
+        let tokens = lex("fn outer() int\nrecord Inner\nvalue int\nend\nreturn 2\nend\n")
             .expect("lexing should succeed");
-        let error = parse(&tokens).expect_err("nested fn should fail");
-        assert!(error.message.contains("nested function"));
+        let error = parse(&tokens).expect_err("nested declaration should fail");
+        assert!(error.message.contains("nested declaration"));
     }
 
     #[test]
@@ -1079,8 +1280,8 @@ mod tests {
     }
 
     #[test]
-    fn recovering_parser_matches_fail_fast_on_valid_function_source() {
-        let source = "fn add(a int, b int) int\nreturn a + b\nend\nprint add(2, 3)\n";
+    fn recovering_parser_matches_fail_fast_on_valid_declaration_source() {
+        let source = "record Point\nx int\nend\nfn add(a int, b int) int\nreturn a + b\nend\nprint add(2, 3)\n";
         let tokens = lex(source).expect("lexing should succeed");
         assert_eq!(
             parse_recovering(&tokens).expect("recovery parse should succeed"),
