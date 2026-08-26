@@ -1,0 +1,12 @@
+n = input_int
+x = input_int
+sum = 0
+repeat n
+if x > 0
+sum = sum + x
+else
+sum = sum - x
+end
+x = -x
+end
+print sum
