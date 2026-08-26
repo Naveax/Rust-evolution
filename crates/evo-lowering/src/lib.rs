@@ -35,6 +35,11 @@ pub enum StmtKind {
         count: Expr,
         body: Vec<Stmt>,
     },
+    If {
+        condition: Expr,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +52,7 @@ pub struct Expr {
 pub enum ExprKind {
     Integer(i64),
     String(String),
+    Bool(bool),
     Local(String),
     InputInt,
     UnaryMinus(Box<Expr>),
@@ -79,6 +85,7 @@ impl Error for LowerError {}
 enum ValueType {
     Integer,
     String,
+    Bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -93,7 +100,7 @@ pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
 struct Analyzer {
     bindings: HashMap<String, BindingState>,
     mutable_bindings: HashSet<String>,
-    repeat_depth: usize,
+    control_depth: usize,
 }
 
 impl Analyzer {
@@ -101,7 +108,7 @@ impl Analyzer {
         Self {
             bindings: HashMap::new(),
             mutable_bindings: HashSet::new(),
-            repeat_depth: 0,
+            control_depth: 0,
         }
     }
 
@@ -137,10 +144,10 @@ impl Analyzer {
                         expr,
                     }
                 } else {
-                    if self.repeat_depth > 0 {
+                    if self.control_depth > 0 {
                         return Err(LowerError {
                             message: format!(
-                                "local {name:?} must be defined before entering a repeat block"
+                                "local {name:?} must be defined before entering a control-flow block"
                             ),
                             span: statement.span,
                         });
@@ -167,11 +174,40 @@ impl Analyzer {
                     });
                 }
 
-                self.repeat_depth += 1;
+                self.control_depth += 1;
                 let lowered_body = self.lower_statements(body);
-                self.repeat_depth -= 1;
+                self.control_depth -= 1;
                 let body = lowered_body?;
                 StmtKind::Repeat { count, body }
+            }
+            SyntaxStmtKind::If {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                let (condition, condition_type) = self.lower_expr(condition)?;
+                if condition_type != ValueType::Bool {
+                    return Err(LowerError {
+                        message: "if condition must be a boolean".to_owned(),
+                        span: condition.span,
+                    });
+                }
+
+                self.control_depth += 1;
+                let then_result = self.lower_statements(then_body);
+                let else_result = if then_result.is_ok() {
+                    self.lower_statements(else_body)
+                } else {
+                    Ok(Vec::new())
+                };
+                self.control_depth -= 1;
+                let then_body = then_result?;
+                let else_body = else_result?;
+                StmtKind::If {
+                    condition,
+                    then_body,
+                    else_body,
+                }
             }
         };
 
@@ -185,6 +221,7 @@ impl Analyzer {
         let (kind, value_type) = match &expr.kind {
             SyntaxExprKind::Integer(value) => (ExprKind::Integer(*value), ValueType::Integer),
             SyntaxExprKind::String(value) => (ExprKind::String(value.clone()), ValueType::String),
+            SyntaxExprKind::Bool(value) => (ExprKind::Bool(*value), ValueType::Bool),
             SyntaxExprKind::Identifier(name) => {
                 let binding = self.bindings.get(name).ok_or_else(|| LowerError {
                     message: format!("use of local {name:?} before definition"),
@@ -206,19 +243,46 @@ impl Analyzer {
             SyntaxExprKind::Binary { left, op, right } => {
                 let (left, left_type) = self.lower_expr(left)?;
                 let (right, right_type) = self.lower_expr(right)?;
-                if left_type != ValueType::Integer || right_type != ValueType::Integer {
-                    return Err(LowerError {
-                        message: "arithmetic operators require integer operands".to_owned(),
-                        span: expr.span,
-                    });
-                }
+                let result_type = match op {
+                    BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+                        if left_type != ValueType::Integer || right_type != ValueType::Integer {
+                            return Err(LowerError {
+                                message: "arithmetic operators require integer operands".to_owned(),
+                                span: expr.span,
+                            });
+                        }
+                        ValueType::Integer
+                    }
+                    BinaryOp::Equal | BinaryOp::NotEqual => {
+                        if left_type != right_type {
+                            return Err(LowerError {
+                                message: "equality operands must have the same value type"
+                                    .to_owned(),
+                                span: expr.span,
+                            });
+                        }
+                        ValueType::Bool
+                    }
+                    BinaryOp::Less
+                    | BinaryOp::LessEqual
+                    | BinaryOp::Greater
+                    | BinaryOp::GreaterEqual => {
+                        if left_type != ValueType::Integer || right_type != ValueType::Integer {
+                            return Err(LowerError {
+                                message: "ordering operators require integer operands".to_owned(),
+                                span: expr.span,
+                            });
+                        }
+                        ValueType::Bool
+                    }
+                };
                 (
                     ExprKind::Binary {
                         left: Box::new(left),
                         op: *op,
                         right: Box::new(right),
                     },
-                    ValueType::Integer,
+                    result_type,
                 )
             }
         };
@@ -239,6 +303,14 @@ impl Analyzer {
                     *mutable = self.mutable_bindings.contains(name);
                 }
                 StmtKind::Repeat { body, .. } => self.apply_mutability(body),
+                StmtKind::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    self.apply_mutability(then_body);
+                    self.apply_mutability(else_body);
+                }
                 StmtKind::Assign { .. } | StmtKind::Print(_) => {}
             }
         }
@@ -282,13 +354,91 @@ mod tests {
                 ..
             } if name == "sum"
         ));
-        let StmtKind::Repeat { body, .. } = &program.statements[2].kind else {
-            panic!("expected repeat statement");
+    }
+
+    #[test]
+    fn lowers_boolean_condition_and_comparisons() {
+        let program = lower_source("x = 1\nif x >= 1\nprint true\nelse\nprint false\nend\n")
+            .expect("boolean control flow should lower");
+        let StmtKind::If {
+            condition,
+            then_body,
+            else_body,
+        } = &program.statements[1].kind
+        else {
+            panic!("expected if statement");
         };
+        assert!(matches!(condition.kind, ExprKind::Binary { .. }));
         assert!(matches!(
-            &body[0].kind,
-            StmtKind::Assign { name, .. } if name == "sum"
+            then_body[0].kind,
+            StmtKind::Print(super::Expr {
+                kind: ExprKind::Bool(true),
+                ..
+            })
         ));
+        assert!(matches!(
+            else_body[0].kind,
+            StmtKind::Print(super::Expr {
+                kind: ExprKind::Bool(false),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn reassignments_in_conditional_branches_infer_mutability() {
+        let program =
+            lower_source("x = 0\nflag = true\nif flag\nx = x + 1\nelse\nx = x - 1\nend\n")
+                .expect("branch reassignment should lower");
+        assert!(matches!(
+            &program.statements[0].kind,
+            StmtKind::Let {
+                name,
+                mutable: true,
+                ..
+            } if name == "x"
+        ));
+    }
+
+    #[test]
+    fn equality_supports_same_type_integer_bool_and_string_values() {
+        for source in [
+            "print 1 == 1\n",
+            "print true != false\n",
+            "print \"a\" == \"a\"\n",
+        ] {
+            lower_source(source).expect("same-type equality should lower");
+        }
+    }
+
+    #[test]
+    fn rejects_mixed_type_equality() {
+        let error = lower_source("print 1 == true\n").expect_err("mixed equality should fail");
+        assert!(error.message.contains("same value type"));
+    }
+
+    #[test]
+    fn rejects_non_integer_ordering() {
+        let error = lower_source("print true < false\n").expect_err("boolean ordering should fail");
+        assert!(error.message.contains("ordering operators require integer"));
+    }
+
+    #[test]
+    fn rejects_non_boolean_if_condition() {
+        let error =
+            lower_source("if 1\nprint 1\nend\n").expect_err("integer condition should fail");
+        assert!(error.message.contains("if condition must be a boolean"));
+    }
+
+    #[test]
+    fn rejects_new_binding_inside_conditional_branch() {
+        let error = lower_source("if true\nx = 1\nend\n")
+            .expect_err("branch-local definition should fail in v0");
+        assert!(
+            error
+                .message
+                .contains("defined before entering a control-flow block")
+        );
     }
 
     #[test]
@@ -328,17 +478,6 @@ mod tests {
                 mutable: true,
                 ..
             } if name == "b"
-        ));
-        let StmtKind::Repeat { body, .. } = &program.statements[2].kind else {
-            panic!("expected repeat statement");
-        };
-        assert!(matches!(
-            &body[0].kind,
-            StmtKind::Assign { name, .. } if name == "a"
-        ));
-        assert!(matches!(
-            &body[1].kind,
-            StmtKind::Assign { name, .. } if name == "b"
         ));
     }
 
