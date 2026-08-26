@@ -175,6 +175,7 @@ fn render_expr(expr: &Expr) -> String {
         ExprKind::Bool(value) => value.to_string(),
         ExprKind::Local(name) => generated_identifier(name),
         ExprKind::InputInt => "__evo_input_int()".to_owned(),
+        ExprKind::LogicalNot(inner) => format!("(!{})", render_expr(inner)),
         ExprKind::UnaryMinus(inner) => format!("(-{})", render_expr(inner)),
         ExprKind::Binary { left, op, right } => format!(
             "({} {} {})",
@@ -197,6 +198,8 @@ const fn render_binary_op(op: BinaryOp) -> &'static str {
         BinaryOp::LessEqual => "<=",
         BinaryOp::Greater => ">",
         BinaryOp::GreaterEqual => ">=",
+        BinaryOp::And => "&&",
+        BinaryOp::Or => "||",
     }
 }
 
@@ -231,7 +234,7 @@ fn statement_uses_input_int(statement: &Stmt) -> bool {
 fn expr_uses_input_int(expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::InputInt => true,
-        ExprKind::UnaryMinus(inner) => expr_uses_input_int(inner),
+        ExprKind::LogicalNot(inner) | ExprKind::UnaryMinus(inner) => expr_uses_input_int(inner),
         ExprKind::Binary { left, right, .. } => {
             expr_uses_input_int(left) || expr_uses_input_int(right)
         }
@@ -295,6 +298,34 @@ mod tests {
                 "}\n"
             )
         );
+    }
+
+    #[test]
+    fn logical_operators_lower_to_native_short_circuit_rust() {
+        let generated = compile_source("print true and not false or false\n");
+        assert!(generated.contains("&&"));
+        assert!(generated.contains("||"));
+        assert!(generated.contains("!false"));
+        assert!(!generated.contains("Box"));
+        assert!(!generated.contains("dyn "));
+    }
+
+    #[test]
+    fn logical_expressions_do_not_add_source_map_lines() {
+        let program = lower_source("flag = true\nif flag and not false\nprint flag\nend\n");
+        let generated = generate_lowered_rust_with_map(&program);
+        assert_eq!(mapped_source_line(&generated, 2), Some(1));
+        assert_eq!(mapped_source_line(&generated, 3), Some(2));
+        assert_eq!(mapped_source_line(&generated, 4), Some(3));
+        assert_eq!(mapped_source_line(&generated, 5), Some(2));
+        assert_eq!(generated.source_span_for_line(6), None);
+    }
+
+    #[test]
+    fn logical_not_input_int_dependency_is_detected_recursively() {
+        let generated = compile_source("print not (input_int > 0)\n");
+        assert!(generated.contains("fn __evo_input_int()"));
+        assert!(generated.contains("!(__evo_input_int() > 0)"));
     }
 
     #[test]
