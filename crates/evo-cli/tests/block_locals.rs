@@ -8,7 +8,10 @@ fn temp_dir(label: &str) -> std::path::PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be valid")
         .as_nanos();
-    env::temp_dir().join(format!("evo-block-locals-{label}-{}-{nanos}", process::id()))
+    env::temp_dir().join(format!(
+        "evo-block-locals-{label}-{}-{nanos}",
+        process::id()
+    ))
 }
 
 fn normalized_stdout(bytes: &[u8]) -> String {
@@ -122,7 +125,10 @@ fn functions_still_cannot_capture_top_level_locals() {
     let _ = fs::remove_dir_all(&dir);
 
     assert!(!output.status.success());
-    assert!(stderr.contains("before definition or outside its scope"), "{stderr}");
+    assert!(
+        stderr.contains("before definition or outside its scope"),
+        "{stderr}"
+    );
     assert!(stderr.contains(&location), "{stderr}");
     assert!(stderr.contains("2 | return top"), "{stderr}");
 }

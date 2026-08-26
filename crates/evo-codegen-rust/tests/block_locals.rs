@@ -49,7 +49,11 @@ fn block_locals_lower_to_plain_lexical_rust_and_keep_source_mappings() {
     );
     assert!(generated.source.contains("__evo_temp = (__evo_temp + 1);"));
     assert!(generated.source.contains("let __evo_temp = (__evo_x + 2);"));
-    assert!(generated.source.contains("__evo_x = (__evo_x + __evo_temp);"));
+    assert!(
+        generated
+            .source
+            .contains("__evo_x = (__evo_x + __evo_temp);")
+    );
 
     for forbidden in ["HashMap", "Box<", "Rc<", "RefCell", "dyn "] {
         assert!(
