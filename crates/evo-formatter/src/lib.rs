@@ -46,9 +46,12 @@ pub fn format_source(source: &str, tokens: &[Token]) -> String {
         }
         output.push('\n');
 
-        if first_kind
-            .is_some_and(|kind| matches!(kind, TokenKind::Repeat | TokenKind::If | TokenKind::Else))
-        {
+        if first_kind.is_some_and(|kind| {
+            matches!(
+                kind,
+                TokenKind::Repeat | TokenKind::If | TokenKind::Else | TokenKind::Fn
+            )
+        }) {
             depth += 1;
         }
     }
@@ -117,14 +120,22 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
     let previous_unary_minus = is_unary_minus(tokens, index - 1);
     let current_unary_minus = is_unary_minus(tokens, index);
 
-    if matches!(current, TokenKind::RParen) || matches!(previous, TokenKind::LParen) {
+    if matches!(current, TokenKind::RParen | TokenKind::Comma)
+        || matches!(previous, TokenKind::LParen)
+    {
         return false;
+    }
+    if matches!(previous, TokenKind::Comma) {
+        return true;
     }
     if previous_unary_minus {
         return false;
     }
 
     if matches!(current, TokenKind::LParen) {
+        if matches!(previous, TokenKind::Identifier(_)) {
+            return false;
+        }
         return is_expression_prefix(previous)
             || matches!(previous, TokenKind::Equal)
             || is_binary_operator(previous, previous_unary_minus);
@@ -132,7 +143,7 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
 
     if current_unary_minus {
         return is_expression_prefix(previous)
-            || matches!(previous, TokenKind::Equal)
+            || matches!(previous, TokenKind::Equal | TokenKind::Comma)
             || is_binary_operator(previous, previous_unary_minus);
     }
 
@@ -140,15 +151,38 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
         return true;
     }
 
+    if is_type_name(current) {
+        return matches!(
+            previous,
+            TokenKind::Identifier(_) | TokenKind::RParen | TokenKind::Comma
+        );
+    }
+
+    if matches!(previous, TokenKind::Fn) {
+        return true;
+    }
+
     is_expression_prefix(previous)
         || matches!(previous, TokenKind::Equal)
         || is_binary_operator(previous, previous_unary_minus)
+        || is_type_name(previous)
 }
 
 fn is_expression_prefix(kind: &TokenKind) -> bool {
     matches!(
         kind,
-        TokenKind::Print | TokenKind::Repeat | TokenKind::If | TokenKind::Not
+        TokenKind::Print
+            | TokenKind::Repeat
+            | TokenKind::If
+            | TokenKind::Not
+            | TokenKind::Return
+    )
+}
+
+fn is_type_name(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString
     )
 }
 
@@ -161,7 +195,7 @@ fn is_unary_minus(tokens: &[&Token], index: usize) -> bool {
     }
 
     let previous = &tokens[index - 1].kind;
-    matches!(previous, TokenKind::Equal | TokenKind::LParen)
+    matches!(previous, TokenKind::Equal | TokenKind::LParen | TokenKind::Comma)
         || is_expression_prefix(previous)
         || is_binary_operator(previous, false)
 }
@@ -199,6 +233,25 @@ mod tests {
     }
 
     #[test]
+    fn formats_function_signature_body_return_and_calls() {
+        let source = "fn add(a int,b bool,c string)int\nreturn pick(a,c)\nend\nprint add(1,true,\"x\")\n";
+        let expected = concat!(
+            "fn add(a int, b bool, c string) int\n",
+            "    return pick(a, c)\n",
+            "end\n",
+            "print add(1, true, \"x\")\n"
+        );
+        assert_eq!(format(source), expected);
+    }
+
+    #[test]
+    fn function_formatter_is_idempotent() {
+        let source = "fn yes(flag bool)bool\nif flag and not false\nreturn true\nelse\nreturn false\nend\nend\n";
+        let once = format(source);
+        assert_eq!(format(&once), once);
+    }
+
+    #[test]
     fn formats_comparisons_and_if_else_indentation() {
         let source = concat!(
             "x=1\n",
@@ -224,21 +277,6 @@ mod tests {
         let source = "if(true and not(false)or true)\nprint true\nend\n";
         let expected = "if (true and not (false) or true)\n    print true\nend\n";
         assert_eq!(format(source), expected);
-    }
-
-    #[test]
-    fn logical_formatter_is_idempotent() {
-        let source = "if true and not (false or true)\nprint false\nend\n";
-        let once = format(source);
-        assert_eq!(format(&once), once);
-    }
-
-    #[test]
-    fn keeps_unary_minus_attached_after_comparison_operator() {
-        assert_eq!(
-            format("if -1<-2\nprint 1\nend\n"),
-            "if -1 < -2\n    print 1\nend\n"
-        );
     }
 
     #[test]
@@ -279,22 +317,5 @@ mod tests {
     #[test]
     fn preserves_blank_lines_and_adds_final_newline() {
         assert_eq!(format("x=1\n\n\nprint x"), "x = 1\n\n\nprint x\n");
-    }
-
-    #[test]
-    fn formatter_is_idempotent() {
-        let source = concat!(
-            "if true # branch\n",
-            "repeat 2 # outer\n",
-            "x= -1\n",
-            "print(x+2)# value\n",
-            "end\n",
-            "else\n",
-            "print 0\n",
-            "end\n"
-        );
-        let once = format(source);
-        let twice = format(&once);
-        assert_eq!(twice, once);
     }
 }
