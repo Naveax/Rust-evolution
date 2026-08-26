@@ -202,22 +202,22 @@ impl<'a> Parser<'a> {
         let mut records = Vec::new();
         let mut functions = Vec::new();
         let mut statements = Vec::new();
-        let mut declaration_region = true;
+        let mut record_declaration_region = true;
         self.skip_newlines();
         while !self.is_eof() {
             match self.current().kind {
-                TokenKind::Record if declaration_region => {
+                TokenKind::Record if record_declaration_region => {
                     records.push(self.parse_record()?);
                     self.require_statement_terminator()?;
                 }
-                TokenKind::Fn if declaration_region => {
+                TokenKind::Record => {
+                    return Err(self.error_here(
+                        "record declarations must appear before executable statements",
+                    ));
+                }
+                TokenKind::Fn => {
                     functions.push(self.parse_function()?);
                     self.require_statement_terminator()?;
-                }
-                TokenKind::Record | TokenKind::Fn => {
-                    return Err(self.error_here(
-                        "top-level declarations must appear before executable statements",
-                    ));
                 }
                 TokenKind::End => {
                     return Err(self.error_here("unexpected 'end' without matching block"));
@@ -229,7 +229,7 @@ impl<'a> Parser<'a> {
                     return Err(self.error_here("'return' is only valid inside a function"));
                 }
                 _ => {
-                    declaration_region = false;
+                    record_declaration_region = false;
                     let statement = self.parse_statement()?;
                     self.require_statement_terminator()?;
                     statements.push(statement);
@@ -257,17 +257,17 @@ impl<'a> Parser<'a> {
         let mut records = Vec::new();
         let mut functions = Vec::new();
         let mut statements = Vec::new();
-        let mut declaration_region = true;
+        let mut record_declaration_region = true;
         self.skip_newlines();
 
         while !self.is_eof() && errors.len() < MAX_RECOVERED_ERRORS {
             if matches!(self.current().kind, TokenKind::Record) {
                 let start_index = self.index;
-                if !declaration_region {
+                if !record_declaration_region {
                     self.record_error(
                         &mut errors,
                         self.error_here(
-                            "top-level declarations must appear before executable statements",
+                            "record declarations must appear before executable statements",
                         ),
                     );
                     self.recover_record_definition();
@@ -296,28 +296,18 @@ impl<'a> Parser<'a> {
 
             if matches!(self.current().kind, TokenKind::Fn) {
                 let start_index = self.index;
-                if !declaration_region {
-                    self.record_error(
-                        &mut errors,
-                        self.error_here(
-                            "top-level declarations must appear before executable statements",
-                        ),
-                    );
-                    self.recover_function_definition();
-                } else {
-                    match self.parse_function() {
-                        Ok(function) => {
-                            if let Err(error) = self.require_statement_terminator() {
-                                self.record_error(&mut errors, error);
-                                self.synchronize_statement(StopSet::NONE);
-                            } else {
-                                functions.push(function);
-                            }
-                        }
-                        Err(error) => {
+                match self.parse_function() {
+                    Ok(function) => {
+                        if let Err(error) = self.require_statement_terminator() {
                             self.record_error(&mut errors, error);
-                            self.recover_function_definition();
+                            self.synchronize_statement(StopSet::NONE);
+                        } else {
+                            functions.push(function);
                         }
+                    }
+                    Err(error) => {
+                        self.record_error(&mut errors, error);
+                        self.recover_function_definition();
                     }
                 }
                 self.skip_newlines();
@@ -328,7 +318,7 @@ impl<'a> Parser<'a> {
             }
 
             if matches!(self.current().kind, TokenKind::Return) {
-                declaration_region = false;
+                record_declaration_region = false;
                 self.record_error(
                     &mut errors,
                     self.error_here("'return' is only valid inside a function"),
@@ -338,7 +328,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            declaration_region = false;
+            record_declaration_region = false;
             let before = self.index;
             let recovered = self.parse_statements_recovering(StopSet::NONE, &mut errors);
             statements.extend(recovered);
@@ -532,12 +522,10 @@ impl<'a> Parser<'a> {
                 break;
             }
             if matches!(self.current().kind, TokenKind::Fn | TokenKind::Record) {
-                let message = if self.function_depth == 0 {
-                    "top-level declarations must appear before executable statements"
-                } else {
-                    "nested declarations are not supported in v0"
-                };
-                self.record_error(errors, self.error_here(message));
+                self.record_error(
+                    errors,
+                    self.error_here("nested declarations are not supported in v0"),
+                );
                 if matches!(self.current().kind, TokenKind::Record) {
                     self.recover_record_definition();
                 } else {
@@ -1192,10 +1180,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_declaration_after_executable_statement() {
+    fn rejects_record_declaration_after_executable_statement() {
         let tokens = lex("x = 1\nrecord Late\nvalue int\nend\n").expect("lexing should succeed");
-        let error = parse(&tokens).expect_err("late declaration should fail");
+        let error = parse(&tokens).expect_err("late record declaration should fail");
         assert!(error.message.contains("before executable"));
+    }
+
+    #[test]
+    fn preserves_existing_function_placement_compatibility() {
+        let program = parse_source("print add(2, 3)\nfn add(a int, b int) int\nreturn a + b\nend\n");
+        assert_eq!(program.functions.len(), 1);
+        assert_eq!(program.statements.len(), 1);
     }
 
     #[test]
