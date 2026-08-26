@@ -104,7 +104,11 @@ fn render_code(source: &str, tokens: &[&Token]) -> String {
         if index > 0 && needs_space(tokens, index) {
             output.push(' ');
         }
-        output.push_str(source.get(token.span.start..token.span.end).unwrap_or_default());
+        output.push_str(
+            source
+                .get(token.span.start..token.span.end)
+                .unwrap_or_default(),
+        );
     }
 
     output
@@ -124,21 +128,27 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
     }
 
     if matches!(current, TokenKind::LParen) {
-        return matches!(previous, TokenKind::Print | TokenKind::Repeat | TokenKind::Equal)
-            || is_binary_operator(previous, previous_unary_minus);
+        return matches!(
+            previous,
+            TokenKind::Print | TokenKind::Repeat | TokenKind::Equal
+        ) || is_binary_operator(previous, previous_unary_minus);
     }
 
     if current_unary_minus {
-        return matches!(previous, TokenKind::Print | TokenKind::Repeat | TokenKind::Equal)
-            || is_binary_operator(previous, previous_unary_minus);
+        return matches!(
+            previous,
+            TokenKind::Print | TokenKind::Repeat | TokenKind::Equal
+        ) || is_binary_operator(previous, previous_unary_minus);
     }
 
     if matches!(current, TokenKind::Equal) || is_binary_operator(current, current_unary_minus) {
         return true;
     }
 
-    matches!(previous, TokenKind::Print | TokenKind::Repeat | TokenKind::Equal)
-        || is_binary_operator(previous, previous_unary_minus)
+    matches!(
+        previous,
+        TokenKind::Print | TokenKind::Repeat | TokenKind::Equal
+    ) || is_binary_operator(previous, previous_unary_minus)
 }
 
 fn is_unary_minus(tokens: &[&Token], index: usize) -> bool {
@@ -179,10 +189,7 @@ mod tests {
 
     #[test]
     fn normalizes_binding_print_and_expression_spacing() {
-        assert_eq!(
-            format("x=1\nprint(1+2*3)\n"),
-            "x = 1\nprint (1 + 2 * 3)\n"
-        );
+        assert_eq!(format("x=1\nprint(1+2*3)\n"), "x = 1\nprint (1 + 2 * 3)\n");
     }
 
     #[test]
