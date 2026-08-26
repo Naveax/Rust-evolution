@@ -235,7 +235,9 @@ fn expr_uses_input_int(expr: &Expr) -> bool {
         ExprKind::Binary { left, right, .. } => {
             expr_uses_input_int(left) || expr_uses_input_int(right)
         }
-        ExprKind::Integer(_) | ExprKind::String(_) | ExprKind::Bool(_) | ExprKind::Local(_) => false,
+        ExprKind::Integer(_) | ExprKind::String(_) | ExprKind::Bool(_) | ExprKind::Local(_) => {
+            false
+        }
     }
 }
 
