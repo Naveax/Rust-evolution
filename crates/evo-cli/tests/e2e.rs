@@ -84,6 +84,67 @@ fn check_reports_multiple_parser_errors_in_one_run() {
 }
 
 #[test]
+fn check_reports_multiple_lexer_errors_in_one_run() {
+    let dir = temp_dir("multi-lexer");
+    fs::create_dir_all(&dir).expect("temporary directory should be created");
+    let source = dir.join("multiple-lex-invalid.evo");
+    fs::write(&source, "print @\nprint $\n").expect("source should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_evo"))
+        .arg("check")
+        .arg(&source)
+        .output()
+        .expect("evo should run");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let first_location = format!(" --> {}:1:7", source.display());
+    let second_location = format!(" --> {}:2:7", source.display());
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(!output.status.success());
+    assert_eq!(
+        stderr.matches("error: unexpected character").count(),
+        2,
+        "{stderr}"
+    );
+    assert!(stderr.contains(&first_location), "{stderr}");
+    assert!(stderr.contains(&second_location), "{stderr}");
+    assert!(stderr.contains("1 | print @"), "{stderr}");
+    assert!(stderr.contains("2 | print $"), "{stderr}");
+}
+
+#[test]
+fn build_stops_before_parser_and_rustc_when_lexer_errors_exist() {
+    let dir = temp_dir("lexer-before-rustc");
+    fs::create_dir_all(&dir).expect("temporary directory should be created");
+    let source = dir.join("invalid-build.evo");
+    let binary = dir.join("must-not-exist");
+    fs::write(&source, "print @\nprint $\n").expect("source should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_evo"))
+        .arg("build")
+        .arg(&source)
+        .arg(&binary)
+        .env("RUSTC", "evo-rustc-must-not-run")
+        .output()
+        .expect("evo build should run");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let binary_exists = binary.exists();
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(!output.status.success());
+    assert_eq!(
+        stderr.matches("error: unexpected character").count(),
+        2,
+        "{stderr}"
+    );
+    assert!(!stderr.contains("expected expression"), "{stderr}");
+    assert!(!stderr.contains("failed to execute rustc"), "{stderr}");
+    assert!(!binary_exists, "lexer failure must not produce a binary");
+}
+
+#[test]
 fn build_stops_before_rustc_when_parser_errors_exist() {
     let dir = temp_dir("parser-before-rustc");
     fs::create_dir_all(&dir).expect("temporary directory should be created");
@@ -100,12 +161,13 @@ fn build_stops_before_rustc_when_parser_errors_exist() {
         .expect("evo build should run");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let binary_exists = binary.exists();
     let _ = fs::remove_dir_all(&dir);
 
     assert!(!output.status.success());
     assert_eq!(stderr.matches("error: expected '='").count(), 2, "{stderr}");
     assert!(!stderr.contains("failed to execute rustc"), "{stderr}");
-    assert!(!binary.exists(), "parser failure must not produce a binary");
+    assert!(!binary_exists, "parser failure must not produce a binary");
 }
 
 #[test]

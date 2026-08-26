@@ -1,6 +1,6 @@
 use evo_codegen_rust::{GeneratedRust, generate_lowered_rust_with_map};
 use evo_diagnostics::render_error;
-use evo_lexer::lex;
+use evo_lexer::lex_recovering;
 use evo_lowering::lower;
 use evo_parser::parse_recovering;
 use std::env;
@@ -89,13 +89,21 @@ fn load_program(path: &Path) -> Result<LoadedProgram, String> {
     let source = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let tokens =
-        lex(&source).map_err(|error| render_error(path, &source, &error.message, error.span))?;
+        lex_recovering(&source).map_err(|errors| render_lex_errors(path, &source, &errors))?;
     let syntax =
         parse_recovering(&tokens).map_err(|errors| render_parse_errors(path, &source, &errors))?;
     let program =
         lower(&syntax).map_err(|error| render_error(path, &source, &error.message, error.span))?;
     let generated = generate_lowered_rust_with_map(&program);
     Ok(LoadedProgram { source, generated })
+}
+
+fn render_lex_errors(path: &Path, source: &str, errors: &[evo_lexer::LexError]) -> String {
+    errors
+        .iter()
+        .map(|error| render_error(path, source, &error.message, error.span))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn render_parse_errors(path: &Path, source: &str, errors: &[evo_parser::ParseError]) -> String {
