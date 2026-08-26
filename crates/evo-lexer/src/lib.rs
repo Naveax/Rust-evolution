@@ -38,6 +38,9 @@ pub enum TokenKind {
     True,
     False,
     InputInt,
+    And,
+    Or,
+    Not,
     Plus,
     Minus,
     Star,
@@ -409,6 +412,9 @@ impl<'a> Lexer<'a> {
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             "input_int" => TokenKind::InputInt,
+            "and" => TokenKind::And,
+            "or" => TokenKind::Or,
+            "not" => TokenKind::Not,
             _ => TokenKind::Identifier(text.to_owned()),
         };
         Token {
@@ -569,6 +575,38 @@ mod tests {
         assert!(kinds.contains(&TokenKind::LessEqual));
         assert!(kinds.contains(&TokenKind::Greater));
         assert!(kinds.contains(&TokenKind::GreaterEqual));
+    }
+
+    #[test]
+    fn tokenizes_logical_keywords() {
+        let tokens = lex("if true and not false or true\nend\n")
+            .expect("logical keyword source should lex");
+        let kinds: Vec<_> = tokens.into_iter().map(|token| token.kind).collect();
+        assert!(kinds.contains(&TokenKind::And));
+        assert!(kinds.contains(&TokenKind::Or));
+        assert!(kinds.contains(&TokenKind::Not));
+    }
+
+    #[test]
+    fn logical_keyword_prefixes_remain_identifiers() {
+        let tokens = lex("android = 1\norigin = 2\nnotice = 3\n")
+            .expect("keyword prefixes should remain identifiers");
+        let kinds: Vec<_> = tokens.into_iter().map(|token| token.kind).collect();
+        assert!(kinds.contains(&TokenKind::Identifier("android".to_owned())));
+        assert!(kinds.contains(&TokenKind::Identifier("origin".to_owned())));
+        assert!(kinds.contains(&TokenKind::Identifier("notice".to_owned())));
+        assert!(!kinds.contains(&TokenKind::And));
+        assert!(!kinds.contains(&TokenKind::Or));
+        assert!(!kinds.contains(&TokenKind::Not));
+    }
+
+    #[test]
+    fn recovering_lexer_matches_fail_fast_tokens_for_logical_source() {
+        let source = "if true and not false or true\nend\n";
+        assert_eq!(
+            lex_recovering(source).expect("recovery lexing should succeed"),
+            lex(source).expect("fail-fast lexing should succeed")
+        );
     }
 
     #[test]
