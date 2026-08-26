@@ -46,6 +46,7 @@ pub enum ExprKind {
     Bool(bool),
     Identifier(String),
     InputInt,
+    LogicalNot(Box<Expr>),
     UnaryMinus(Box<Expr>),
     Binary {
         left: Box<Expr>,
@@ -66,6 +67,8 @@ pub enum BinaryOp {
     LessEqual,
     Greater,
     GreaterEqual,
+    And,
+    Or,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -449,6 +452,55 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expression(&mut self) -> Result<Expr, ParseError> {
+        self.parse_or()
+    }
+
+    fn parse_or(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_and()?;
+        while matches!(self.current().kind, TokenKind::Or) {
+            self.advance();
+            let right = self.parse_and()?;
+            let span = left.span.join(right.span);
+            left = Expr {
+                kind: ExprKind::Binary {
+                    left: Box::new(left),
+                    op: BinaryOp::Or,
+                    right: Box::new(right),
+                },
+                span,
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_and(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_not()?;
+        while matches!(self.current().kind, TokenKind::And) {
+            self.advance();
+            let right = self.parse_not()?;
+            let span = left.span.join(right.span);
+            left = Expr {
+                kind: ExprKind::Binary {
+                    left: Box::new(left),
+                    op: BinaryOp::And,
+                    right: Box::new(right),
+                },
+                span,
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_not(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.current().kind, TokenKind::Not) {
+            let start = self.advance().span;
+            let expr = self.parse_not()?;
+            let span = start.join(expr.span);
+            return Ok(Expr {
+                kind: ExprKind::LogicalNot(Box::new(expr)),
+                span,
+            });
+        }
         self.parse_comparison()
     }
 
@@ -777,6 +829,63 @@ mod tests {
     }
 
     #[test]
+    fn parses_logical_precedence_and_associativity() {
+        let program = parse_source("print true or false and false\n");
+        let StmtKind::Print(expr) = &program.statements[0].kind else {
+            panic!("expected print statement");
+        };
+        let ExprKind::Binary { op, right, .. } = &expr.kind else {
+            panic!("expected outer logical expression");
+        };
+        assert_eq!(*op, BinaryOp::Or);
+        assert!(matches!(
+            &right.kind,
+            ExprKind::Binary {
+                op: BinaryOp::And,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn not_binds_looser_than_comparison_and_tighter_than_and() {
+        let program = parse_source("print not 1 > 0 and true\n");
+        let StmtKind::Print(expr) = &program.statements[0].kind else {
+            panic!("expected print statement");
+        };
+        let ExprKind::Binary {
+            left,
+            op: BinaryOp::And,
+            ..
+        } = &expr.kind
+        else {
+            panic!("expected and expression");
+        };
+        let ExprKind::LogicalNot(inner) = &left.kind else {
+            panic!("expected logical not");
+        };
+        assert!(matches!(
+            &inner.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Greater,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_double_not() {
+        let program = parse_source("print not not true\n");
+        let StmtKind::Print(expr) = &program.statements[0].kind else {
+            panic!("expected print statement");
+        };
+        let ExprKind::LogicalNot(inner) = &expr.kind else {
+            panic!("expected outer not");
+        };
+        assert!(matches!(&inner.kind, ExprKind::LogicalNot(_)));
+    }
+
+    #[test]
     fn supports_nested_if_and_repeat_composition() {
         let source = concat!(
             "x = 1\n",
@@ -875,7 +984,7 @@ mod tests {
 
     #[test]
     fn recovering_parser_matches_fail_fast_parser_on_valid_input() {
-        let source = "x = 1\nif x > 0\nprint true\nelse\nprint false\nend\n";
+        let source = "x = 1\nif x > 0 and not false\nprint true\nelse\nprint false\nend\n";
         let tokens = lex(source).expect("lexing should succeed");
         assert_eq!(
             parse_recovering(&tokens).expect("recovery parse should succeed"),
