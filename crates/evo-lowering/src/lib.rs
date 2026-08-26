@@ -434,7 +434,11 @@ mod tests {
 
     #[test]
     fn rejects_non_boolean_and_or_operands() {
-        for source in ["print 1 and true\n", "print true or 1\n", "print \"x\" and false\n"] {
+        for source in [
+            "print 1 and true\n",
+            "print true or 1\n",
+            "print \"x\" and false\n",
+        ] {
             let error = lower_source(source).expect_err("non-boolean logical operand should fail");
             assert!(error.message.contains("require boolean operands"));
         }
