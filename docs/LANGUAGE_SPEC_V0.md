@@ -2,7 +2,7 @@
 
 Status: **experimental, deliberately small, not stable**.
 
-This document describes the behavior implemented on `main`. Future ideas belong in `docs/LANGUAGE_DESIGN.md` and the tracking issues until code, tests, diagnostics and performance evidence exist for them.
+This document describes behavior implemented on `main`. Future ideas belong in `docs/LANGUAGE_DESIGN.md` and tracking issues until code, tests, diagnostics, and performance evidence exist for them.
 
 The current implementation establishes a complete source-to-native pipeline while keeping the user-facing surface intentionally small:
 
@@ -18,12 +18,17 @@ A current program can look like:
 
 ```text
 n = input_int
-value = 1
+x = input_int
+sum = 0
 repeat n
-    value = value * 3 + 1
-    value = value / 2
+    if x > 1
+        x = x / 2
+    else
+        x = x + 3
+    end
+    sum = sum + x
 end
-print value
+print sum
 ```
 
 The frontend lowers this to ordinary Rust constructs and native code.
@@ -38,8 +43,10 @@ The frontend lowers this to ordinary Rust constructs and native code.
 - Integer literals target `i64`.
 - String literals use double quotes.
 - Supported string escapes are `\n`, `\r`, `\t`, `\"`, and `\\`.
-- Operators are `+`, `-`, `*`, `/`, `=`, `(`, and `)`.
-- Current keywords are `print`, `repeat`, `end`, and `input_int`.
+- Arithmetic/assignment/grouping operators are `+`, `-`, `*`, `/`, `=`, `(`, and `)`.
+- Comparison operators are `==`, `!=`, `<`, `<=`, `>`, and `>=`.
+- Current keywords are `print`, `repeat`, `if`, `else`, `end`, `true`, `false`, and `input_int`.
+- A lone `!` is not an operator and produces a deterministic lexical error requiring `=` after it.
 
 ### Lexical diagnostics
 
@@ -56,6 +63,7 @@ Current recovery boundaries are deliberately conservative:
 - an overflowing integer literal is consumed as one full numeric literal before continuing;
 - an unterminated string at newline leaves the newline available as a structural boundary;
 - an unsupported escape synchronizes to a closing quote or newline;
+- a lone `!` consumes the offending scalar and recovery continues;
 - EOF inside a string/escape terminates recovery cleanly.
 
 Malformed lexical input is not passed to the parser.
@@ -70,24 +78,42 @@ program          := NEWLINE* (statement (NEWLINE+ | EOF) NEWLINE*)* EOF
 statement        := binding
                   | print_statement
                   | repeat_statement
+                  | if_statement
 
 binding          := IDENTIFIER "=" expression
 print_statement  := "print" expression
-repeat_statement := "repeat" expression NEWLINE+ repeat_body "end"
-repeat_body      := (NEWLINE* statement (NEWLINE+ | EOF))* NEWLINE*
+repeat_statement := "repeat" expression NEWLINE+ block "end"
+if_statement     := "if" expression NEWLINE+ block
+                    ("else" NEWLINE+ block)?
+                    "end"
+block            := (NEWLINE* statement (NEWLINE+ | EOF))* NEWLINE*
 
-expression       := additive
+expression       := comparison
+comparison       := additive (comparison_operator additive)?
+comparison_operator := "==" | "!=" | "<" | "<=" | ">" | ">="
 additive         := multiplicative (("+" | "-") multiplicative)*
 multiplicative   := unary (("*" | "/") unary)*
 unary            := "-" unary | primary
 primary          := INTEGER
                   | STRING
+                  | "true"
+                  | "false"
                   | IDENTIFIER
                   | "input_int"
                   | "(" expression ")"
 ```
 
-`repeat` blocks may be nested. A top-level unmatched `end` is an error. Reaching EOF before a required repeat `end` is also an error.
+`repeat` and `if` blocks may be nested in each other. `if` may omit `else`. A top-level unmatched `end` or `else` is an error. Reaching EOF before a required block `end` is an error.
+
+Comparison precedence is lower than arithmetic, so:
+
+```text
+print 1 + 2 * 3 == 7
+```
+
+parses as `(1 + (2 * 3)) == 7`.
+
+Chained comparisons such as `1 < 2 < 3` are explicitly rejected in v0 rather than given Python-style semantics.
 
 The prose above is authoritative for intent; parser tests are authoritative for exact currently accepted edge cases while the language remains experimental.
 
@@ -95,15 +121,16 @@ The prose above is authoritative for intent; parser tests are authoritative for 
 
 Two parser APIs exist:
 
-- `parse()` preserves the original fail-fast behavior.
+- `parse()` preserves fail-fast behavior.
 - `parse_recovering()` is used by the CLI and benchmark frontend.
 
 The recovery parser:
 
 - reports multiple independent syntax errors in source order;
 - caps diagnostics at 8;
-- synchronizes primarily at newline, `end`, and EOF;
-- preserves repeat/nested-repeat block boundaries to avoid fake unmatched-`end` cascades;
+- synchronizes primarily at newline, `else`, `end`, and EOF;
+- preserves nested `repeat`/`if` block boundaries to avoid fake unmatched-`end` or unmatched-`else` cascades;
+- uses forced progress guards for malformed input that would otherwise stall;
 - never sends an error-bearing partial AST into semantic lowering.
 
 Both parser and lexer recovery paths have deterministic mutation-corpus coverage in normal CI.
@@ -142,35 +169,41 @@ let mut __evo_x = 1;
 __evo_x = (__evo_x + 1);
 ```
 
-The user does not write `mut` in this v0 surface. Mutability is inferred only for locals that are actually reassigned.
+The user does not write `mut` in this v0 surface. Mutability is inferred only for locals that are actually reassigned, including reassignments inside `repeat` and `if` branches.
 
 Current restrictions:
 
 - reading a local before its first definition is rejected by lowering;
 - reassigning an existing local with a different current value type is rejected;
-- a new local cannot currently be introduced inside a `repeat` block;
-- repeat bodies operate on already-defined outer locals;
+- a new local cannot currently be introduced inside any `repeat` or `if` control-flow block;
+- control-flow bodies operate on already-defined outer locals;
 - lexical shadowing/block-local scope semantics are not implemented yet.
 
-The no-new-local-inside-repeat rule avoids exposing a local after a zero-iteration loop without definite-initialization semantics. It is a current limitation, not a long-term language goal.
+The no-new-local-inside-control-flow rule avoids exposing maybe-uninitialized locals after zero-iteration loops or conditionally skipped branches without definite-initialization semantics. It is a current limitation, not a long-term language goal.
 
 ## Current value types
 
-The semantic layer currently recognizes two value categories:
+The semantic layer currently recognizes three value categories:
 
 - integer (`i64`);
-- string.
+- string;
+- boolean.
 
 Rules implemented today:
 
 - unary `-` requires an integer operand;
 - `+`, `-`, `*`, and `/` require integer operands;
 - repeat counts must be integer expressions;
+- `if` conditions must be boolean expressions;
+- `==` and `!=` require operands of the same current value type and support integer, string, and boolean values;
+- `<`, `<=`, `>`, and `>=` are integer-only;
+- comparison expressions produce booleans;
+- no truthiness or implicit integer-to-boolean coercion exists;
 - no implicit numeric widening or coercion exists;
 - no dynamic type system is introduced;
 - type-changing reassignment is rejected.
 
-String concatenation or other string operators are not currently implemented.
+String concatenation or other string arithmetic operators are not currently implemented.
 
 ## `input_int`
 
@@ -220,7 +253,44 @@ Current semantics:
 - one executes it once;
 - a negative count executes the body zero times because the generated `0..negative` range is empty;
 - nested repeats are supported;
+- `repeat` may contain `if`, and `if` may contain `repeat`;
 - repeat lowering itself adds no heap allocation, boxing, or dynamic dispatch.
+
+## `if` / `else`
+
+`if condition ... else ... end` is strict boolean control flow. There is no `then`, colon, brace, or truthiness requirement in the Evolution surface.
+
+Example:
+
+```text
+value = input_int
+if value > 0
+    print value
+else
+    print -value
+end
+```
+
+Current generated Rust shape:
+
+```rust
+let __evo_value = __evo_input_int();
+if (__evo_value > 0) {
+    println!("{}", __evo_value);
+} else {
+    println!("{}", (-__evo_value));
+}
+```
+
+Current semantics:
+
+- condition must lower to boolean;
+- `else` is optional;
+- nested `if` is supported;
+- `if` and `repeat` may nest in either direction;
+- assignments to existing outer locals are allowed and participate in inferred mutability;
+- introducing new branch-local locals is rejected in v0;
+- lowering is direct Rust control flow with no hidden allocation, boxing, or dynamic dispatch.
 
 ## Print semantics
 
@@ -234,7 +304,7 @@ currently lowers to:
 println!("{}", expression);
 ```
 
-This uses Rust display formatting and writes one trailing newline. It is bootstrap I/O behavior, not a final general-purpose I/O design.
+Integers, strings, and booleans therefore use Rust display formatting and one trailing newline. This is bootstrap I/O behavior, not a final general-purpose I/O design.
 
 ## Identifier lowering
 
@@ -249,6 +319,26 @@ print type
 
 can lower safely even though `type` has special meaning in Rust, because the generated local is `__evo_type`.
 
+## Formatter
+
+The CLI provides:
+
+```text
+evo fmt file.evo
+evo fmt file.evo --check
+```
+
+The formatter operates on lexed/parsed Evolution source rather than generated Rust. It currently normalizes:
+
+- assignment/arithmetic/comparison spacing;
+- `repeat` indentation;
+- `if` / `else` / `end` indentation;
+- unary-minus spacing;
+- comments and raw string spelling;
+- final newline behavior.
+
+Formatting is required to be idempotent. `--check` does not rewrite the file and fails when the source is not canonical.
+
 ## Source-native diagnostics
 
 Lexer, parser, and semantic-lowering diagnostics are rendered against the original `.evo` source with:
@@ -261,6 +351,8 @@ Lexer, parser, and semantic-lowering diagnostics are rendered against the origin
 
 The renderer is deterministic and ANSI-free so CI output and snapshots remain stable. It handles UTF-8 byte offsets without treating bytes as display columns.
 
+Multiple recovered lexer or parser errors are rendered in source order. Lexical errors stop the pipeline before parsing; parser errors stop the pipeline before lowering/rustc.
+
 ## Generated Rust source mapping
 
 Rust code generation can return sidecar metadata mapping generated Rust lines back to Evolution `Span` values.
@@ -269,7 +361,8 @@ Current mapping policy:
 
 - generated `let`, reassignment, and `print` lines map to their Evolution statement span;
 - repeat opening and closing lines map to the repeat statement span;
-- nested repeat body lines retain their own statement spans;
+- `if` opening, `else` transition, and closing lines map to the owning `if` statement span;
+- nested control-flow body lines retain their own statement spans;
 - generated `input_int` helper lines are intentionally unmapped;
 - generated `fn main` wrapper lines are intentionally unmapped;
 - unknown generated lines return no mapping.
@@ -301,16 +394,23 @@ Correctness must match before performance evidence is valid. See:
 - GitHub issue #4 for the living invariant;
 - GitHub issue #5 for benchmark infrastructure.
 
-The `runtime-repeat-v0` case is an enforced Ubuntu CI gate. The harness compares correctness, timing, normalized LLVM IR, binary size, and exact executable bytes. Byte-identical executables after correctness PASS are treated as deterministic runtime parity evidence; non-identical binaries remain subject to the strict timing gate.
+Two runtime-dependent cases are currently enforced on Ubuntu CI:
+
+- `runtime-repeat-v0`, covering runtime input/repeat/reassignment lowering;
+- `control-flow-branch-v0`, covering runtime-dependent comparisons, branches, reassignment, and inferred mutability.
+
+The harness compares correctness, timing, normalized LLVM IR, binary size, and exact executable bytes. Byte-identical executables after correctness PASS are treated as deterministic runtime parity evidence; non-identical binaries remain subject to the strict stable timing gate.
+
+The accepted control-flow case uses a 20,000,000-iteration loop-carried recurrence rather than the first trivial alternating-sign draft. The trivial draft was rejected as credible branch-heavy evidence after optimization made it suspiciously cheap. The hardened case retains runtime-dependent state and passed both timing and exact-codegen parity in the acceptance CI run for #31.
 
 ## Current explicit non-features
 
 The following are not implemented yet:
 
 - functions and closures;
-- booleans;
-- comparison/equality operators;
-- `if` / `else` conditionals;
+- logical `and` / `or` / `not` operators;
+- truthiness or implicit integer-to-boolean coercion;
+- chained-comparison semantics;
 - explicit type annotations;
 - user-defined records/structs;
 - enums/sum types;
@@ -325,6 +425,7 @@ The following are not implemented yet:
 - FFI syntax;
 - modules/packages;
 - user-defined block-local bindings;
+- definite-initialization/branch-merge semantics for new locals;
 - a stable language specification.
 
 These omissions are deliberate. A smaller language with tested semantics is preferable to a larger syntax surface whose costs and safety rules are imaginary.
