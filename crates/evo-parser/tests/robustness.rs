@@ -94,11 +94,17 @@ fn mutated_sources_preserve_parser_safety_and_api_consistency() {
 
         match (fail_fast, recovering) {
             (Ok(expected), Ok(actual)) => {
-                assert_eq!(actual, expected, "parser APIs disagree on valid input\n{context}");
+                assert_eq!(
+                    actual, expected,
+                    "parser APIs disagree on valid input\n{context}"
+                );
             }
             (Err(_), Err(errors)) => {
                 parser_error_cases += 1;
-                assert!(!errors.is_empty(), "recovery returned an empty error set\n{context}");
+                assert!(
+                    !errors.is_empty(),
+                    "recovery returned an empty error set\n{context}"
+                );
                 assert!(
                     errors.len() <= RECOVERY_ERROR_CAP,
                     "recovery exceeded the {RECOVERY_ERROR_CAP}-error cap: {} errors\n{context}",
