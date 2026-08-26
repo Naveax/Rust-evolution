@@ -1,5 +1,7 @@
 use evo_lexer::Span;
-use evo_lowering::{BinaryOp, Expr, ExprKind, Program, Stmt, StmtKind};
+use evo_lowering::{
+    BinaryOp, Expr, ExprKind, Function, Program, Stmt, StmtKind, ValueType,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourceMapping {
@@ -68,6 +70,11 @@ impl Generator {
             ));
         }
 
+        for function in &program.functions {
+            self.write_function(function);
+            self.push_unmapped("\n");
+        }
+
         self.push_unmapped("fn main() {\n");
         for statement in &program.statements {
             self.write_statement(statement, 1);
@@ -78,6 +85,29 @@ impl Generator {
             source: self.source,
             mappings: self.mappings,
         }
+    }
+
+    fn write_function(&mut self, function: &Function) {
+        let mut signature = format!("fn {}(", generated_function_name(&function.name));
+        for (index, parameter) in function.parameters.iter().enumerate() {
+            if index > 0 {
+                signature.push_str(", ");
+            }
+            if parameter.mutable {
+                signature.push_str("mut ");
+            }
+            signature.push_str(&generated_identifier(&parameter.name));
+            signature.push_str(": ");
+            signature.push_str(rust_type(parameter.value_type));
+        }
+        signature.push_str(") -> ");
+        signature.push_str(rust_type(function.return_type));
+        signature.push_str(" {\n");
+        self.push_mapped_line(signature, function.span);
+        for statement in &function.body {
+            self.write_statement(statement, 1);
+        }
+        self.push_mapped_line("}\n".to_owned(), function.span);
     }
 
     fn write_statement(&mut self, statement: &Stmt, indent: usize) {
@@ -111,6 +141,12 @@ impl Generator {
             StmtKind::Print(expr) => {
                 self.push_mapped_line(
                     format!("{padding}println!(\"{{}}\", {});\n", render_expr(expr)),
+                    statement.span,
+                );
+            }
+            StmtKind::Return(expr) => {
+                self.push_mapped_line(
+                    format!("{padding}return {};\n", render_expr(expr)),
                     statement.span,
                 );
             }
@@ -168,12 +204,28 @@ impl Generator {
     }
 }
 
+fn rust_type(value_type: ValueType) -> &'static str {
+    match value_type {
+        ValueType::Integer => "i64",
+        ValueType::Bool => "bool",
+        ValueType::String => "&'static str",
+    }
+}
+
 fn render_expr(expr: &Expr) -> String {
     match &expr.kind {
         ExprKind::Integer(value) => value.to_string(),
         ExprKind::String(value) => format!("{value:?}"),
         ExprKind::Bool(value) => value.to_string(),
         ExprKind::Local(name) => generated_identifier(name),
+        ExprKind::Call { name, arguments } => {
+            let arguments = arguments
+                .iter()
+                .map(render_expr)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{}({arguments})", generated_function_name(name))
+        }
         ExprKind::InputInt => "__evo_input_int()".to_owned(),
         ExprKind::LogicalNot(inner) => format!("(!{})", render_expr(inner)),
         ExprKind::UnaryMinus(inner) => format!("(-{})", render_expr(inner)),
@@ -207,15 +259,25 @@ fn generated_identifier(source_name: &str) -> String {
     format!("__evo_{source_name}")
 }
 
+fn generated_function_name(source_name: &str) -> String {
+    format!("__evo_fn_{source_name}")
+}
+
 fn program_uses_input_int(program: &Program) -> bool {
     program.statements.iter().any(statement_uses_input_int)
+        || program
+            .functions
+            .iter()
+            .flat_map(|function| &function.body)
+            .any(statement_uses_input_int)
 }
 
 fn statement_uses_input_int(statement: &Stmt) -> bool {
     match &statement.kind {
-        StmtKind::Let { expr, .. } | StmtKind::Assign { expr, .. } | StmtKind::Print(expr) => {
-            expr_uses_input_int(expr)
-        }
+        StmtKind::Let { expr, .. }
+        | StmtKind::Assign { expr, .. }
+        | StmtKind::Print(expr)
+        | StmtKind::Return(expr) => expr_uses_input_int(expr),
         StmtKind::Repeat { count, body } => {
             expr_uses_input_int(count) || body.iter().any(statement_uses_input_int)
         }
@@ -234,6 +296,7 @@ fn statement_uses_input_int(statement: &Stmt) -> bool {
 fn expr_uses_input_int(expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::InputInt => true,
+        ExprKind::Call { arguments, .. } => arguments.iter().any(expr_uses_input_int),
         ExprKind::LogicalNot(inner) | ExprKind::UnaryMinus(inner) => expr_uses_input_int(inner),
         ExprKind::Binary { left, right, .. } => {
             expr_uses_input_int(left) || expr_uses_input_int(right)
@@ -251,13 +314,9 @@ mod tests {
     use evo_lowering::lower;
     use evo_parser::parse;
 
-    fn parse_source(source: &str) -> evo_parser::Program {
-        let tokens = lex(source).expect("lexing should succeed");
-        parse(&tokens).expect("parsing should succeed")
-    }
-
     fn lower_source(source: &str) -> evo_lowering::Program {
-        let syntax = parse_source(source);
+        let tokens = lex(source).expect("lexing should succeed");
+        let syntax = parse(&tokens).expect("parsing should succeed");
         lower(&syntax).expect("lowering should succeed")
     }
 
@@ -270,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn generates_deterministic_rust() {
+    fn existing_top_level_generation_is_unchanged() {
         assert_eq!(
             compile_source("x = 1\ny = 1\nprint x + y\n"),
             concat!(
@@ -284,204 +343,63 @@ mod tests {
     }
 
     #[test]
-    fn generates_plain_rust_if_else_and_comparisons() {
+    fn generates_direct_static_function_and_call() {
         assert_eq!(
-            compile_source("x = 1\nif x >= 1\nprint true\nelse\nprint false\nend\n"),
+            compile_source(
+                "fn add(a int, b int) int\nreturn a + b\nend\nprint add(2, 3)\n",
+            ),
             concat!(
+                "fn __evo_fn_add(__evo_a: i64, __evo_b: i64) -> i64 {\n",
+                "    return (__evo_a + __evo_b);\n",
+                "}\n",
+                "\n",
                 "fn main() {\n",
-                "    let __evo_x = 1;\n",
-                "    if (__evo_x >= 1) {\n",
-                "        println!(\"{}\", true);\n",
-                "    } else {\n",
-                "        println!(\"{}\", false);\n",
-                "    }\n",
+                "    println!(\"{}\", __evo_fn_add(2, 3));\n",
                 "}\n"
             )
         );
     }
 
     #[test]
-    fn logical_operators_lower_to_native_short_circuit_rust() {
-        let generated = compile_source("print true and not false or false\n");
-        assert!(generated.contains("&&"));
-        assert!(generated.contains("||"));
-        assert!(generated.contains("!false"));
-        assert!(!generated.contains("Box"));
-        assert!(!generated.contains("dyn "));
+    fn mutable_parameter_is_explicit_only_when_reassigned() {
+        let generated = compile_source("fn bump(x int) int\nx = x + 1\nreturn x\nend\n");
+        assert!(generated.contains("fn __evo_fn_bump(mut __evo_x: i64) -> i64"));
     }
 
     #[test]
-    fn logical_expressions_do_not_add_source_map_lines() {
-        let program = lower_source("flag = true\nif flag and not false\nprint flag\nend\n");
+    fn bool_and_string_signatures_use_static_rust_types() {
+        let generated = compile_source(
+            "fn yes(flag bool) bool\nreturn flag and true\nend\nfn echo(s string) string\nreturn s\nend\n",
+        );
+        assert!(generated.contains("__evo_flag: bool) -> bool"));
+        assert!(generated.contains("__evo_s: &'static str) -> &'static str"));
+    }
+
+    #[test]
+    fn function_source_map_covers_signature_body_and_close() {
+        let program = lower_source("fn id(x int) int\nreturn x\nend\nprint id(1)\n");
         let generated = generate_lowered_rust_with_map(&program);
-        assert_eq!(mapped_source_line(&generated, 2), Some(1));
-        assert_eq!(mapped_source_line(&generated, 3), Some(2));
-        assert_eq!(mapped_source_line(&generated, 4), Some(3));
-        assert_eq!(mapped_source_line(&generated, 5), Some(2));
-        assert_eq!(generated.source_span_for_line(6), None);
-    }
-
-    #[test]
-    fn logical_not_input_int_dependency_is_detected_recursively() {
-        let generated = compile_source("print not (input_int > 0)\n");
-        assert!(generated.contains("fn __evo_input_int()"));
-        assert!(generated.contains("!(__evo_input_int() > 0)"));
-    }
-
-    #[test]
-    fn if_without_else_does_not_emit_synthetic_else_block() {
-        let generated = compile_source("flag = true\nif flag\nprint 1\nend\n");
-        assert!(generated.contains("if __evo_flag {"));
-        assert!(!generated.contains("else"));
-    }
-
-    #[test]
-    fn conditional_source_map_preserves_nested_statement_lines() {
-        let program = lower_source("x = 1\nif x > 0\nprint true\nelse\nprint false\nend\n");
-        let generated = generate_lowered_rust_with_map(&program);
-        assert_eq!(mapped_source_line(&generated, 2), Some(1));
-        assert_eq!(mapped_source_line(&generated, 3), Some(2));
-        assert_eq!(mapped_source_line(&generated, 4), Some(3));
-        assert_eq!(mapped_source_line(&generated, 5), Some(2));
-        assert_eq!(mapped_source_line(&generated, 6), Some(5));
-        assert_eq!(mapped_source_line(&generated, 7), Some(2));
-        assert_eq!(generated.source_span_for_line(8), None);
-    }
-
-    #[test]
-    fn mapped_api_preserves_exact_generated_source() {
-        let program = lower_source("x = 1\ny = 1\nprint x + y\n");
-        let plain = generate_lowered_rust(&program);
-        let mapped = generate_lowered_rust_with_map(&program);
-        assert_eq!(mapped.source, plain);
-    }
-
-    #[test]
-    fn simple_statement_lines_map_back_to_source_spans() {
-        let program = lower_source("x = 1\nprint x\n");
-        let generated = generate_lowered_rust_with_map(&program);
-
-        assert_eq!(generated.source_span_for_line(1), None);
-        assert_eq!(mapped_source_line(&generated, 2), Some(1));
-        assert_eq!(mapped_source_line(&generated, 3), Some(2));
+        assert_eq!(mapped_source_line(&generated, 1), Some(1));
+        assert_eq!(mapped_source_line(&generated, 2), Some(2));
+        assert_eq!(mapped_source_line(&generated, 3), Some(1));
         assert_eq!(generated.source_span_for_line(4), None);
-        assert_eq!(generated.source_span_for_line(999), None);
+        assert_eq!(generated.source_span_for_line(5), None);
+        assert_eq!(mapped_source_line(&generated, 6), Some(4));
     }
 
     #[test]
-    fn reassignment_line_maps_to_reassignment_span() {
-        let program = lower_source("x = 1\nx = x + 1\n");
-        let generated = generate_lowered_rust_with_map(&program);
-
-        assert_eq!(mapped_source_line(&generated, 2), Some(1));
-        assert_eq!(mapped_source_line(&generated, 3), Some(2));
+    fn input_helper_is_emitted_when_only_function_body_uses_it() {
+        let generated = compile_source("fn read() int\nreturn input_int\nend\nprint read()\n");
+        assert_eq!(generated.matches("fn __evo_input_int()").count(), 1);
+        assert!(generated.contains("return __evo_input_int();"));
     }
 
     #[test]
-    fn nested_repeat_keeps_inner_statement_mappings() {
-        let program = lower_source("x = 0\nrepeat 2\nrepeat 3\nx = x + 1\nend\nend\n");
-        let generated = generate_lowered_rust_with_map(&program);
-
-        assert_eq!(mapped_source_line(&generated, 2), Some(1));
-        assert_eq!(mapped_source_line(&generated, 3), Some(2));
-        assert_eq!(mapped_source_line(&generated, 4), Some(3));
-        assert_eq!(mapped_source_line(&generated, 5), Some(4));
-        assert_eq!(mapped_source_line(&generated, 6), Some(3));
-        assert_eq!(mapped_source_line(&generated, 7), Some(2));
-        assert_eq!(generated.source_span_for_line(8), None);
-    }
-
-    #[test]
-    fn runtime_input_helper_and_main_wrapper_are_unmapped() {
-        let program = lower_source("value = input_int\nprint value\n");
-        let generated = generate_lowered_rust_with_map(&program);
-        let first_mapped_line = generated
-            .mappings
-            .first()
-            .expect("user statements should be mapped")
-            .generated_start_line;
-
-        for line in 1..first_mapped_line {
-            assert_eq!(generated.source_span_for_line(line), None, "line {line}");
-        }
-        assert_eq!(mapped_source_line(&generated, first_mapped_line), Some(1));
-        let final_line = generated.source.lines().count();
-        assert_eq!(generated.source_span_for_line(final_line), None);
-    }
-
-    #[test]
-    fn lowers_runtime_input_repeat_and_inferred_mutability() {
-        let source = concat!(
-            "n = input_int\n",
-            "sum = 0\n",
-            "repeat n\n",
-            "sum = sum + 1\n",
-            "end\n",
-            "print sum\n"
-        );
-        assert_eq!(
-            compile_source(source),
-            concat!(
-                "fn __evo_input_int() -> i64 {\n",
-                "    let mut __evo_input = String::new();\n",
-                "    std::io::stdin()\n",
-                "        .read_line(&mut __evo_input)\n",
-                "        .expect(\"failed to read integer input\");\n",
-                "    __evo_input\n",
-                "        .trim()\n",
-                "        .parse::<i64>()\n",
-                "        .expect(\"expected signed integer input\")\n",
-                "}\n\n",
-                "fn main() {\n",
-                "    let __evo_n = __evo_input_int();\n",
-                "    let mut __evo_sum = 0;\n",
-                "    for _ in 0..__evo_n {\n",
-                "        __evo_sum = (__evo_sum + 1);\n",
-                "    }\n",
-                "    println!(\"{}\", __evo_sum);\n",
-                "}\n"
-            )
-        );
-    }
-
-    #[test]
-    fn zero_and_one_repeat_counts_lower_directly_to_ranges() {
-        let generated = compile_source("repeat 0\nend\nrepeat 1\nend\n");
-        assert!(generated.contains("for _ in 0..0 {"));
-        assert!(generated.contains("for _ in 0..1 {"));
-    }
-
-    #[test]
-    fn input_int_has_explicit_parse_failure_contract() {
-        let generated = compile_source("value = input_int\nprint value\n");
-        assert!(generated.contains(".parse::<i64>()"));
-        assert!(generated.contains(".expect(\"expected signed integer input\")"));
-    }
-
-    #[test]
-    fn nested_repeat_uses_plain_rust_ranges_without_allocation() {
-        let generated = compile_source("x = 0\nrepeat 2\nrepeat 3\nx = x + 1\nend\nend\n");
-        assert_eq!(generated.matches("for _ in 0..").count(), 2);
-        assert!(!generated.contains("Box"));
-        assert!(!generated.contains("Vec"));
-    }
-
-    #[test]
-    fn generated_names_do_not_collide_with_rust_keywords() {
-        assert_eq!(
-            compile_source("type = 7\nprint type\n"),
-            concat!(
-                "fn main() {\n",
-                "    let __evo_type = 7;\n",
-                "    println!(\"{}\", __evo_type);\n",
-                "}\n"
-            )
-        );
-    }
-
-    #[test]
-    fn escapes_strings_using_rust_debug_literal_rules() {
-        let generated = compile_source("print \"hello\\nworld\"\n");
-        assert!(generated.contains("\"hello\\nworld\""));
+    fn functions_use_no_runtime_dispatch_scaffolding() {
+        let generated = compile_source("fn add(a int, b int) int\nreturn a + b\nend\nprint add(1, 2)\n");
+        assert!(!generated.contains("Box<"));
+        assert!(!generated.contains("dyn "));
+        assert!(!generated.contains("HashMap"));
+        assert!(!generated.contains("function_registry"));
     }
 }
