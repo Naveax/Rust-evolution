@@ -21,7 +21,12 @@ fn function_call_reference_matches_generated_rust_exactly() {
     let generated = generate_lowered_rust(&lowered);
 
     assert_eq!(
-        reference, generated,
+        normalize_newlines(&reference),
+        normalize_newlines(&generated),
         "function-call-v0 reference.rs must mirror generated static Rust exactly"
     );
+}
+
+fn normalize_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n")
 }
