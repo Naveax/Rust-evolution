@@ -19,9 +19,11 @@ A current program can look like:
 ```text
 fn step(x int) int
     if x > 1 and not (x == 7)
-        return x / 2
+        local = x / 2
+        return local
     else
-        return x + 3
+        local = x + 3
+        return local
     end
 end
 
@@ -29,8 +31,9 @@ n = input_int
 x = input_int
 sum = 0
 repeat n
-    x = step(x)
-    sum = sum + x
+    temp = step(x)
+    x = temp
+    sum = sum + temp
 end
 print sum
 ```
@@ -216,13 +219,72 @@ __evo_x = (__evo_x + 1);
 
 The user does not write `mut` in v0. Mutability is inferred only for locals or function parameters that are actually reassigned.
 
-Current restrictions:
+Current semantic rules:
 
 - use before first definition is rejected;
 - type-changing reassignment is rejected;
-- new locals cannot currently be introduced inside `repeat` or `if` blocks;
-- control-flow bodies operate on already-defined outer locals;
-- lexical shadowing/block-local scope semantics are not implemented yet.
+- a first assignment creates a binding in the current lexical scope only when no binding with that name is visible in the current or parent scopes;
+- assignment to a visible binding remains reassignment, not shadowing;
+- `if` then/else bodies and `repeat` bodies create lexical child scopes;
+- child scopes may read visible parent bindings while the parent scope is active;
+- child-local bindings disappear when their block closes;
+- sibling branches are independent scopes and may each define a local with the same source name;
+- same-name sibling locals do not merge into an outer binding after `end`;
+- a zero-iteration `repeat` never exposes a loop-local outside the loop;
+- arbitrary same-name shadowing of an already-visible binding is not a v0 feature.
+
+### Lexical block locals v0
+
+No new user syntax is required. The existing assignment form remains syntax-neutral:
+
+```text
+x = 10
+if x > 0
+    doubled = x * 2
+    print doubled
+end
+```
+
+`doubled` is created in the `if` child scope. It is valid in nested child blocks while that scope is active and is rejected after the matching `end`.
+
+Sibling branches have independent local scopes:
+
+```text
+if flag
+    temp = 1
+    print temp
+else
+    temp = 2
+    print temp
+end
+```
+
+The two `temp` declarations are independent. Neither exists after `end`, and no implicit branch result, phi value, promotion, or merge is created.
+
+A visible outer name is reassigned rather than shadowed:
+
+```text
+x = 1
+if true
+    x = 2
+end
+```
+
+Conceptually this lowers to an outer mutable Rust binding plus a normal assignment in the child block.
+
+`repeat` locals use ordinary Rust loop-body scope semantics:
+
+```text
+repeat n
+    temp = x + 1
+    temp = temp + 1
+    x = temp
+end
+```
+
+`temp` is recreated per loop iteration, can become `mut` if reassigned in the body, and is unavailable after the loop. `x` remains an outer reassignment.
+
+Block-local lowering is compile-time semantic scope tracking only. Generated Rust contains ordinary lexical `let`/assignment statements; no runtime scope object, `HashMap` lookup, boxing, reference counting, or dynamic dispatch is introduced for scoping.
 
 ## Current value types
 
@@ -301,10 +363,11 @@ The signature pre-pass does not create dynamic dispatch. It is compile-time sema
 
 ### Function-local scope
 
-Each function body gets an independent local binding environment.
+Each function body gets an independent root binding scope.
 
-- parameters enter the local scope before body lowering;
+- parameters enter the function root scope before body lowering;
 - function-local first assignments create local bindings;
+- nested `if`/`else`/`repeat` bodies use the same lexical child-scope model described above;
 - reassignment uses the existing same-type/inferred-mutability policy;
 - mutable parameters are marked `mut` only when reassigned;
 - top-level locals are not captured by functions;
@@ -322,9 +385,11 @@ Examples:
 ```text
 fn choose(flag bool) int
     if flag
-        return 1
+        result = 1
+        return result
     else
-        return 2
+        result = 2
+        return result
     end
 end
 ```
@@ -426,7 +491,8 @@ The helper is emitted only when needed, including when only a function body need
 
 ```text
 repeat n
-    x = x + 1
+    temp = x + 1
+    x = temp
 end
 ```
 
@@ -434,11 +500,12 @@ becomes the equivalent shape:
 
 ```rust
 for _ in 0..__evo_n {
-    __evo_x = (__evo_x + 1);
+    let __evo_temp = (__evo_x + 1);
+    __evo_x = __evo_temp;
 }
 ```
 
-Zero and negative counts execute zero iterations under current Rust range semantics. Nested repeats and repeat/if composition are supported. Repeat lowering adds no helper runtime or allocation.
+Zero and negative counts execute zero iterations under current Rust range semantics. A binding first created in the repeat body exists only for that iteration and is unavailable after `end`. Nested repeats and repeat/if composition are supported. Repeat lowering adds no helper runtime or allocation.
 
 ## `if` / `else`
 
@@ -449,13 +516,15 @@ Example:
 ```text
 value = input_int
 if value > 0 and not (value == 7)
-    print value
+    shown = value
+    print shown
 else
-    print -value
+    shown = -value
+    print shown
 end
 ```
 
-Assignments to existing outer locals are allowed and participate in inferred mutability. New branch-local locals are rejected in v0.
+Each branch is an independent lexical child scope. A first assignment to a name that is not already visible creates a branch-local binding. Same-name branch locals do not merge or become visible after `end`. Assignments to existing visible outer locals remain reassignment and participate in inferred mutability.
 
 ## Print semantics
 
@@ -489,7 +558,8 @@ Canonical formatting currently normalizes:
 - assignment/arithmetic/comparison spacing;
 - `and` / `or` spacing;
 - `not` keyword spacing;
-- `repeat` and `if`/`else` indentation;
+- `repeat` and `if`/`else` indentation, including block-local bindings;
+- nested block-local indentation;
 - function signature spacing;
 - function parameter and call-argument comma spacing;
 - function body indentation;
@@ -498,11 +568,17 @@ Canonical formatting currently normalizes:
 - comments and raw string spelling;
 - final newline behavior.
 
-Function example:
+Function/block-local example:
 
 ```text
 fn add(a int, b int) int
-    return a + b
+    if a > 0
+        result = a + b
+        return result
+    else
+        result = b
+        return result
+    end
 end
 
 print add(1, 2)
@@ -518,12 +594,16 @@ The renderer is deterministic and ANSI-free. Recovered lexer/parser errors are d
 
 Function-specific semantic errors such as duplicate names, unknown calls, arity/type mismatches, illegal capture, and missing return paths are reported against Evolution source spans.
 
+Block-scope semantic errors such as reading a local after its defining block closes are also reported against the original Evolution source. Type-changing reassignment to a visible outer or block-local binding remains a semantic error under the same source-native diagnostic path.
+
 ## Generated Rust source mapping
 
 Codegen returns optional sidecar generated-line to Evolution `Span` metadata.
 
 - `let`, reassignment, `print`, and `return` lines map to their statement spans;
+- block-local declarations and reassignments keep their own source statement spans;
 - repeat/if structural generated lines map to the owning statement span;
+- sibling block-local declarations map independently even when they use the same source identifier;
 - function signature and closing lines map to the owning function span;
 - nested function-body statements retain their own spans;
 - function call expressions stay on the owning generated statement line;
@@ -555,7 +635,8 @@ Runtime-dependent Ubuntu CI gates include:
 - `runtime-repeat-v0` for input/repeat/reassignment;
 - `control-flow-branch-v0` for comparisons/branches/mutability;
 - `logical-operators-v0` for `and`/`or`/`not` inside runtime-dependent control flow;
-- `function-call-v0` for typed named functions and direct static calls inside a runtime-dependent loop.
+- `function-call-v0` for typed named functions and direct static calls inside a runtime-dependent loop;
+- `block-locals-v0` for sibling branch-local declarations, block-local reads, and outer reassignment inside a runtime-dependent loop.
 
 The harness compares correctness, raw timing, normalized LLVM IR, binary size, and exact executable bytes. Exact byte-identical binaries after correctness PASS are deterministic runtime parity evidence. Non-identical binaries remain subject to the strict stable timing gate `T_evolution / T_reference <= 1.00`; unstable timing is INCONCLUSIVE.
 
@@ -569,7 +650,19 @@ For `function-call-v0`, the Rust reference is locked by regression test to the f
 - final verdict: PASS;
 - verdict basis: `byte-identical-binary-parity`.
 
-The observed timing ratio is still reported even when identical binaries make runtime parity deterministic; scheduler noise is not promoted into a fictitious codegen regression.
+For `block-locals-v0`, the Rust reference is likewise locked to ordinary generated Rust. The accepted Ubuntu evidence showed:
+
+- differential correctness: PASS;
+- stable measurement: true;
+- normalized LLVM IR equality: true;
+- exact executable equality: true;
+- binary size: 2,267,072 bytes on both sides;
+- observed median ratio: 1.001008999;
+- timing-only verdict: FAIL;
+- final verdict: PASS;
+- verdict basis: `byte-identical-binary-parity`.
+
+The timing-only value remains visible even when identical binaries make runtime parity deterministic; scheduler noise is not promoted into a fictitious codegen regression.
 
 ## Current explicit non-features
 
@@ -596,8 +689,9 @@ Not implemented yet:
 - async/concurrency syntax;
 - FFI syntax;
 - modules/packages;
-- user-defined block-local bindings;
-- definite-initialization/branch-merge semantics for new locals;
+- branch-result values or automatic promotion/merge of block locals into an outer scope;
+- arbitrary same-name shadowing of an already-visible local;
+- definite-initialization/phi semantics for conditionally created outer values;
 - a stable language specification.
 
 These omissions are deliberate. A small language with measured semantics beats a large syntax brochure whose costs exist mostly in imagination.
