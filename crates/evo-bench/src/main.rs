@@ -226,11 +226,7 @@ fn run_case(case_dir: &Path, output_dir: &Path, config: CaseConfig) -> Result<Ru
     })
 }
 
-fn render_parse_errors(
-    path: &Path,
-    source: &str,
-    errors: &[evo_parser::ParseError],
-) -> String {
+fn render_parse_errors(path: &Path, source: &str, errors: &[evo_parser::ParseError]) -> String {
     errors
         .iter()
         .map(|error| render_error(path, source, &error.message, error.span))
