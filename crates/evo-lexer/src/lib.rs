@@ -3,6 +3,8 @@ use std::fmt;
 use std::iter::Peekable;
 use std::str::CharIndices;
 
+const MAX_RECOVERED_ERRORS: usize = 8;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
     pub start: usize,
@@ -69,6 +71,10 @@ impl Error for LexError {}
 
 pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
     Lexer::new(source).lex_all()
+}
+
+pub fn lex_recovering(source: &str) -> Result<Vec<Token>, Vec<LexError>> {
+    Lexer::new(source).lex_all_recovering()
 }
 
 struct Lexer<'a> {
@@ -149,6 +155,86 @@ impl<'a> Lexer<'a> {
         Ok(tokens)
     }
 
+    fn lex_all_recovering(mut self) -> Result<Vec<Token>, Vec<LexError>> {
+        let mut tokens = Vec::new();
+        let mut errors = Vec::new();
+
+        while let Some((byte, ch)) = self.peek() {
+            let line = self.line;
+            let column = self.column;
+            match ch {
+                ' ' | '\t' | '\r' => {
+                    let _ = self.bump();
+                }
+                '\n' => {
+                    let _ = self.bump();
+                    tokens.push(Token {
+                        kind: TokenKind::Newline,
+                        span: Span {
+                            start: byte,
+                            end: byte + 1,
+                            line,
+                            column,
+                        },
+                    });
+                }
+                '#' => self.skip_comment(),
+                '+' => tokens.push(self.single(TokenKind::Plus)),
+                '-' => tokens.push(self.single(TokenKind::Minus)),
+                '*' => tokens.push(self.single(TokenKind::Star)),
+                '/' => tokens.push(self.single(TokenKind::Slash)),
+                '=' => tokens.push(self.single(TokenKind::Equal)),
+                '(' => tokens.push(self.single(TokenKind::LParen)),
+                ')' => tokens.push(self.single(TokenKind::RParen)),
+                '"' => match self.lex_string() {
+                    Ok(token) => tokens.push(token),
+                    Err(error) => {
+                        errors.push(error);
+                        self.synchronize_string_recovery();
+                    }
+                },
+                c if c.is_ascii_digit() => match self.lex_number() {
+                    Ok(token) => tokens.push(token),
+                    Err(error) => errors.push(error),
+                },
+                c if is_ident_start(c) => tokens.push(self.lex_identifier()),
+                _ => {
+                    let end = byte + ch.len_utf8();
+                    errors.push(LexError {
+                        message: format!("unexpected character {ch:?}"),
+                        span: Span {
+                            start: byte,
+                            end,
+                            line,
+                            column,
+                        },
+                    });
+                    let _ = self.bump();
+                }
+            }
+
+            if errors.len() >= MAX_RECOVERED_ERRORS {
+                return Err(errors);
+            }
+        }
+
+        if errors.is_empty() {
+            let end = self.source.len();
+            tokens.push(Token {
+                kind: TokenKind::Eof,
+                span: Span {
+                    start: end,
+                    end,
+                    line: self.line,
+                    column: self.column,
+                },
+            });
+            Ok(tokens)
+        } else {
+            Err(errors)
+        }
+    }
+
     fn peek(&mut self) -> Option<(usize, char)> {
         self.chars.peek().copied()
     }
@@ -185,6 +271,27 @@ impl<'a> Lexer<'a> {
                 break;
             }
             let _ = self.bump();
+        }
+    }
+
+    fn synchronize_string_recovery(&mut self) {
+        while let Some((_, ch)) = self.peek() {
+            match ch {
+                '\n' => break,
+                '"' => {
+                    let _ = self.bump();
+                    break;
+                }
+                '\\' => {
+                    let _ = self.bump();
+                    if matches!(self.peek(), Some((_, next)) if next != '\n') {
+                        let _ = self.bump();
+                    }
+                }
+                _ => {
+                    let _ = self.bump();
+                }
+            }
         }
     }
 
@@ -328,7 +435,7 @@ const fn is_ident_continue(ch: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{TokenKind, lex};
+    use super::{MAX_RECOVERED_ERRORS, TokenKind, lex, lex_recovering};
 
     #[test]
     fn tokenizes_basic_script() {
@@ -388,5 +495,82 @@ mod tests {
         let error = lex("print @").expect_err("unknown character should fail");
         assert_eq!(error.span.line, 1);
         assert_eq!(error.span.column, 7);
+    }
+
+    #[test]
+    fn recovering_lexer_matches_fail_fast_tokens_on_valid_input() {
+        let source = "# comment\nn = input_int\nrepeat n\nprint \"hello\\nworld\"\nend\n";
+        assert_eq!(
+            lex_recovering(source).expect("recovery lexing should succeed"),
+            lex(source).expect("fail-fast lexing should succeed")
+        );
+    }
+
+    #[test]
+    fn recovering_lexer_reports_multiple_unknown_characters_in_order() {
+        let errors = lex_recovering("print @\nprint $\n")
+            .expect_err("multiple unknown characters should fail");
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0].span.line, 1);
+        assert_eq!(errors[0].span.column, 7);
+        assert_eq!(errors[1].span.line, 2);
+        assert_eq!(errors[1].span.column, 7);
+    }
+
+    #[test]
+    fn unsupported_escape_synchronizes_to_string_end_and_continues() {
+        let errors = lex_recovering("print \"bad\\q rest\"\nprint @\n")
+            .expect_err("unsupported escape should recover");
+        assert_eq!(errors.len(), 2);
+        assert!(errors[0].message.contains("unsupported escape"));
+        assert_eq!(errors[0].span.line, 1);
+        assert!(errors[1].message.contains("unexpected character"));
+        assert_eq!(errors[1].span.line, 2);
+        assert_eq!(errors[1].span.column, 7);
+    }
+
+    #[test]
+    fn unterminated_string_preserves_newline_and_continues() {
+        let errors = lex_recovering("print \"bad\nprint @\n")
+            .expect_err("unterminated string should recover at newline");
+        assert_eq!(errors.len(), 2);
+        assert!(errors[0].message.contains("unterminated string"));
+        assert_eq!(errors[0].span.line, 1);
+        assert_eq!(errors[1].span.line, 2);
+        assert_eq!(errors[1].span.column, 7);
+    }
+
+    #[test]
+    fn integer_overflow_consumes_literal_and_continues() {
+        let errors = lex_recovering("999999999999999999999999999999\nprint @\n")
+            .expect_err("overflowing integer should recover");
+        assert_eq!(errors.len(), 2);
+        assert!(errors[0].message.contains("out of range"));
+        assert_eq!(errors[0].span.line, 1);
+        assert_eq!(errors[1].span.line, 2);
+        assert_eq!(errors[1].span.column, 7);
+    }
+
+    #[test]
+    fn recovering_lexer_caps_diagnostics() {
+        let source = "@\n".repeat(MAX_RECOVERED_ERRORS + 4);
+        let errors = lex_recovering(&source).expect_err("unknown characters should fail");
+        assert_eq!(errors.len(), MAX_RECOVERED_ERRORS);
+        assert_eq!(errors.first().expect("first error").span.line, 1);
+        assert_eq!(
+            errors.last().expect("last error").span.line,
+            MAX_RECOVERED_ERRORS
+        );
+    }
+
+    #[test]
+    fn unknown_unicode_scalar_makes_progress_by_scalar_not_byte() {
+        let errors = lex_recovering("@☃\n").expect_err("unknown characters should fail");
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0].span.start, 0);
+        assert_eq!(errors[0].span.end, 1);
+        assert_eq!(errors[1].span.start, 1);
+        assert_eq!(errors[1].span.end, 4);
+        assert_eq!(errors[1].span.column, 2);
     }
 }
