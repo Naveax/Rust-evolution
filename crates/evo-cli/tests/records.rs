@@ -61,5 +61,8 @@ fn build_stops_before_rustc_for_parsed_records() {
     assert!(!output.status.success());
     assert!(stderr.contains("Records v0 semantic lowering"), "{stderr}");
     assert!(!stderr.contains("rustc failed"), "{stderr}");
-    assert!(!binary_exists, "record source must not reach native compilation");
+    assert!(
+        !binary_exists,
+        "record source must not reach native compilation"
+    );
 }
