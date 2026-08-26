@@ -2,9 +2,9 @@
 
 Status: **experimental, deliberately small, not stable**.
 
-This document describes behavior implemented on `main`. Future ideas belong in `docs/LANGUAGE_DESIGN.md` and tracking issues until code, tests, diagnostics, and performance evidence exist for them.
+This document describes the frontend behavior intended on `main` after accepted PRs merge. Future ideas belong in `docs/LANGUAGE_DESIGN.md` and tracking issues until code, tests, diagnostics, and performance evidence exist for them.
 
-The current implementation establishes a complete source-to-native pipeline while keeping the user-facing surface intentionally small:
+The implementation pipeline is:
 
 `Evolution source -> lexer -> parser -> semantic lowering -> Rust codegen -> rustc -> native binary`
 
@@ -12,7 +12,7 @@ There is no VM and no mandatory standalone runtime.
 
 ## Design direction
 
-The long-term surface is inspired by Lua minimalism, Python readability/rapid expression, and Rust safety/performance/systems semantics. It does not mechanically combine those grammars.
+The surface borrows Lua-style low ceremony, Python-style readability, and Rust-style strict semantics/native compilation. It does not copy the three grammars mechanically.
 
 A current program can look like:
 
@@ -21,7 +21,7 @@ n = input_int
 x = input_int
 sum = 0
 repeat n
-    if x > 1
+    if x > 1 and not (x == 7) or x < -10
         x = x / 2
     else
         x = x + 3
@@ -36,17 +36,18 @@ The frontend lowers this to ordinary Rust constructs and native code.
 ## Lexical rules
 
 - Source is UTF-8.
-- Identifiers are currently ASCII letters/underscore followed by ASCII letters/digits/underscore.
-- Non-ASCII source text is valid UTF-8, but non-ASCII identifier characters are not currently identifier characters.
-- `#` starts a comment through the end of the line.
+- Identifiers are ASCII letters/underscore followed by ASCII letters/digits/underscore.
+- `#` starts a comment through end of line.
 - Newline is a structural statement terminator.
 - Integer literals target `i64`.
 - String literals use double quotes.
 - Supported string escapes are `\n`, `\r`, `\t`, `\"`, and `\\`.
 - Arithmetic/assignment/grouping operators are `+`, `-`, `*`, `/`, `=`, `(`, and `)`.
 - Comparison operators are `==`, `!=`, `<`, `<=`, `>`, and `>=`.
-- Current keywords are `print`, `repeat`, `if`, `else`, `end`, `true`, `false`, and `input_int`.
-- A lone `!` is not an operator and produces a deterministic lexical error requiring `=` after it.
+- Logical operators are keyword operators `and`, `or`, and `not`.
+- Current keywords are `print`, `repeat`, `if`, `else`, `end`, `true`, `false`, `input_int`, `and`, `or`, and `not`.
+- Keyword matching respects identifier boundaries. Names such as `android`, `origin`, and `notice` remain identifiers.
+- A lone `!` is not a logical-not operator. `not` is the user-facing logical negation keyword.
 
 ### Lexical diagnostics
 
@@ -55,22 +56,11 @@ Two lexer APIs exist:
 - `lex()` is the fail-fast compatibility API.
 - `lex_recovering()` is the user-facing recovery path used by the CLI and benchmark frontend.
 
-On valid source both APIs produce exactly the same token stream. On malformed source the recovery API reports source-ordered lexical errors with a deterministic maximum of 8 errors.
-
-Current recovery boundaries are deliberately conservative:
-
-- an unknown Unicode scalar is consumed as one scalar and lexing continues;
-- an overflowing integer literal is consumed as one full numeric literal before continuing;
-- an unterminated string at newline leaves the newline available as a structural boundary;
-- an unsupported escape synchronizes to a closing quote or newline;
-- a lone `!` consumes the offending scalar and recovery continues;
-- EOF inside a string/escape terminates recovery cleanly.
+On valid source both APIs produce the same token stream. On malformed source recovery reports source-ordered errors with a deterministic maximum of 8 diagnostics.
 
 Malformed lexical input is not passed to the parser.
 
 ## Grammar v0
-
-The implemented grammar can be summarized as:
 
 ```text
 program          := NEWLINE* (statement (NEWLINE+ | EOF) NEWLINE*)* EOF
@@ -88,7 +78,10 @@ if_statement     := "if" expression NEWLINE+ block
                     "end"
 block            := (NEWLINE* statement (NEWLINE+ | EOF))* NEWLINE*
 
-expression       := comparison
+expression       := logical_or
+logical_or       := logical_and ("or" logical_and)*
+logical_and      := logical_not ("and" logical_not)*
+logical_not      := "not" logical_not | comparison
 comparison       := additive (comparison_operator additive)?
 comparison_operator := "==" | "!=" | "<" | "<=" | ">" | ">="
 additive         := multiplicative (("+" | "-") multiplicative)*
@@ -103,113 +96,165 @@ primary          := INTEGER
                   | "(" expression ")"
 ```
 
-`repeat` and `if` blocks may be nested in each other. `if` may omit `else`. A top-level unmatched `end` or `else` is an error. Reaching EOF before a required block `end` is an error.
+`repeat` and `if` blocks may nest in either direction. `if` may omit `else`. Top-level unmatched `end`/`else` and missing required `end` are errors.
 
-Comparison precedence is lower than arithmetic, so:
+### Expression precedence
+
+From lowest to highest:
+
+1. `or`
+2. `and`
+3. `not`
+4. comparisons
+5. `+` / `-`
+6. `*` / `/`
+7. unary numeric `-`
+8. primary/grouping
+
+Therefore:
 
 ```text
-print 1 + 2 * 3 == 7
+not value > 0
 ```
 
-parses as `(1 + (2 * 3)) == 7`.
+means:
 
-Chained comparisons such as `1 < 2 < 3` are explicitly rejected in v0 rather than given Python-style semantics.
+```text
+not (value > 0)
+```
 
-The prose above is authoritative for intent; parser tests are authoritative for exact currently accepted edge cases while the language remains experimental.
+and:
+
+```text
+a > 0 and b > 0 or c > 0
+```
+
+means:
+
+```text
+((a > 0) and (b > 0)) or (c > 0)
+```
+
+`not` is recursive, so `not not true` is valid.
+
+Comparison precedence remains below arithmetic. Chained comparisons such as `1 < 2 < 3` are explicitly rejected rather than given Python-style semantics.
 
 ## Parser diagnostics and recovery
 
-Two parser APIs exist:
-
 - `parse()` preserves fail-fast behavior.
-- `parse_recovering()` is used by the CLI and benchmark frontend.
-
-The recovery parser:
-
-- reports multiple independent syntax errors in source order;
-- caps diagnostics at 8;
-- synchronizes primarily at newline, `else`, `end`, and EOF;
-- preserves nested `repeat`/`if` block boundaries to avoid fake unmatched-`end` or unmatched-`else` cascades;
-- uses forced progress guards for malformed input that would otherwise stall;
-- never sends an error-bearing partial AST into semantic lowering.
-
-Both parser and lexer recovery paths have deterministic mutation-corpus coverage in normal CI.
+- `parse_recovering()` is used by user-facing paths.
+- Recovery reports independent syntax errors in source order, capped at 8.
+- Main synchronization boundaries are newline, `else`, `end`, and EOF.
+- Nested `repeat`/`if` boundaries are preserved to avoid fake cascade errors.
+- An error-bearing partial AST is never sent to lowering.
 
 ## Semantic lowering
 
-Parsing does not decide whether `name = expression` is a declaration or a reassignment. That decision belongs to semantic lowering.
+Parsing keeps `name = expression` syntax-neutral. Lowering decides first definition versus reassignment.
 
-### First definition
-
-The first top-level assignment to a local defines it:
-
-```text
-x = 1
-```
-
-Current lowering:
-
-```rust
-let __evo_x = 1;
-```
-
-### Reassignment and inferred mutability
-
-A later assignment to the same local is a reassignment if the value type matches:
+### First definition and reassignment
 
 ```text
 x = 1
 x = x + 1
 ```
 
-Current lowering marks the original local mutable automatically:
+lowers conceptually to:
 
 ```rust
 let mut __evo_x = 1;
 __evo_x = (__evo_x + 1);
 ```
 
-The user does not write `mut` in this v0 surface. Mutability is inferred only for locals that are actually reassigned, including reassignments inside `repeat` and `if` branches.
+The user does not write `mut` in v0. Mutability is inferred only for locals that are actually reassigned.
 
 Current restrictions:
 
-- reading a local before its first definition is rejected by lowering;
-- reassigning an existing local with a different current value type is rejected;
-- a new local cannot currently be introduced inside any `repeat` or `if` control-flow block;
+- use before first definition is rejected;
+- type-changing reassignment is rejected;
+- new locals cannot currently be introduced inside `repeat` or `if` blocks;
 - control-flow bodies operate on already-defined outer locals;
 - lexical shadowing/block-local scope semantics are not implemented yet.
 
-The no-new-local-inside-control-flow rule avoids exposing maybe-uninitialized locals after zero-iteration loops or conditionally skipped branches without definite-initialization semantics. It is a current limitation, not a long-term language goal.
-
 ## Current value types
 
-The semantic layer currently recognizes three value categories:
+The semantic layer recognizes:
 
 - integer (`i64`);
 - string;
 - boolean.
 
-Rules implemented today:
+Rules:
 
-- unary `-` requires an integer operand;
-- `+`, `-`, `*`, and `/` require integer operands;
-- repeat counts must be integer expressions;
-- `if` conditions must be boolean expressions;
-- `==` and `!=` require operands of the same current value type and support integer, string, and boolean values;
-- `<`, `<=`, `>`, and `>=` are integer-only;
-- comparison expressions produce booleans;
-- no truthiness or implicit integer-to-boolean coercion exists;
-- no implicit numeric widening or coercion exists;
-- no dynamic type system is introduced;
-- type-changing reassignment is rejected.
+- unary `-` requires integer;
+- arithmetic `+ - * /` requires integer operands;
+- repeat counts require integer;
+- `if` conditions require boolean;
+- `==` / `!=` require operands of the same current value type;
+- ordering `< <= > >=` is integer-only;
+- comparisons produce boolean;
+- `and` / `or` require boolean operands and produce boolean;
+- `not` requires one boolean operand and produces boolean;
+- there is no truthiness;
+- there is no implicit integer/string-to-boolean conversion;
+- there is no dynamic type layer hidden behind logical syntax.
 
-String concatenation or other string arithmetic operators are not currently implemented.
+Examples rejected by lowering:
+
+```text
+print 1 and true
+print true or 1
+print not 1
+print "text" and false
+```
+
+## Logical operators
+
+### `and`
+
+```text
+left and right
+```
+
+uses strict boolean short-circuit semantics. If `left` is false, `right` is not evaluated.
+
+Direct Rust target:
+
+```rust
+left && right
+```
+
+### `or`
+
+```text
+left or right
+```
+
+uses strict boolean short-circuit semantics. If `left` is true, `right` is not evaluated.
+
+Direct Rust target:
+
+```rust
+left || right
+```
+
+### `not`
+
+```text
+not value
+```
+
+negates one boolean value and lowers directly to Rust `!`.
+
+There is no runtime helper for `and`, `or`, or `not`. Accepted lowering must not add allocations, clones, boxing, dynamic dispatch, reference counting, or eager RHS evaluation.
+
+The process-level short-circuit corpus uses `input_int` as an observable side effect: expressions such as `false and input_int > 0` and `true or input_int > 0` must not consume stdin, while `true and ...` and `false or ...` must evaluate the RHS.
 
 ## `input_int`
 
-`input_int` is a built-in primary expression that reads one line from standard input and parses a signed `i64`.
+`input_int` reads one line from standard input and parses signed `i64`.
 
-Conceptually, generated Rust uses:
+Generated Rust helper shape:
 
 ```rust
 fn __evo_input_int() -> i64 {
@@ -224,13 +269,11 @@ fn __evo_input_int() -> i64 {
 }
 ```
 
-The helper is emitted only when a program uses `input_int`.
-
-Current error semantics are explicit but intentionally simple: read failure or invalid integer input causes the generated program to fail through the shown `expect` contract. The subprocess corpus verifies valid zero/one/positive/negative input and invalid-input failure behavior.
+The helper is emitted only when needed. Invalid input fails through the explicit parse contract; subprocess tests cover valid and invalid cases.
 
 ## `repeat`
 
-`repeat count ... end` evaluates an integer repeat count and lowers directly to a Rust range loop:
+`repeat count ... end` lowers directly to a Rust range loop:
 
 ```text
 repeat n
@@ -246,51 +289,24 @@ for _ in 0..__evo_n {
 }
 ```
 
-Current semantics:
-
-- the count must be an integer;
-- zero executes the body zero times;
-- one executes it once;
-- a negative count executes the body zero times because the generated `0..negative` range is empty;
-- nested repeats are supported;
-- `repeat` may contain `if`, and `if` may contain `repeat`;
-- repeat lowering itself adds no heap allocation, boxing, or dynamic dispatch.
+Zero and negative counts execute zero iterations under current Rust range semantics. Nested repeats and repeat/if composition are supported. Repeat lowering adds no helper runtime or allocation.
 
 ## `if` / `else`
 
-`if condition ... else ... end` is strict boolean control flow. There is no `then`, colon, brace, or truthiness requirement in the Evolution surface.
+`if condition ... else ... end` is strict boolean control flow. No truthiness is accepted.
 
 Example:
 
 ```text
 value = input_int
-if value > 0
+if value > 0 and not (value == 7)
     print value
 else
     print -value
 end
 ```
 
-Current generated Rust shape:
-
-```rust
-let __evo_value = __evo_input_int();
-if (__evo_value > 0) {
-    println!("{}", __evo_value);
-} else {
-    println!("{}", (-__evo_value));
-}
-```
-
-Current semantics:
-
-- condition must lower to boolean;
-- `else` is optional;
-- nested `if` is supported;
-- `if` and `repeat` may nest in either direction;
-- assignments to existing outer locals are allowed and participate in inferred mutability;
-- introducing new branch-local locals is rejected in v0;
-- lowering is direct Rust control flow with no hidden allocation, boxing, or dynamic dispatch.
+Assignments to existing outer locals are allowed and participate in inferred mutability. New branch-local locals are rejected in v0.
 
 ## Print semantics
 
@@ -298,26 +314,17 @@ Current semantics:
 print expression
 ```
 
-currently lowers to:
+lowers to Rust display output with one newline:
 
 ```rust
 println!("{}", expression);
 ```
 
-Integers, strings, and booleans therefore use Rust display formatting and one trailing newline. This is bootstrap I/O behavior, not a final general-purpose I/O design.
+Integers, strings, and booleans are currently printable.
 
 ## Identifier lowering
 
-Evolution locals lower to generated Rust identifiers prefixed with `__evo_`.
-
-Example:
-
-```text
-type = 7
-print type
-```
-
-can lower safely even though `type` has special meaning in Rust, because the generated local is `__evo_type`.
+Evolution locals are prefixed with `__evo_` in generated Rust. This avoids direct collisions with Rust keywords.
 
 ## Formatter
 
@@ -328,88 +335,74 @@ evo fmt file.evo
 evo fmt file.evo --check
 ```
 
-The formatter operates on lexed/parsed Evolution source rather than generated Rust. It currently normalizes:
+Canonical formatting currently normalizes:
 
 - assignment/arithmetic/comparison spacing;
-- `repeat` indentation;
-- `if` / `else` / `end` indentation;
+- `and` / `or` spacing;
+- `not` keyword spacing;
+- `repeat` and `if`/`else` indentation;
 - unary-minus spacing;
 - comments and raw string spelling;
 - final newline behavior.
 
-Formatting is required to be idempotent. `--check` does not rewrite the file and fails when the source is not canonical.
+Logical example:
+
+```text
+if value > 0 and not (limit == 0) or false
+```
+
+Formatting is idempotent. `--check` does not rewrite and fails when source is not canonical.
 
 ## Source-native diagnostics
 
-Lexer, parser, and semantic-lowering diagnostics are rendered against the original `.evo` source with:
+Lexer, parser, and semantic-lowering diagnostics render against the original `.evo` source with message, path, line/column, source line, and caret/range underline.
 
-- error message;
-- source path;
-- one-based line/column;
-- source line;
-- caret/range underline.
-
-The renderer is deterministic and ANSI-free so CI output and snapshots remain stable. It handles UTF-8 byte offsets without treating bytes as display columns.
-
-Multiple recovered lexer or parser errors are rendered in source order. Lexical errors stop the pipeline before parsing; parser errors stop the pipeline before lowering/rustc.
+The renderer is deterministic and ANSI-free. Recovered lexer/parser errors are displayed in source order. Parser errors prevent lowering/rustc.
 
 ## Generated Rust source mapping
 
-Rust code generation can return sidecar metadata mapping generated Rust lines back to Evolution `Span` values.
+Codegen returns optional sidecar generated-line to Evolution `Span` metadata.
 
-Current mapping policy:
+- `let`, reassignment, and `print` lines map to their statement spans;
+- repeat/if structural generated lines map to the owning statement span;
+- nested body statements retain their own spans;
+- helper/wrapper lines remain intentionally unmapped;
+- logical expressions remain on the owning statement line and therefore do not create synthetic source-map lines.
 
-- generated `let`, reassignment, and `print` lines map to their Evolution statement span;
-- repeat opening and closing lines map to the repeat statement span;
-- `if` opening, `else` transition, and closing lines map to the owning `if` statement span;
-- nested control-flow body lines retain their own statement spans;
-- generated `input_int` helper lines are intentionally unmapped;
-- generated `fn main` wrapper lines are intentionally unmapped;
-- unknown generated lines return no mapping.
-
-The source map is metadata only. It does not inject comments or directives into generated Rust, so mapped and plain code generation produce the same Rust source bytes.
+Source-map metadata does not alter generated Rust bytes.
 
 ## rustc diagnostic remapping
 
-`evo build` and `evo run` compile generated Rust with rustc. When rustc reports an error on a generated line that has source-map metadata, the CLI presents the primary error on the corresponding Evolution source statement rather than making the temporary generated `main.rs` the main user-facing location.
+`evo build` and `evo run` map rustc errors from generated lines back to Evolution statement spans when mapping exists. Unmapped helper/wrapper/internal failures preserve raw rustc stderr rather than dropping detail.
 
-Unmapped helper/wrapper/internal compiler errors retain raw rustc stderr as a fallback instead of discarding diagnostic detail.
-
-The current source map is line/statement-granular. Generated-column to Evolution-subexpression mapping is not implemented yet.
+Column-level generated-subexpression mapping is not implemented yet.
 
 ## Native compilation and performance contract
 
 Accepted programs compile through rustc to native binaries.
 
-The project performance rule remains:
+The hard rule remains:
 
 ```text
 T_evolution <= T_reference_rust
 ```
 
-Correctness must match before performance evidence is valid. See:
+Correctness must match first. See `docs/PERFORMANCE_CONTRACT.md`, `docs/BENCHMARKING.md`, issue #4, and issue #5.
 
-- `docs/PERFORMANCE_CONTRACT.md`;
-- `docs/BENCHMARKING.md`;
-- GitHub issue #4 for the living invariant;
-- GitHub issue #5 for benchmark infrastructure.
+Runtime-dependent Ubuntu CI gates include:
 
-Two runtime-dependent cases are currently enforced on Ubuntu CI:
+- `runtime-repeat-v0` for input/repeat/reassignment;
+- `control-flow-branch-v0` for comparisons/branches/mutability;
+- `logical-operators-v0` for `and`/`or`/`not` inside runtime-dependent control flow.
 
-- `runtime-repeat-v0`, covering runtime input/repeat/reassignment lowering;
-- `control-flow-branch-v0`, covering runtime-dependent comparisons, branches, reassignment, and inferred mutability.
-
-The harness compares correctness, timing, normalized LLVM IR, binary size, and exact executable bytes. Byte-identical executables after correctness PASS are treated as deterministic runtime parity evidence; non-identical binaries remain subject to the strict stable timing gate.
-
-The accepted control-flow case uses a 20,000,000-iteration loop-carried recurrence rather than the first trivial alternating-sign draft. The trivial draft was rejected as credible branch-heavy evidence after optimization made it suspiciously cheap. The hardened case retains runtime-dependent state and passed both timing and exact-codegen parity in the acceptance CI run for #31.
+The harness compares correctness, raw timing, normalized LLVM IR, binary size, and exact executable bytes. Exact byte-identical binaries after correctness PASS are deterministic runtime parity evidence. Non-identical binaries remain subject to the strict stable timing gate `T_evolution / T_reference <= 1.00`; unstable timing is INCONCLUSIVE.
 
 ## Current explicit non-features
 
-The following are not implemented yet:
+Not implemented yet:
 
 - functions and closures;
-- logical `and` / `or` / `not` operators;
-- truthiness or implicit integer-to-boolean coercion;
+- truthiness or implicit boolean coercion;
 - chained-comparison semantics;
 - explicit type annotations;
 - user-defined records/structs;
@@ -428,7 +421,7 @@ The following are not implemented yet:
 - definite-initialization/branch-merge semantics for new locals;
 - a stable language specification.
 
-These omissions are deliberate. A smaller language with tested semantics is preferable to a larger syntax surface whose costs and safety rules are imaginary.
+These omissions are deliberate. A small language with measured semantics beats a large syntax brochure whose costs exist mostly in imagination.
 
 ## Acceptance rule for future syntax
 
@@ -436,11 +429,12 @@ Every new construct must define:
 
 1. exact semantics;
 2. equivalent idiomatic Rust;
-3. generated Rust snapshot expectations;
+3. generated Rust expectations;
 4. correctness tests;
 5. safety implications;
 6. hidden allocation/clone/boxing/dispatch impact;
 7. source diagnostic behavior;
-8. runtime comparison under the project performance contract when applicable.
+8. formatter behavior when syntax is user-facing;
+9. runtime comparison under the project performance contract when applicable.
 
-A repeatable runtime regression against equivalent Rust is not accepted as a successful default feature merely because the syntax is shorter.
+A repeatable runtime regression against equivalent Rust is not accepted merely because the syntax is shorter.

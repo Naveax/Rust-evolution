@@ -55,6 +55,7 @@ pub enum ExprKind {
     Bool(bool),
     Local(String),
     InputInt,
+    LogicalNot(Box<Expr>),
     UnaryMinus(Box<Expr>),
     Binary {
         left: Box<Expr>,
@@ -230,6 +231,16 @@ impl Analyzer {
                 (ExprKind::Local(name.clone()), binding.value_type)
             }
             SyntaxExprKind::InputInt => (ExprKind::InputInt, ValueType::Integer),
+            SyntaxExprKind::LogicalNot(inner) => {
+                let (inner, inner_type) = self.lower_expr(inner)?;
+                if inner_type != ValueType::Bool {
+                    return Err(LowerError {
+                        message: "logical 'not' requires a boolean operand".to_owned(),
+                        span: expr.span,
+                    });
+                }
+                (ExprKind::LogicalNot(Box::new(inner)), ValueType::Bool)
+            }
             SyntaxExprKind::UnaryMinus(inner) => {
                 let (inner, inner_type) = self.lower_expr(inner)?;
                 if inner_type != ValueType::Integer {
@@ -270,6 +281,16 @@ impl Analyzer {
                         if left_type != ValueType::Integer || right_type != ValueType::Integer {
                             return Err(LowerError {
                                 message: "ordering operators require integer operands".to_owned(),
+                                span: expr.span,
+                            });
+                        }
+                        ValueType::Bool
+                    }
+                    BinaryOp::And | BinaryOp::Or => {
+                        if left_type != ValueType::Bool || right_type != ValueType::Bool {
+                            return Err(LowerError {
+                                message: "logical 'and'/'or' operators require boolean operands"
+                                    .to_owned(),
                                 span: expr.span,
                             });
                         }
@@ -319,7 +340,7 @@ impl Analyzer {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExprKind, StmtKind, lower};
+    use super::{BinaryOp, ExprKind, StmtKind, lower};
     use evo_lexer::lex;
     use evo_parser::parse;
 
@@ -383,6 +404,58 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn lowers_strict_logical_operators_to_boolean_ir() {
+        let program = lower_source("print true and not false or false\n")
+            .expect("boolean logical operators should lower");
+        let StmtKind::Print(expr) = &program.statements[0].kind else {
+            panic!("expected print statement");
+        };
+        let ExprKind::Binary {
+            left,
+            op: BinaryOp::Or,
+            ..
+        } = &expr.kind
+        else {
+            panic!("expected outer or");
+        };
+        let ExprKind::Binary {
+            right,
+            op: BinaryOp::And,
+            ..
+        } = &left.kind
+        else {
+            panic!("expected inner and");
+        };
+        assert!(matches!(&right.kind, ExprKind::LogicalNot(_)));
+    }
+
+    #[test]
+    fn rejects_non_boolean_and_or_operands() {
+        for source in [
+            "print 1 and true\n",
+            "print true or 1\n",
+            "print \"x\" and false\n",
+        ] {
+            let error = lower_source(source).expect_err("non-boolean logical operand should fail");
+            assert!(error.message.contains("require boolean operands"));
+        }
+    }
+
+    #[test]
+    fn rejects_non_boolean_not_operand() {
+        for source in ["print not 1\n", "print not \"x\"\n"] {
+            let error = lower_source(source).expect_err("non-boolean not operand should fail");
+            assert!(error.message.contains("logical 'not' requires a boolean"));
+        }
+    }
+
+    #[test]
+    fn logical_comparison_composition_is_boolean() {
+        lower_source("x = 1\ny = 2\nif not x > y or x == 1 and y > 0\nprint true\nend\n")
+            .expect("comparison/logical composition should lower");
     }
 
     #[test]
