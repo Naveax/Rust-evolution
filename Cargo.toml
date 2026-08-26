@@ -5,6 +5,7 @@ members = [
     "crates/evo-lowering",
     "crates/evo-codegen-rust",
     "crates/evo-diagnostics",
+    "crates/evo-formatter",
     "crates/evo-bench",
     "crates/evo-cli",
 ]
