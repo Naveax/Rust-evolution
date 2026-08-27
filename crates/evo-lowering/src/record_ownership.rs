@@ -71,18 +71,44 @@ impl MoveTracker {
     }
 
     pub(crate) fn merge_if(&mut self, then_exit: &Self, else_exit: &Self) {
-        for (name, binding) in &mut self.bindings {
-            let then_binding = then_exit
-                .bindings
-                .get(name)
-                .expect("branch trackers are forked from the same visible bindings");
-            let else_binding = else_exit
-                .bindings
-                .get(name)
-                .expect("branch trackers are forked from the same visible bindings");
-            debug_assert_eq!(binding.value_type, then_binding.value_type);
-            debug_assert_eq!(binding.value_type, else_binding.value_type);
-            binding.available = then_binding.available && else_binding.available;
+        let has_continuation = self.merge_if_continuing(Some(then_exit), Some(else_exit));
+        debug_assert!(has_continuation);
+    }
+
+    pub(crate) fn merge_if_continuing(
+        &mut self,
+        then_exit: Option<&Self>,
+        else_exit: Option<&Self>,
+    ) -> bool {
+        match (then_exit, else_exit) {
+            (None, None) => false,
+            (Some(exit), None) | (None, Some(exit)) => {
+                for (name, binding) in &mut self.bindings {
+                    let exit_binding = exit
+                        .bindings
+                        .get(name)
+                        .expect("branch tracker is forked from the same visible bindings");
+                    debug_assert_eq!(binding.value_type, exit_binding.value_type);
+                    binding.available = exit_binding.available;
+                }
+                true
+            }
+            (Some(then_exit), Some(else_exit)) => {
+                for (name, binding) in &mut self.bindings {
+                    let then_binding = then_exit
+                        .bindings
+                        .get(name)
+                        .expect("branch trackers are forked from the same visible bindings");
+                    let else_binding = else_exit
+                        .bindings
+                        .get(name)
+                        .expect("branch trackers are forked from the same visible bindings");
+                    debug_assert_eq!(binding.value_type, then_binding.value_type);
+                    debug_assert_eq!(binding.value_type, else_binding.value_type);
+                    binding.available = then_binding.available && else_binding.available;
+                }
+                true
+            }
         }
     }
 
@@ -210,6 +236,47 @@ mod tests {
             .consume_value("point", span(3))
             .expect_err("move on either branch must make merged value unavailable");
         assert!(error.message.contains("moved record local"));
+    }
+
+    #[test]
+    fn if_merge_ignores_terminal_branch_state() {
+        let mut entry = MoveTracker::default();
+        entry.define("point".to_owned(), SemanticType::Record("Point".to_owned()));
+
+        let mut terminal_then = entry.clone();
+        terminal_then
+            .consume_value("point", span(2))
+            .expect("terminal branch may consume point before returning");
+        let continuing_else = entry.clone();
+
+        assert!(entry.merge_if_continuing(None, Some(&continuing_else)));
+        entry
+            .consume_value("point", span(3))
+            .expect("terminal branch must not poison continuing state");
+    }
+
+    #[test]
+    fn if_merge_preserves_move_on_only_continuing_branch() {
+        let mut entry = MoveTracker::default();
+        entry.define("point".to_owned(), SemanticType::Record("Point".to_owned()));
+
+        let mut continuing_then = entry.clone();
+        continuing_then
+            .consume_value("point", span(2))
+            .expect("continuing branch moves point");
+
+        assert!(entry.merge_if_continuing(Some(&continuing_then), None));
+        let error = entry
+            .consume_value("point", span(3))
+            .expect_err("move on the only continuing branch must remain visible");
+        assert!(error.message.contains("moved record local"));
+    }
+
+    #[test]
+    fn if_merge_reports_no_state_when_both_branches_terminate() {
+        let mut entry = MoveTracker::default();
+        entry.define("point".to_owned(), SemanticType::Record("Point".to_owned()));
+        assert!(!entry.merge_if_continuing(None, None));
     }
 
     #[test]
