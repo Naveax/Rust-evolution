@@ -33,11 +33,7 @@ impl MoveTracker {
         debug_assert!(removed.is_some());
     }
 
-    pub(crate) fn inspect_value(
-        &self,
-        name: &str,
-        span: Span,
-    ) -> Result<SemanticType, LowerError> {
+    pub(crate) fn inspect_value(&self, name: &str, span: Span) -> Result<SemanticType, LowerError> {
         let binding = self.bindings.get(name).ok_or_else(|| LowerError {
             message: format!("use of local {name:?} before definition or outside its scope"),
             span,
