@@ -301,9 +301,9 @@ fn expr_uses_input_int(expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::InputInt => true,
         ExprKind::Call { arguments, .. } => arguments.iter().any(expr_uses_input_int),
-        ExprKind::Construct { fields, .. } => fields
-            .iter()
-            .any(|field| expr_uses_input_int(&field.value)),
+        ExprKind::Construct { fields, .. } => {
+            fields.iter().any(|field| expr_uses_input_int(&field.value))
+        }
         ExprKind::FieldAccess { base, .. } => expr_uses_input_int(base),
         ExprKind::LogicalNot(inner) | ExprKind::UnaryMinus(inner) => expr_uses_input_int(inner),
         ExprKind::Binary { left, right, .. } => {

@@ -163,11 +163,7 @@ pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
     let signatures = collect_function_signatures(&program.functions, &record_environment)?;
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
-        functions.push(lower_function(
-            function,
-            &signatures,
-            &record_environment,
-        )?);
+        functions.push(lower_function(function, &signatures, &record_environment)?);
     }
 
     let mut top_level = Analyzer::new(&signatures, None, &record_environment);
@@ -203,13 +199,13 @@ fn collect_function_signatures(
                     span: parameter.span,
                 });
             }
-            let parameter_type = record_environment
-                .resolve_type_name(&parameter.type_name, parameter.span)?;
+            let parameter_type =
+                record_environment.resolve_type_name(&parameter.type_name, parameter.span)?;
             parameter_types.push(lowered_value_type(&parameter_type));
         }
 
-        let return_type = record_environment
-            .resolve_type_name(&function.return_type, function.span)?;
+        let return_type =
+            record_environment.resolve_type_name(&function.return_type, function.span)?;
         signatures.insert(
             function.name.clone(),
             FunctionSignature {
@@ -230,11 +226,7 @@ fn lower_function(
         .get(&function.name)
         .expect("function signatures are collected before lowering bodies");
     let return_type = signature.return_type.clone();
-    let mut analyzer = Analyzer::new(
-        signatures,
-        Some(return_type.clone()),
-        record_environment,
-    );
+    let mut analyzer = Analyzer::new(signatures, Some(return_type.clone()), record_environment);
     let mut parameters = Vec::with_capacity(function.parameters.len());
 
     for (parameter, parameter_type) in function.parameters.iter().zip(&signature.parameter_types) {
@@ -331,8 +323,7 @@ fn type_label(value_type: &ValueType) -> &str {
 }
 
 fn record_valued_field_access(expr: &Expr, value_type: &ValueType) -> bool {
-    matches!(value_type, ValueType::Record(_))
-        && matches!(&expr.kind, ExprKind::FieldAccess { .. })
+    matches!(value_type, ValueType::Record(_)) && matches!(&expr.kind, ExprKind::FieldAccess { .. })
 }
 
 struct Analyzer<'a> {
@@ -517,12 +508,7 @@ impl<'a> Analyzer<'a> {
                 (ExprKind::Local(name.clone()), binding.value_type)
             }
             SyntaxExprKind::Call { name, arguments } => {
-                match resolve_call_name(
-                    self.record_environment,
-                    name,
-                    arguments.len(),
-                    expr.span,
-                )? {
+                match resolve_call_name(self.record_environment, name, arguments.len(), expr.span)? {
                     CallNameResolution::ZeroFieldRecordConstructor => (
                         ExprKind::Construct {
                             name: name.clone(),
@@ -531,13 +517,13 @@ impl<'a> Analyzer<'a> {
                         ValueType::Record(name.clone()),
                     ),
                     CallNameResolution::Function => {
-                        let signature = self
-                            .function_signatures
-                            .get(name)
-                            .ok_or_else(|| LowerError {
-                                message: format!("unknown function {name:?}"),
-                                span: expr.span,
-                            })?;
+                        let signature =
+                            self.function_signatures
+                                .get(name)
+                                .ok_or_else(|| LowerError {
+                                    message: format!("unknown function {name:?}"),
+                                    span: expr.span,
+                                })?;
                         if arguments.len() != signature.parameter_types.len() {
                             return Err(LowerError {
                                 message: format!(
@@ -859,10 +845,8 @@ mod tests {
 
     #[test]
     fn resolves_zero_field_record_call_to_constructor() {
-        let program = lower_source(
-            "record Marker\nend\nfn make() Marker\nreturn Marker()\nend\n",
-        )
-        .expect("zero-field record call should lower as constructor");
+        let program = lower_source("record Marker\nend\nfn make() Marker\nreturn Marker()\nend\n")
+            .expect("zero-field record call should lower as constructor");
         let StmtKind::Return(expr) = &program.functions[0].body[0].kind else {
             panic!("expected return statement");
         };
@@ -875,28 +859,24 @@ mod tests {
 
     #[test]
     fn constructor_validation_is_source_native_in_production_lowering() {
-        let missing = lower_source(
-            "record Point\nx int\nend\nfn bad() Point\nreturn Point()\nend\n",
-        )
-        .expect_err("missing field constructor must fail");
+        let missing =
+            lower_source("record Point\nx int\nend\nfn bad() Point\nreturn Point()\nend\n")
+                .expect_err("missing field constructor must fail");
         assert!(missing.message.contains("missing field"));
 
-        let positional = lower_source(
-            "record Point\nx int\nend\nfn bad() Point\nreturn Point(1)\nend\n",
-        )
-        .expect_err("positional record construction must fail");
+        let positional =
+            lower_source("record Point\nx int\nend\nfn bad() Point\nreturn Point(1)\nend\n")
+                .expect_err("positional record construction must fail");
         assert!(positional.message.contains("requires named fields"));
 
-        let wrong_type = lower_source(
-            "record Point\nx int\nend\nfn bad() Point\nreturn Point(x = true)\nend\n",
-        )
-        .expect_err("constructor field type mismatch must fail");
+        let wrong_type =
+            lower_source("record Point\nx int\nend\nfn bad() Point\nreturn Point(x = true)\nend\n")
+                .expect_err("constructor field type mismatch must fail");
         assert!(wrong_type.message.contains("expects int, found bool"));
 
-        let unknown = lower_source(
-            "record Point\nx int\nend\nfn bad() Point\nreturn Point(y = 1)\nend\n",
-        )
-        .expect_err("unknown constructor field must fail");
+        let unknown =
+            lower_source("record Point\nx int\nend\nfn bad() Point\nreturn Point(y = 1)\nend\n")
+                .expect_err("unknown constructor field must fail");
         assert!(unknown.message.contains("unknown constructor field"));
 
         let duplicate = lower_source(
@@ -935,7 +915,11 @@ mod tests {
 
         let scalar = lower_source("fn bad(value int) int\nreturn value.x\nend\n")
             .expect_err("scalar field access must fail");
-        assert!(scalar.message.contains("field access requires a record value"));
+        assert!(
+            scalar
+                .message
+                .contains("field access requires a record value")
+        );
     }
 
     #[test]
