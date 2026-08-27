@@ -227,6 +227,9 @@ fn render_expr(expr: &Expr) -> String {
                 .join(", ");
             format!("{}({arguments})", generated_function_name(name))
         }
+        ExprKind::Construct { .. } | ExprKind::FieldAccess { .. } => {
+            unreachable!("record expression reached Rust codegen before Records v0 codegen lands")
+        }
         ExprKind::InputInt => "__evo_input_int()".to_owned(),
         ExprKind::LogicalNot(inner) => format!("(!{})", render_expr(inner)),
         ExprKind::UnaryMinus(inner) => format!("(-{})", render_expr(inner)),
@@ -298,6 +301,10 @@ fn expr_uses_input_int(expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::InputInt => true,
         ExprKind::Call { arguments, .. } => arguments.iter().any(expr_uses_input_int),
+        ExprKind::Construct { fields, .. } => fields
+            .iter()
+            .any(|field| expr_uses_input_int(&field.value)),
+        ExprKind::FieldAccess { base, .. } => expr_uses_input_int(base),
         ExprKind::LogicalNot(inner) | ExprKind::UnaryMinus(inner) => expr_uses_input_int(inner),
         ExprKind::Binary { left, right, .. } => {
             expr_uses_input_int(left) || expr_uses_input_int(right)

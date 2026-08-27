@@ -1,14 +1,18 @@
+mod record_constructor;
+mod record_environment;
 mod record_ir;
-mod records;
+mod record_resolution;
 
 use evo_lexer::Span;
 pub use evo_parser::BinaryOp;
 use evo_parser::{
     Expr as SyntaxExpr, ExprKind as SyntaxExprKind, FunctionDef as SyntaxFunction,
     Program as SyntaxProgram, Stmt as SyntaxStmt, StmtKind as SyntaxStmtKind,
-    TypeName as SyntaxTypeName,
 };
+use record_constructor::lower_constructor_fields;
+use record_environment::{ConstructorFieldInput, RecordEnvironment, SemanticType};
 pub use record_ir::{RecordFieldIr, RecordIr, RecordType};
+use record_resolution::{CallNameResolution, resolve_call_name};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
@@ -74,6 +78,13 @@ pub struct Expr {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordFieldValue {
+    pub name: String,
+    pub value: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprKind {
     Integer(i64),
     String(String),
@@ -82,6 +93,14 @@ pub enum ExprKind {
     Call {
         name: String,
         arguments: Vec<Expr>,
+    },
+    Construct {
+        name: String,
+        fields: Vec<RecordFieldValue>,
+    },
+    FieldAccess {
+        base: Box<Expr>,
+        field: String,
     },
     InputInt,
     LogicalNot(Box<Expr>),
@@ -132,17 +151,26 @@ struct FunctionSignature {
 }
 
 pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
-    records::validate_record_declarations(program)?;
+    record_environment::validate_record_declarations(program)?;
+    let record_environment = record_environment::collect_record_environment(program)?;
     let records = record_ir::lower_record_schemas(program);
-    let record_names: HashSet<String> = records.iter().map(|record| record.name.clone()).collect();
+    debug_assert!(records.iter().all(|record| {
+        record_environment
+            .schema(&record.name)
+            .is_some_and(|schema| schema.span == record.span)
+    }));
 
-    let signatures = collect_function_signatures(&program.functions, &record_names)?;
+    let signatures = collect_function_signatures(&program.functions, &record_environment)?;
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
-        functions.push(lower_function(function, &signatures)?);
+        functions.push(lower_function(
+            function,
+            &signatures,
+            &record_environment,
+        )?);
     }
 
-    let mut top_level = Analyzer::new(&signatures, None);
+    let mut top_level = Analyzer::new(&signatures, None, &record_environment);
     let mut statements = top_level.lower_statements(&program.statements)?;
     top_level.apply_mutability(&mut statements);
 
@@ -155,7 +183,7 @@ pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
 
 fn collect_function_signatures(
     functions: &[SyntaxFunction],
-    record_names: &HashSet<String>,
+    record_environment: &RecordEnvironment,
 ) -> Result<HashMap<String, FunctionSignature>, LowerError> {
     let mut signatures = HashMap::new();
     for function in functions {
@@ -175,18 +203,18 @@ fn collect_function_signatures(
                     span: parameter.span,
                 });
             }
-            parameter_types.push(value_type(
-                &parameter.type_name,
-                record_names,
-                parameter.span,
-            )?);
+            let parameter_type = record_environment
+                .resolve_type_name(&parameter.type_name, parameter.span)?;
+            parameter_types.push(lowered_value_type(&parameter_type));
         }
 
+        let return_type = record_environment
+            .resolve_type_name(&function.return_type, function.span)?;
         signatures.insert(
             function.name.clone(),
             FunctionSignature {
                 parameter_types,
-                return_type: value_type(&function.return_type, record_names, function.span)?,
+                return_type: lowered_value_type(&return_type),
             },
         );
     }
@@ -196,12 +224,17 @@ fn collect_function_signatures(
 fn lower_function(
     function: &SyntaxFunction,
     signatures: &HashMap<String, FunctionSignature>,
+    record_environment: &RecordEnvironment,
 ) -> Result<Function, LowerError> {
     let signature = signatures
         .get(&function.name)
         .expect("function signatures are collected before lowering bodies");
     let return_type = signature.return_type.clone();
-    let mut analyzer = Analyzer::new(signatures, Some(return_type.clone()));
+    let mut analyzer = Analyzer::new(
+        signatures,
+        Some(return_type.clone()),
+        record_environment,
+    );
     let mut parameters = Vec::with_capacity(function.parameters.len());
 
     for (parameter, parameter_type) in function.parameters.iter().zip(&signature.parameter_types) {
@@ -270,22 +303,21 @@ fn statement_always_returns(statement: &Stmt) -> bool {
     }
 }
 
-fn value_type(
-    type_name: &SyntaxTypeName,
-    record_names: &HashSet<String>,
-    span: Span,
-) -> Result<ValueType, LowerError> {
-    match type_name {
-        SyntaxTypeName::Int => Ok(ValueType::Integer),
-        SyntaxTypeName::Bool => Ok(ValueType::Bool),
-        SyntaxTypeName::String => Ok(ValueType::String),
-        SyntaxTypeName::Named(name) if record_names.contains(name) => {
-            Ok(ValueType::Record(name.clone()))
-        }
-        SyntaxTypeName::Named(name) => Err(LowerError {
-            message: format!("unknown record type {name:?}"),
-            span,
-        }),
+fn semantic_type(value_type: &ValueType) -> SemanticType {
+    match value_type {
+        ValueType::Integer => SemanticType::Integer,
+        ValueType::Bool => SemanticType::Bool,
+        ValueType::String => SemanticType::String,
+        ValueType::Record(name) => SemanticType::Record(name.clone()),
+    }
+}
+
+fn lowered_value_type(value_type: &SemanticType) -> ValueType {
+    match value_type {
+        SemanticType::Integer => ValueType::Integer,
+        SemanticType::Bool => ValueType::Bool,
+        SemanticType::String => ValueType::String,
+        SemanticType::Record(name) => ValueType::Record(name.clone()),
     }
 }
 
@@ -298,23 +330,31 @@ fn type_label(value_type: &ValueType) -> &str {
     }
 }
 
+fn record_valued_field_access(expr: &Expr, value_type: &ValueType) -> bool {
+    matches!(value_type, ValueType::Record(_))
+        && matches!(&expr.kind, ExprKind::FieldAccess { .. })
+}
+
 struct Analyzer<'a> {
     scopes: Vec<HashMap<String, BindingState>>,
     mutable_declarations: HashSet<usize>,
     function_signatures: &'a HashMap<String, FunctionSignature>,
     expected_return: Option<ValueType>,
+    record_environment: &'a RecordEnvironment,
 }
 
 impl<'a> Analyzer<'a> {
     fn new(
         function_signatures: &'a HashMap<String, FunctionSignature>,
         expected_return: Option<ValueType>,
+        record_environment: &'a RecordEnvironment,
     ) -> Self {
         Self {
             scopes: vec![HashMap::new()],
             mutable_declarations: HashSet::new(),
             function_signatures,
             expected_return,
+            record_environment,
         }
     }
 
@@ -414,6 +454,13 @@ impl<'a> Analyzer<'a> {
                         span: statement.span,
                     });
                 }
+                if record_valued_field_access(&expr, &actual_type) {
+                    return Err(LowerError {
+                        message: "moving a record-valued field out of a record is not supported in Records v0"
+                            .to_owned(),
+                        span: expr.span,
+                    });
+                }
                 StmtKind::Return(expr)
             }
             SyntaxStmtKind::Repeat { count, body } => {
@@ -470,69 +517,135 @@ impl<'a> Analyzer<'a> {
                 (ExprKind::Local(name.clone()), binding.value_type)
             }
             SyntaxExprKind::Call { name, arguments } => {
-                let signature = self
-                    .function_signatures
-                    .get(name)
-                    .ok_or_else(|| LowerError {
-                        message: format!("unknown function {name:?}"),
-                        span: expr.span,
-                    })?;
-                if arguments.len() != signature.parameter_types.len() {
-                    return Err(LowerError {
-                        message: format!(
-                            "function {name:?} expects {} arguments, found {}",
-                            signature.parameter_types.len(),
-                            arguments.len()
-                        ),
-                        span: expr.span,
+                match resolve_call_name(
+                    self.record_environment,
+                    name,
+                    arguments.len(),
+                    expr.span,
+                )? {
+                    CallNameResolution::ZeroFieldRecordConstructor => (
+                        ExprKind::Construct {
+                            name: name.clone(),
+                            fields: Vec::new(),
+                        },
+                        ValueType::Record(name.clone()),
+                    ),
+                    CallNameResolution::Function => {
+                        let signature = self
+                            .function_signatures
+                            .get(name)
+                            .ok_or_else(|| LowerError {
+                                message: format!("unknown function {name:?}"),
+                                span: expr.span,
+                            })?;
+                        if arguments.len() != signature.parameter_types.len() {
+                            return Err(LowerError {
+                                message: format!(
+                                    "function {name:?} expects {} arguments, found {}",
+                                    signature.parameter_types.len(),
+                                    arguments.len()
+                                ),
+                                span: expr.span,
+                            });
+                        }
+                        let mut lowered_arguments = Vec::with_capacity(arguments.len());
+                        for (index, (argument, expected_type)) in
+                            arguments.iter().zip(&signature.parameter_types).enumerate()
+                        {
+                            let (argument, actual_type) = self.lower_expr(argument)?;
+                            if &actual_type != expected_type {
+                                return Err(LowerError {
+                                    message: format!(
+                                        "argument {} for function {name:?} expects {}, found {}",
+                                        index + 1,
+                                        type_label(expected_type),
+                                        type_label(&actual_type)
+                                    ),
+                                    span: argument.span,
+                                });
+                            }
+                            if matches!(&actual_type, ValueType::Record(_)) {
+                                return Err(LowerError {
+                                    message: "record-valued function arguments are typed but remain fail-closed until Records v0 move analysis lands"
+                                        .to_owned(),
+                                    span: argument.span,
+                                });
+                            }
+                            lowered_arguments.push(argument);
+                        }
+                        (
+                            ExprKind::Call {
+                                name: name.clone(),
+                                arguments: lowered_arguments,
+                            },
+                            signature.return_type.clone(),
+                        )
+                    }
+                }
+            }
+            SyntaxExprKind::Construct { name, fields } => {
+                let mut lowered_fields = Vec::with_capacity(fields.len());
+                let mut semantic_fields = Vec::with_capacity(fields.len());
+                for field in fields {
+                    let (value, value_type) = self.lower_expr(&field.value)?;
+                    semantic_fields.push(ConstructorFieldInput {
+                        name: field.name.clone(),
+                        value_type: semantic_type(&value_type),
+                        span: field.span,
+                    });
+                    lowered_fields.push(RecordFieldValue {
+                        name: field.name.clone(),
+                        value,
+                        span: field.span,
                     });
                 }
-                let mut lowered_arguments = Vec::with_capacity(arguments.len());
-                for (index, (argument, expected_type)) in
-                    arguments.iter().zip(&signature.parameter_types).enumerate()
-                {
-                    let (argument, actual_type) = self.lower_expr(argument)?;
-                    if &actual_type != expected_type {
+
+                let normalized = lower_constructor_fields(
+                    self.record_environment,
+                    name,
+                    semantic_fields,
+                    expr.span,
+                )?;
+                let mut ordered_fields = Vec::with_capacity(lowered_fields.len());
+                for ordered in &normalized.fields {
+                    let index = lowered_fields
+                        .iter()
+                        .position(|field| field.name == ordered.name)
+                        .expect("constructor validation guarantees unique supplied field names");
+                    let supplied = lowered_fields.remove(index);
+                    if !ordered.value_type.is_trivially_reusable_v0()
+                        && matches!(&supplied.value.kind, ExprKind::FieldAccess { .. })
+                    {
                         return Err(LowerError {
-                            message: format!(
-                                "argument {} for function {name:?} expects {}, found {}",
-                                index + 1,
-                                type_label(expected_type),
-                                type_label(&actual_type)
-                            ),
-                            span: argument.span,
-                        });
-                    }
-                    if matches!(&actual_type, ValueType::Record(_)) {
-                        return Err(LowerError {
-                            message: "record-valued function arguments are typed but remain fail-closed until Records v0 move analysis lands"
+                            message: "moving a record-valued field out of a record is not supported in Records v0"
                                 .to_owned(),
-                            span: argument.span,
+                            span: supplied.span,
                         });
                     }
-                    lowered_arguments.push(argument);
+                    ordered_fields.push(supplied);
                 }
                 (
-                    ExprKind::Call {
+                    ExprKind::Construct {
                         name: name.clone(),
-                        arguments: lowered_arguments,
+                        fields: ordered_fields,
                     },
-                    signature.return_type.clone(),
+                    lowered_value_type(&normalized.value_type),
                 )
             }
-            SyntaxExprKind::Construct { .. } => {
-                return Err(LowerError {
-                    message: "record construction is parsed but Records v0 semantic lowering is not implemented yet"
-                        .to_owned(),
-                    span: expr.span,
-                });
-            }
-            SyntaxExprKind::FieldAccess { .. } => {
-                return Err(LowerError {
-                    message: "record field access is parsed but Records v0 semantic lowering is not implemented yet"
-                        .to_owned(),
-                    span: expr.span,
-                });
+            SyntaxExprKind::FieldAccess { base, field } => {
+                let (base, base_type) = self.lower_expr(base)?;
+                let field_type = self.record_environment.field_type(
+                    &semantic_type(&base_type),
+                    field,
+                    expr.span,
+                )?;
+                (
+                    ExprKind::FieldAccess {
+                        base: Box::new(base),
+                        field: field.clone(),
+                    },
+                    lowered_value_type(&field_type),
+                )
             }
             SyntaxExprKind::InputInt => (ExprKind::InputInt, ValueType::Integer),
             SyntaxExprKind::LogicalNot(inner) => {
@@ -725,14 +838,113 @@ mod tests {
     }
 
     #[test]
-    fn rejects_record_construction_and_field_access_until_semantic_lowering_lands() {
-        let construct = lower_source("p = Point(x = 1, y = 2)\n")
-            .expect_err("record construction must be rejected before semantic support");
-        assert!(construct.message.contains("record construction"));
+    fn lowers_named_record_construction_in_declaration_order() {
+        let program = lower_source(
+            "record Point\nx int\ny bool\nend\nfn make() Point\nreturn Point(y = true, x = 1)\nend\n",
+        )
+        .expect("valid named constructor should lower");
+        let StmtKind::Return(expr) = &program.functions[0].body[0].kind else {
+            panic!("expected return statement");
+        };
+        let ExprKind::Construct { name, fields } = &expr.kind else {
+            panic!("expected record constructor IR");
+        };
+        assert_eq!(name, "Point");
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].name, "x");
+        assert_eq!(fields[1].name, "y");
+        assert!(matches!(fields[0].value.kind, ExprKind::Integer(1)));
+        assert!(matches!(fields[1].value.kind, ExprKind::Bool(true)));
+    }
 
-        let access = lower_source("x = 1\nprint x.value\n")
-            .expect_err("field access must be rejected before semantic support");
-        assert!(access.message.contains("field access"));
+    #[test]
+    fn resolves_zero_field_record_call_to_constructor() {
+        let program = lower_source(
+            "record Marker\nend\nfn make() Marker\nreturn Marker()\nend\n",
+        )
+        .expect("zero-field record call should lower as constructor");
+        let StmtKind::Return(expr) = &program.functions[0].body[0].kind else {
+            panic!("expected return statement");
+        };
+        let ExprKind::Construct { name, fields } = &expr.kind else {
+            panic!("expected zero-field constructor IR");
+        };
+        assert_eq!(name, "Marker");
+        assert!(fields.is_empty());
+    }
+
+    #[test]
+    fn constructor_validation_is_source_native_in_production_lowering() {
+        let missing = lower_source(
+            "record Point\nx int\nend\nfn bad() Point\nreturn Point()\nend\n",
+        )
+        .expect_err("missing field constructor must fail");
+        assert!(missing.message.contains("missing field"));
+
+        let positional = lower_source(
+            "record Point\nx int\nend\nfn bad() Point\nreturn Point(1)\nend\n",
+        )
+        .expect_err("positional record construction must fail");
+        assert!(positional.message.contains("requires named fields"));
+
+        let wrong_type = lower_source(
+            "record Point\nx int\nend\nfn bad() Point\nreturn Point(x = true)\nend\n",
+        )
+        .expect_err("constructor field type mismatch must fail");
+        assert!(wrong_type.message.contains("expects int, found bool"));
+
+        let unknown = lower_source(
+            "record Point\nx int\nend\nfn bad() Point\nreturn Point(y = 1)\nend\n",
+        )
+        .expect_err("unknown constructor field must fail");
+        assert!(unknown.message.contains("unknown constructor field"));
+
+        let duplicate = lower_source(
+            "record Point\nx int\nend\nfn bad() Point\nreturn Point(x = 1, x = 2)\nend\n",
+        )
+        .expect_err("duplicate constructor field must fail");
+        assert!(duplicate.message.contains("duplicate constructor field"));
+    }
+
+    #[test]
+    fn lowers_typed_chained_scalar_field_access() {
+        let program = lower_source(
+            "record Point\nx int\nend\nrecord Wrapper\npoint Point\nend\nfn get_x(wrapper Wrapper) int\nreturn wrapper.point.x\nend\n",
+        )
+        .expect("chained scalar field access should lower");
+        let StmtKind::Return(expr) = &program.functions[0].body[0].kind else {
+            panic!("expected return statement");
+        };
+        let ExprKind::FieldAccess { base, field } = &expr.kind else {
+            panic!("expected outer field access");
+        };
+        assert_eq!(field, "x");
+        let ExprKind::FieldAccess { field, .. } = &base.kind else {
+            panic!("expected nested record field access");
+        };
+        assert_eq!(field, "point");
+    }
+
+    #[test]
+    fn rejects_unknown_and_scalar_field_access() {
+        let unknown = lower_source(
+            "record Point\nx int\nend\nfn bad(point Point) int\nreturn point.y\nend\n",
+        )
+        .expect_err("unknown record field must fail");
+        assert!(unknown.message.contains("unknown field"));
+
+        let scalar = lower_source("fn bad(value int) int\nreturn value.x\nend\n")
+            .expect_err("scalar field access must fail");
+        assert!(scalar.message.contains("field access requires a record value"));
+    }
+
+    #[test]
+    fn rejects_record_valued_partial_field_moves() {
+        let error = lower_source(
+            "record Point\nx int\nend\nrecord Wrapper\npoint Point\nend\nfn extract(wrapper Wrapper) Point\nreturn wrapper.point\nend\n",
+        )
+        .expect_err("record-valued field move must remain unsupported");
+        assert!(error.message.contains("record-valued field"));
     }
 
     #[test]
