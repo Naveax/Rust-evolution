@@ -1,6 +1,7 @@
 mod record_constructor;
 mod record_environment;
 mod record_ir;
+mod record_ownership;
 mod record_resolution;
 
 use evo_lexer::Span;
@@ -12,6 +13,7 @@ use evo_parser::{
 use record_constructor::lower_constructor_fields;
 use record_environment::{ConstructorFieldInput, RecordEnvironment, SemanticType};
 pub use record_ir::{RecordFieldIr, RecordIr, RecordType};
+use record_ownership::MoveTracker;
 use record_resolution::{CallNameResolution, resolve_call_name};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -322,16 +324,13 @@ fn type_label(value_type: &ValueType) -> &str {
     }
 }
 
-fn record_valued_field_access(expr: &Expr, value_type: &ValueType) -> bool {
-    matches!(value_type, ValueType::Record(_)) && matches!(&expr.kind, ExprKind::FieldAccess { .. })
-}
-
 struct Analyzer<'a> {
     scopes: Vec<HashMap<String, BindingState>>,
     mutable_declarations: HashSet<usize>,
     function_signatures: &'a HashMap<String, FunctionSignature>,
     expected_return: Option<ValueType>,
     record_environment: &'a RecordEnvironment,
+    move_tracker: MoveTracker,
 }
 
 impl<'a> Analyzer<'a> {
@@ -346,6 +345,7 @@ impl<'a> Analyzer<'a> {
             function_signatures,
             expected_return,
             record_environment,
+            move_tracker: MoveTracker::default(),
         }
     }
 
@@ -357,6 +357,8 @@ impl<'a> Analyzer<'a> {
     }
 
     fn define_binding(&mut self, name: String, value_type: ValueType, declaration_start: usize) {
+        self.move_tracker
+            .define(name.clone(), semantic_type(&value_type));
         self.scopes
             .last_mut()
             .expect("analyzer always has a lexical scope")
@@ -372,8 +374,13 @@ impl<'a> Analyzer<'a> {
     fn lower_child_scope(&mut self, statements: &[SyntaxStmt]) -> Result<Vec<Stmt>, LowerError> {
         self.scopes.push(HashMap::new());
         let result = self.lower_statements(statements);
-        let popped = self.scopes.pop();
-        debug_assert!(popped.is_some());
+        let locals = self
+            .scopes
+            .pop()
+            .expect("child scope must be present after lowering");
+        for name in locals.keys() {
+            self.move_tracker.forget(name);
+        }
         result
     }
 
@@ -388,13 +395,6 @@ impl<'a> Analyzer<'a> {
         let kind = match &statement.kind {
             SyntaxStmtKind::Bind { name, expr } => {
                 let (expr, expression_type) = self.lower_expr(expr)?;
-                if matches!(&expression_type, ValueType::Record(_)) {
-                    return Err(LowerError {
-                        message: "record-valued bindings are typed but remain fail-closed until Records v0 move analysis lands"
-                            .to_owned(),
-                        span: statement.span,
-                    });
-                }
                 if let Some(binding) = self.visible_binding(name) {
                     if binding.value_type != expression_type {
                         return Err(LowerError {
@@ -404,6 +404,11 @@ impl<'a> Analyzer<'a> {
                             span: statement.span,
                         });
                     }
+                    self.move_tracker.reinitialize(
+                        name,
+                        semantic_type(&expression_type),
+                        statement.span,
+                    )?;
                     self.mutable_declarations.insert(binding.declaration_start);
                     StmtKind::Assign {
                         name: name.clone(),
@@ -430,26 +435,19 @@ impl<'a> Analyzer<'a> {
                 StmtKind::Print(expr)
             }
             SyntaxStmtKind::Return(expr) => {
-                let expected_return = self.expected_return.as_ref().ok_or_else(|| LowerError {
+                let expected_return = self.expected_return.clone().ok_or_else(|| LowerError {
                     message: "return is only valid inside a function".to_owned(),
                     span: statement.span,
                 })?;
                 let (expr, actual_type) = self.lower_expr(expr)?;
-                if &actual_type != expected_return {
+                if actual_type != expected_return {
                     return Err(LowerError {
                         message: format!(
                             "return type mismatch: expected {}, found {}",
-                            type_label(expected_return),
+                            type_label(&expected_return),
                             type_label(&actual_type)
                         ),
                         span: statement.span,
-                    });
-                }
-                if record_valued_field_access(&expr, &actual_type) {
-                    return Err(LowerError {
-                        message: "moving a record-valued field out of a record is not supported in Records v0"
-                            .to_owned(),
-                        span: expr.span,
                     });
                 }
                 StmtKind::Return(expr)
@@ -462,7 +460,14 @@ impl<'a> Analyzer<'a> {
                         span: count.span,
                     });
                 }
+
+                let entry = self.move_tracker.clone();
+                self.move_tracker = entry.clone();
                 let body = self.lower_child_scope(body)?;
+                let body_exit = self.move_tracker.clone();
+                let mut merged = entry;
+                merged.merge_repeat(&body_exit, statement.span)?;
+                self.move_tracker = merged;
                 StmtKind::Repeat { count, body }
             }
             SyntaxStmtKind::If {
@@ -477,8 +482,36 @@ impl<'a> Analyzer<'a> {
                         span: condition.span,
                     });
                 }
+
+                let entry = self.move_tracker.clone();
+                self.move_tracker = entry.clone();
                 let then_body = self.lower_child_scope(then_body)?;
+                let then_exit = self.move_tracker.clone();
+
+                self.move_tracker = entry.clone();
                 let else_body = self.lower_child_scope(else_body)?;
+                let else_exit = self.move_tracker.clone();
+
+                let then_returns = block_always_returns(&then_body);
+                let else_returns = block_always_returns(&else_body);
+                let mut merged = entry;
+                match (then_returns, else_returns) {
+                    (false, false) => merged.merge_if(&then_exit, &else_exit),
+                    (true, false) => {
+                        let continues = merged.merge_if_continuing(None, Some(&else_exit));
+                        debug_assert!(continues);
+                    }
+                    (false, true) => {
+                        let continues = merged.merge_if_continuing(Some(&then_exit), None);
+                        debug_assert!(continues);
+                    }
+                    (true, true) => {
+                        let continues = merged.merge_if_continuing(None, None);
+                        debug_assert!(!continues);
+                    }
+                }
+                self.move_tracker = merged;
+
                 StmtKind::If {
                     condition,
                     then_body,
@@ -493,19 +526,14 @@ impl<'a> Analyzer<'a> {
         })
     }
 
-    fn lower_expr(&self, expr: &SyntaxExpr) -> Result<(Expr, ValueType), LowerError> {
+    fn lower_expr(&mut self, expr: &SyntaxExpr) -> Result<(Expr, ValueType), LowerError> {
         let (kind, expression_type) = match &expr.kind {
             SyntaxExprKind::Integer(value) => (ExprKind::Integer(*value), ValueType::Integer),
             SyntaxExprKind::String(value) => (ExprKind::String(value.clone()), ValueType::String),
             SyntaxExprKind::Bool(value) => (ExprKind::Bool(*value), ValueType::Bool),
             SyntaxExprKind::Identifier(name) => {
-                let binding = self.visible_binding(name).ok_or_else(|| LowerError {
-                    message: format!(
-                        "use of local {name:?} before definition or outside its scope"
-                    ),
-                    span: expr.span,
-                })?;
-                (ExprKind::Local(name.clone()), binding.value_type)
+                let value_type = self.move_tracker.consume_value(name, expr.span)?;
+                (ExprKind::Local(name.clone()), lowered_value_type(&value_type))
             }
             SyntaxExprKind::Call { name, arguments } => {
                 match resolve_call_name(self.record_environment, name, arguments.len(), expr.span)?
@@ -518,13 +546,14 @@ impl<'a> Analyzer<'a> {
                         ValueType::Record(name.clone()),
                     ),
                     CallNameResolution::Function => {
-                        let signature =
-                            self.function_signatures
-                                .get(name)
-                                .ok_or_else(|| LowerError {
-                                    message: format!("unknown function {name:?}"),
-                                    span: expr.span,
-                                })?;
+                        let signature = self
+                            .function_signatures
+                            .get(name)
+                            .cloned()
+                            .ok_or_else(|| LowerError {
+                                message: format!("unknown function {name:?}"),
+                                span: expr.span,
+                            })?;
                         if arguments.len() != signature.parameter_types.len() {
                             return Err(LowerError {
                                 message: format!(
@@ -551,13 +580,6 @@ impl<'a> Analyzer<'a> {
                                     span: argument.span,
                                 });
                             }
-                            if matches!(&actual_type, ValueType::Record(_)) {
-                                return Err(LowerError {
-                                    message: "record-valued function arguments are typed but remain fail-closed until Records v0 move analysis lands"
-                                        .to_owned(),
-                                    span: argument.span,
-                                });
-                            }
                             lowered_arguments.push(argument);
                         }
                         (
@@ -565,7 +587,7 @@ impl<'a> Analyzer<'a> {
                                 name: name.clone(),
                                 arguments: lowered_arguments,
                             },
-                            signature.return_type.clone(),
+                            signature.return_type,
                         )
                     }
                 }
@@ -599,17 +621,7 @@ impl<'a> Analyzer<'a> {
                         .iter()
                         .position(|field| field.name == ordered.name)
                         .expect("constructor validation guarantees unique supplied field names");
-                    let supplied = lowered_fields.remove(index);
-                    if !ordered.value_type.is_trivially_reusable_v0()
-                        && matches!(&supplied.value.kind, ExprKind::FieldAccess { .. })
-                    {
-                        return Err(LowerError {
-                            message: "moving a record-valued field out of a record is not supported in Records v0"
-                                .to_owned(),
-                            span: supplied.span,
-                        });
-                    }
-                    ordered_fields.push(supplied);
+                    ordered_fields.push(lowered_fields.remove(index));
                 }
                 (
                     ExprKind::Construct {
@@ -620,19 +632,7 @@ impl<'a> Analyzer<'a> {
                 )
             }
             SyntaxExprKind::FieldAccess { base, field } => {
-                let (base, base_type) = self.lower_expr(base)?;
-                let field_type = self.record_environment.field_type(
-                    &semantic_type(&base_type),
-                    field,
-                    expr.span,
-                )?;
-                (
-                    ExprKind::FieldAccess {
-                        base: Box::new(base),
-                        field: field.clone(),
-                    },
-                    lowered_value_type(&field_type),
-                )
+                self.lower_field_access(base, field, expr.span)?
             }
             SyntaxExprKind::InputInt => (ExprKind::InputInt, ValueType::Integer),
             SyntaxExprKind::LogicalNot(inner) => {
@@ -657,6 +657,15 @@ impl<'a> Analyzer<'a> {
             }
             SyntaxExprKind::Binary { left, op, right } => {
                 let (left, left_type) = self.lower_expr(left)?;
+                if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
+                    && matches!(&left_type, ValueType::Record(_))
+                {
+                    return Err(LowerError {
+                        message: "record equality is not supported in Records v0".to_owned(),
+                        span: expr.span,
+                    });
+                }
+
                 let (right, right_type) = self.lower_expr(right)?;
                 let result_type = match op {
                     BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
@@ -669,12 +678,9 @@ impl<'a> Analyzer<'a> {
                         ValueType::Integer
                     }
                     BinaryOp::Equal | BinaryOp::NotEqual => {
-                        if matches!(&left_type, ValueType::Record(_))
-                            || matches!(&right_type, ValueType::Record(_))
-                        {
+                        if matches!(&right_type, ValueType::Record(_)) {
                             return Err(LowerError {
-                                message: "record equality is not supported in Records v0"
-                                    .to_owned(),
+                                message: "record equality is not supported in Records v0".to_owned(),
                                 span: expr.span,
                             });
                         }
@@ -728,6 +734,87 @@ impl<'a> Analyzer<'a> {
             },
             expression_type,
         ))
+    }
+
+    fn lower_field_access(
+        &mut self,
+        base: &SyntaxExpr,
+        field: &str,
+        span: Span,
+    ) -> Result<(ExprKind, ValueType), LowerError> {
+        if let SyntaxExprKind::Identifier(name) = &base.kind {
+            let field_type = self.move_tracker.access_field(
+                self.record_environment,
+                name,
+                field,
+                span,
+            )?;
+            return Ok((
+                ExprKind::FieldAccess {
+                    base: Box::new(Expr {
+                        kind: ExprKind::Local(name.clone()),
+                        span: base.span,
+                    }),
+                    field: field.to_owned(),
+                },
+                lowered_value_type(&field_type),
+            ));
+        }
+
+        let (base, base_type) = self.lower_field_base(base)?;
+        let field_type = self.record_environment.field_type(
+            &semantic_type(&base_type),
+            field,
+            span,
+        )?;
+        if !field_type.is_trivially_reusable_v0() {
+            return Err(LowerError {
+                message: "moving a record-valued field out of a record is not supported in Records v0; no implicit clone is inserted"
+                    .to_owned(),
+                span,
+            });
+        }
+        Ok((
+            ExprKind::FieldAccess {
+                base: Box::new(base),
+                field: field.to_owned(),
+            },
+            lowered_value_type(&field_type),
+        ))
+    }
+
+    fn lower_field_base(&mut self, expr: &SyntaxExpr) -> Result<(Expr, ValueType), LowerError> {
+        match &expr.kind {
+            SyntaxExprKind::Identifier(name) => {
+                let value_type = self.move_tracker.inspect_value(name, expr.span)?;
+                Ok((
+                    Expr {
+                        kind: ExprKind::Local(name.clone()),
+                        span: expr.span,
+                    },
+                    lowered_value_type(&value_type),
+                ))
+            }
+            SyntaxExprKind::FieldAccess { base, field } => {
+                let (base, base_type) = self.lower_field_base(base)?;
+                let field_type = self.record_environment.field_type(
+                    &semantic_type(&base_type),
+                    field,
+                    expr.span,
+                )?;
+                Ok((
+                    Expr {
+                        kind: ExprKind::FieldAccess {
+                            base: Box::new(base),
+                            field: field.clone(),
+                        },
+                        span: expr.span,
+                    },
+                    lowered_value_type(&field_type),
+                ))
+            }
+            _ => self.lower_expr(expr),
+        }
     }
 
     fn apply_mutability(&self, statements: &mut [Stmt]) {
@@ -804,13 +891,7 @@ mod tests {
     }
 
     #[test]
-    fn keeps_record_value_operations_fail_closed_before_move_analysis() {
-        let binding = lower_source(
-            "record Point\nx int\nend\nfn copy(point Point) Point\nother = point\nreturn other\nend\n",
-        )
-        .expect_err("record-valued local binding must await move analysis");
-        assert!(binding.message.contains("record-valued bindings"));
-
+    fn keeps_unsupported_whole_record_operations_fail_closed() {
         let printing = lower_source(
             "record Point\nx int\nend\nfn show(point Point) int\nprint point\nreturn 1\nend\n",
         )
@@ -930,6 +1011,91 @@ mod tests {
         )
         .expect_err("record-valued field move must remain unsupported");
         assert!(error.message.contains("record-valued field"));
+        assert!(error.message.contains("no implicit clone"));
+    }
+
+    #[test]
+    fn record_locals_move_once_and_can_be_reinitialized() {
+        lower_source(
+            "record Marker\nend\nfn move_once(value Marker) Marker\nother = value\nreturn other\nend\n",
+        )
+        .expect("moving a record into a local once should lower");
+
+        let reuse = lower_source(
+            "record Marker\nend\nfn bad(value Marker) Marker\nother = value\nreturn value\nend\n",
+        )
+        .expect_err("record reuse after move must fail");
+        assert!(reuse.message.contains("moved record local"));
+
+        let program = lower_source(
+            "record Marker\nend\nfn renew(value Marker) Marker\nother = value\nvalue = Marker()\nreturn value\nend\n",
+        )
+        .expect("same-type explicit reassignment should reinitialize a moved record");
+        assert!(program.functions[0].parameters[0].mutable);
+    }
+
+    #[test]
+    fn record_function_arguments_use_by_value_move_semantics() {
+        lower_source(
+            "record Marker\nend\nfn id(value Marker) Marker\nreturn value\nend\nfn forward(value Marker) Marker\nreturn id(value)\nend\n",
+        )
+        .expect("record argument should move into static function call");
+
+        let error = lower_source(
+            "record Marker\nend\nfn id(value Marker) Marker\nreturn value\nend\nfn bad(value Marker) Marker\nother = id(value)\nreturn value\nend\n",
+        )
+        .expect_err("record argument reuse after call must fail");
+        assert!(error.message.contains("moved record local"));
+    }
+
+    #[test]
+    fn scalar_field_read_does_not_move_record_local() {
+        lower_source(
+            "record Point\nx int\nend\nfn keep(point Point) Point\nx = point.x\nreturn point\nend\n",
+        )
+        .expect("scalar field read must leave whole record available");
+    }
+
+    #[test]
+    fn if_move_state_merges_conservatively_across_continuing_paths() {
+        let error = lower_source(
+            "record Marker\nend\nfn bad(flag bool, value Marker) Marker\nif flag\nother = value\nend\nreturn value\nend\n",
+        )
+        .expect_err("move on one continuing branch must poison merged availability");
+        assert!(error.message.contains("moved record local"));
+
+        lower_source(
+            "record Marker\nend\nfn restore(flag bool, value Marker) Marker\nif flag\nother = value\nvalue = Marker()\nelse\nother = value\nvalue = Marker()\nend\nreturn value\nend\n",
+        )
+        .expect("definite reinitialization on both branches should restore availability");
+    }
+
+    #[test]
+    fn terminal_if_branch_does_not_poison_continuing_move_state() {
+        lower_source(
+            "record Marker\nend\nfn choose(flag bool, value Marker) Marker\nif flag\nreturn value\nelse\nvalue = Marker()\nend\nreturn value\nend\n",
+        )
+        .expect("terminal branch ownership must not affect the continuing branch");
+    }
+
+    #[test]
+    fn repeat_move_analysis_preserves_later_iteration_and_zero_iteration_safety() {
+        let later_iteration = lower_source(
+            "record Marker\nend\nfn bad(value Marker) Marker\nrepeat 2\nother = value\nend\nreturn value\nend\n",
+        )
+        .expect_err("loop-carried move without reinitialization must fail");
+        assert!(later_iteration.message.contains("later iteration"));
+
+        lower_source(
+            "record Marker\nend\nfn safe(value Marker) Marker\nrepeat 2\nother = value\nvalue = Marker()\nend\nreturn value\nend\n",
+        )
+        .expect("repeat body reinitialization should make later iterations safe");
+
+        let zero_iteration = lower_source(
+            "record Marker\nend\nfn skipped(value Marker) Marker\nother = value\nrepeat 1\nvalue = Marker()\nend\nreturn value\nend\n",
+        )
+        .expect_err("loop body cannot restore a value on the zero-iteration path");
+        assert!(zero_iteration.message.contains("moved record local"));
     }
 
     #[test]
