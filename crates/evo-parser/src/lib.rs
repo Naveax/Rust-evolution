@@ -1059,7 +1059,10 @@ impl<'a> Parser<'a> {
                     span: field_name_token.span,
                 });
             };
-            self.expect_kind(TokenKind::Equal, "expected '=' after constructor field name")?;
+            self.expect_kind(
+                TokenKind::Equal,
+                "expected '=' after constructor field name",
+            )?;
             let value = self.parse_expression()?;
             let span = field_name_token.span.join(value.span);
             fields.push(NamedFieldValue {
@@ -1305,9 +1308,7 @@ mod tests {
 
     #[test]
     fn parses_named_construction_and_chained_field_access() {
-        let program = parse_source(
-            "p = Point(x = 2, y = 3)\nprint p.x\nprint p.inner.value\n",
-        );
+        let program = parse_source("p = Point(x = 2, y = 3)\nprint p.x\nprint p.inner.value\n");
 
         let StmtKind::Bind { expr, .. } = &program.statements[0].kind else {
             panic!("expected binding");
