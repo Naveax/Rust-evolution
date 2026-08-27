@@ -26,9 +26,9 @@ pub fn format_source(source: &str, tokens: &[Token]) -> String {
             .collect();
 
         let first_kind = line_tokens.first().map(|token| &token.kind);
-        if first_kind.is_some_and(|kind| {
-            matches!(kind, TokenKind::End | TokenKind::Else | TokenKind::Case)
-        }) {
+        if first_kind
+            .is_some_and(|kind| matches!(kind, TokenKind::End | TokenKind::Else | TokenKind::Case))
+        {
             depth = depth.saturating_sub(1);
         }
 
