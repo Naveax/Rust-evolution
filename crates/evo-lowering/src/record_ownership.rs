@@ -86,11 +86,7 @@ impl MoveTracker {
         }
     }
 
-    pub(crate) fn merge_repeat(
-        &mut self,
-        body_exit: &Self,
-        span: Span,
-    ) -> Result<(), LowerError> {
+    pub(crate) fn merge_repeat(&mut self, body_exit: &Self, span: Span) -> Result<(), LowerError> {
         for (name, binding) in &mut self.bindings {
             let body_binding = body_exit
                 .bindings
