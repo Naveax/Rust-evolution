@@ -55,10 +55,7 @@ pub(crate) fn lower_record_schemas_with_enum_classifier(
         .collect()
 }
 
-fn lower_field_type(
-    field_type: &SyntaxFieldType,
-    is_enum: &impl Fn(&str) -> bool,
-) -> RecordType {
+fn lower_field_type(field_type: &SyntaxFieldType, is_enum: &impl Fn(&str) -> bool) -> RecordType {
     match field_type {
         SyntaxFieldType::Int => SchemaType::Integer,
         SyntaxFieldType::Bool => SchemaType::Bool,
