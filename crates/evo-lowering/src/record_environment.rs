@@ -1,22 +1,66 @@
 use crate::LowerError;
-use evo_parser::Program as SyntaxProgram;
+use evo_lexer::Span;
+use evo_parser::{Program as SyntaxProgram, TypeName as SyntaxTypeName};
 
 mod records_impl {
     include!("record_environment_records.rs");
 }
 
-pub(crate) use records_impl::{ConstructorFieldInput, RecordEnvironment, SemanticType};
+pub(crate) use records_impl::{ConstructorFieldInput, RecordSchema, SemanticType};
+
+#[derive(Debug, Clone)]
+pub(crate) struct TypeEnvironment {
+    records: records_impl::RecordEnvironment,
+}
+
+// Transitional compatibility name for Records v0 callers. New nominal-type work
+// should use TypeEnvironment so enum support can share the same semantic boundary.
+pub(crate) type RecordEnvironment = TypeEnvironment;
+
+impl TypeEnvironment {
+    pub(crate) fn resolve_type_name(
+        &self,
+        type_name: &SyntaxTypeName,
+        span: Span,
+    ) -> Result<SemanticType, LowerError> {
+        self.records.resolve_type_name(type_name, span)
+    }
+
+    pub(crate) fn validate_constructor(
+        &self,
+        name: &str,
+        fields: &[ConstructorFieldInput],
+        constructor_span: Span,
+    ) -> Result<SemanticType, LowerError> {
+        self.records
+            .validate_constructor(name, fields, constructor_span)
+    }
+
+    pub(crate) fn field_type(
+        &self,
+        base_type: &SemanticType,
+        field_name: &str,
+        access_span: Span,
+    ) -> Result<SemanticType, LowerError> {
+        self.records.field_type(base_type, field_name, access_span)
+    }
+
+    #[must_use]
+    pub(crate) fn schema(&self, name: &str) -> Option<&RecordSchema> {
+        self.records.schema(name)
+    }
+}
 
 pub(crate) fn collect_record_environment(
     program: &SyntaxProgram,
 ) -> Result<RecordEnvironment, LowerError> {
     reject_enum_declarations(program)?;
-    records_impl::collect_record_environment(program)
+    let records = records_impl::collect_record_environment(program)?;
+    Ok(TypeEnvironment { records })
 }
 
 pub(crate) fn validate_record_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
-    reject_enum_declarations(program)?;
-    records_impl::validate_record_declarations(program)
+    collect_record_environment(program).map(|_| ())
 }
 
 fn reject_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
