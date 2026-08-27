@@ -124,6 +124,11 @@ pub enum ExprKind {
         name: String,
         fields: Vec<NamedFieldValue>,
     },
+    EnumConstruct {
+        enum_name: String,
+        variant_name: String,
+        arguments: Vec<Expr>,
+    },
     FieldAccess {
         base: Box<Expr>,
         field: String,
@@ -1086,6 +1091,41 @@ impl<'a> Parser<'a> {
                     span: field_token.span,
                 });
             };
+
+            if matches!(self.current().kind, TokenKind::LParen) {
+                if let ExprKind::Identifier(enum_name) = &expr.kind {
+                    let enum_name = enum_name.clone();
+                    self.advance();
+                    let mut arguments = Vec::new();
+                    if !matches!(self.current().kind, TokenKind::RParen) {
+                        loop {
+                            arguments.push(self.parse_expression()?);
+                            if !matches!(self.current().kind, TokenKind::Comma) {
+                                break;
+                            }
+                            self.advance();
+                            if matches!(self.current().kind, TokenKind::RParen) {
+                                return Err(self.error_here("expected enum variant argument after ','"));
+                            }
+                        }
+                    }
+                    if !matches!(self.current().kind, TokenKind::RParen) {
+                        return Err(self.error_here("expected ')' after enum variant arguments"));
+                    }
+                    let close = self.advance().span;
+                    let span = expr.span.join(close);
+                    expr = Expr {
+                        kind: ExprKind::EnumConstruct {
+                            enum_name,
+                            variant_name: field,
+                            arguments,
+                        },
+                        span,
+                    };
+                    continue;
+                }
+            }
+
             let span = expr.span.join(field_token.span);
             expr = Expr {
                 kind: ExprKind::FieldAccess {
@@ -1517,6 +1557,82 @@ mod tests {
             base.kind,
             ExprKind::FieldAccess { ref field, .. } if field == "inner"
         ));
+    }
+
+    #[test]
+    fn parses_qualified_enum_variant_construction_without_regressing_field_access() {
+        let program = parse_source(
+            "none = MaybeInt.None()\nsome = MaybeInt.Some(41)\nplain = MaybeInt.Some\nprint value.inner.field\n",
+        );
+
+        let StmtKind::Bind { expr, .. } = &program.statements[0].kind else {
+            panic!("expected unit variant binding");
+        };
+        let ExprKind::EnumConstruct {
+            enum_name,
+            variant_name,
+            arguments,
+        } = &expr.kind
+        else {
+            panic!("expected qualified enum constructor");
+        };
+        assert_eq!(enum_name, "MaybeInt");
+        assert_eq!(variant_name, "None");
+        assert!(arguments.is_empty());
+        assert_eq!(expr.span.line, 1);
+
+        let StmtKind::Bind { expr, .. } = &program.statements[1].kind else {
+            panic!("expected payload variant binding");
+        };
+        let ExprKind::EnumConstruct {
+            enum_name,
+            variant_name,
+            arguments,
+        } = &expr.kind
+        else {
+            panic!("expected payload enum constructor");
+        };
+        assert_eq!(enum_name, "MaybeInt");
+        assert_eq!(variant_name, "Some");
+        assert_eq!(arguments.len(), 1);
+        assert!(matches!(arguments[0].kind, ExprKind::Integer(41)));
+
+        let StmtKind::Bind { expr, .. } = &program.statements[2].kind else {
+            panic!("expected plain qualified field-shaped binding");
+        };
+        assert!(matches!(
+            expr.kind,
+            ExprKind::FieldAccess { ref field, .. } if field == "Some"
+        ));
+
+        let StmtKind::Print(expr) = &program.statements[3].kind else {
+            panic!("expected chained field access print");
+        };
+        let ExprKind::FieldAccess { base, field } = &expr.kind else {
+            panic!("expected outer field access");
+        };
+        assert_eq!(field, "field");
+        assert!(matches!(base.kind, ExprKind::FieldAccess { .. }));
+    }
+
+    #[test]
+    fn enum_variant_constructor_retains_nested_argument_expressions() {
+        let program = parse_source("value = MaybeInt.Some(add(1, 2 * 3))\n");
+        let StmtKind::Bind { expr, .. } = &program.statements[0].kind else {
+            panic!("expected binding");
+        };
+        let ExprKind::EnumConstruct { arguments, .. } = &expr.kind else {
+            panic!("expected enum constructor");
+        };
+        assert_eq!(arguments.len(), 1);
+        assert!(matches!(arguments[0].kind, ExprKind::Call { .. }));
+    }
+
+    #[test]
+    fn rejects_trailing_enum_variant_argument_comma() {
+        let tokens = lex("value = MaybeInt.Some(1,)\n").expect("lexing should succeed");
+        let error = parse(&tokens).expect_err("trailing enum constructor comma should fail");
+        assert!(error.message.contains("enum variant argument"));
     }
 
     #[test]
