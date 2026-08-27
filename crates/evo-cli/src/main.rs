@@ -130,14 +130,6 @@ fn load_program(path: &Path) -> Result<LoadedProgram, String> {
         parse_recovering(&tokens).map_err(|errors| render_parse_errors(path, &source, &errors))?;
     let program =
         lower(&syntax).map_err(|error| render_error(path, &source, &error.message, error.span))?;
-    if let Some(record) = program.records.first() {
-        return Err(render_error(
-            path,
-            &source,
-            "record declarations passed Records v0 declaration validation, but Records v0 semantic lowering/codegen is not implemented yet",
-            record.span,
-        ));
-    }
     let generated = generate_lowered_rust_with_map(&program);
     Ok(LoadedProgram { source, generated })
 }
