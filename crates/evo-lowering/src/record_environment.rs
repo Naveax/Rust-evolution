@@ -5,8 +5,24 @@ use std::ops::Deref;
 mod enums_impl {
     include!("enum_environment.rs");
 
+    mod ownership_state {
+        include!("move_state.rs");
+    }
+
     mod constructor_typing {
         include!("enum_constructor_typing.rs");
+
+        mod ownership {
+            include!("enum_ownership.rs");
+        }
+
+        pub(super) fn validate_enum_ownership(
+            program: &SyntaxProgram,
+            enums: &EnumEnvironment,
+            matches: &super::match_validation::MatchEnvironment,
+        ) -> Result<(), LowerError> {
+            ownership::validate_enum_ownership(program, enums, matches)
+        }
     }
 
     mod match_validation {
@@ -24,7 +40,8 @@ mod enums_impl {
         let environment = collect_enum_environment(program)?;
         let matches = match_validation::collect_match_environment(program, &environment)?;
         constructor_typing::validate_enum_type_semantics(program, &environment)?;
-        match_sidecar::validate_match_sidecar(program, &matches)
+        match_sidecar::validate_match_sidecar(program, &matches)?;
+        constructor_typing::validate_enum_ownership(program, &environment, &matches)
     }
 }
 
@@ -154,5 +171,16 @@ mod tests {
             .expect_err("non-enum scrutinee should precede unsupported codegen gate");
         assert!(error.message.contains("scrutinee must have an enum type"));
         assert_eq!(error.span.line, 5);
+    }
+
+    #[test]
+    fn enum_ownership_errors_are_diagnosed_before_fail_closed_gate() {
+        let program = parse_source(
+            "enum Flag\nOff\nOn\nend\nvalue = Flag.On()\nfirst = value\nsecond = value\n",
+        );
+        let error = validate_record_declarations(&program)
+            .expect_err("enum reuse-after-move should precede unsupported codegen gate");
+        assert!(error.message.contains("moved enum local \"value\""));
+        assert_eq!(error.span.line, 7);
     }
 }
