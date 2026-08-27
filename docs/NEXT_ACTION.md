@@ -36,18 +36,9 @@ Stable `main` baseline for #56:
 
 Post-merge main CI #221 is authoritative for the #55 nominal-declaration slice. Ubuntu passed every existing runtime/performance gate including Records v0; Windows/macOS passed the quality/test/release matrix.
 
-Stable semantic behavior from #55 includes:
-
-- deterministic record/enum/function namespace policy;
-- duplicate enum and per-enum duplicate variant diagnostics;
-- builtin, record and enum payload-reference validation;
-- mixed record/enum nominal-reference validation;
-- cross-record/enum by-value layout-cycle rejection without hidden boxing;
-- valid enum execution still fails closed before unsupported ownership/codegen.
-
 ## Active #56 implementation
 
-Resolved constructor semantics now under PR #58 include:
+Resolved constructor semantics under PR #58 include:
 
 - resolved enum schemas retaining enum name, variant name, optional payload type and source spans;
 - payload types distinguished nominally as scalar / record / enum for semantic validation;
@@ -68,23 +59,27 @@ Resolved constructor semantics now under PR #58 include:
 - `702fa089...` first payload-typing head: CI #224 / run `33099006049` — failed only because one new test expected line 12 while the correct Evolution payload span was line 13; fmt/Clippy passed
 - `6c0342ec...` corrected payload-span head: CI #225 / run `33099288196` — **SUCCESS**
 - `4c4f1d2f...` first full payload-propagation head: CI #226 / run `33099643034` — Clippy exposed an unused validation wrapper and `&mut Vec`/slice API issue; both were fixed on a new SHA, never rerun
-- `e8f84fb2...` corrected full payload-propagation head: CI #227 / run `33099872021` — format, Clippy, CLI regressions and 89/90 lowering tests passed; failure was one incorrect test expectation (`record_field_type_flows_into_enum_payload_check` expected line 8 while the correct payload span is line 9)
-- the failed #227 SHA was not rerun
-- staging fix commit `5ea176f84b38bf4bca70f60e0e6a75924b18f58b` changes only that span expectation from 8 to 9; docs commits may make the final staging head newer than this code commit
+- `e8f84fb2...` corrected full payload-propagation head: CI #227 / run `33099872021` — format, Clippy, CLI regressions and 89/90 lowering tests passed; failure was one incorrect test expectation (`record_field_type_flows_into_enum_payload_check` expected line 8 while the correct payload span is line 9); the failed SHA was not rerun
+- corrected docs-synchronized head `2a6e7dbbe47e52c0c02499da5de5d1a7a40610cb`: CI #228 / run `33103658784` — **SUCCESS**
+- Ubuntu #228 passed format, Clippy, workspace tests, benchmark smoke, runtime repeat, control-flow, logical operators, Functions v0, Block Locals v0, Records v0 and release build
+- Windows/macOS #228 passed format, Clippy, workspace tests, benchmark smoke and release build
+
+The current staging head is newer only because it records #228 in durable docs. That docs-only head requires one final CI after a single fast-forward to PR #58.
 
 ## Resume here
 
-1. Inspect PR #58 and `work/enums-constructor-typing-v0`; the PR branch may still point at `e8f84fb2...` while staging is newer.
-2. Fast-forward PR #58 only to the current staging head after confirming no active Action already exists for that target SHA.
-3. Follow the single new CI for that final docs-synchronized head. Do not rerun #227 and do not create duplicate Actions.
-4. Require green format, Clippy, workspace tests, CLI constructor regressions, existing runtime/performance gates and release build before merge.
-5. Before merging #58, verify #56 acceptance: exact constructor identity, arity, payload typing through locals/functions/records, source-native CLI failures, no rustc reach-through, and no ownership/codegen behavior added.
-6. Merge #58 only with expected-head protection, then verify post-merge `main` CI.
-7. Close/update #56 only after merged-main evidence exists.
+1. Inspect `work/enums-constructor-typing-v0` and PR #58. The staging head should be ahead only by docs recording CI #228.
+2. Confirm no active Action exists for the staging target SHA, then fast-forward `feature/enums-constructor-typing-v0` exactly once.
+3. Follow the single final docs-synchronized CI. Do not rerun #227/#228 and do not create duplicate Actions.
+4. Require green format, Clippy, workspace tests, CLI constructor regressions, existing runtime/performance gates and release build.
+5. Mark PR #58 ready and merge only with expected-head protection after that final CI succeeds.
+6. Verify the post-merge `main` CI before closing/updating #56.
+7. Update #56 checklist only from merged-main evidence, then close it completed if all acceptance items remain satisfied.
 8. Start #57 from the actual #58 squash-merge commit, not from pre-merge staging ancestry.
-9. #57 must add enum-typed match scrutinees, arm enum/variant membership, duplicate-arm rejection, deterministic exhaustiveness, typed arm-local payload bindings and sibling-scope isolation.
-10. Keep enum ownership/move policy, payload extraction partial moves, Rust enum/match codegen and Enums performance work outside #57 unless a minimal dependency is proven.
-11. Preserve every Records v0 and earlier quality/runtime/performance gate.
+9. First #57 slice should reuse resolved enum schemas to validate structured match arm enum/variant membership and deterministic exhaustiveness while keeping execution fail-closed.
+10. Then add enum-typed scrutinee propagation and arm-local typed payload bindings with sibling-scope isolation.
+11. Keep enum ownership/move policy, payload extraction partial moves, Rust enum/match codegen and Enums performance work outside #57 unless a minimal dependency is proven.
+12. Preserve every Records v0 and earlier quality/runtime/performance gate.
 
 ## Engineering constraints
 
