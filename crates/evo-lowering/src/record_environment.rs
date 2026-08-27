@@ -4,6 +4,18 @@ use std::ops::Deref;
 
 mod enums_impl {
     include!("enum_environment.rs");
+
+    mod constructor_typing {
+        include!("enum_constructor_typing.rs");
+    }
+
+    pub(crate) fn validate_enum_constructor_semantics(
+        program: &SyntaxProgram,
+    ) -> Result<(), LowerError> {
+        let environment = collect_enum_environment(program)?;
+        validate_constructor_shapes(program, &environment)?;
+        constructor_typing::validate_constructor_payload_types(program, &environment)
+    }
 }
 
 mod records_impl {
@@ -49,7 +61,7 @@ fn reject_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
         return Ok(());
     }
 
-    enums_impl::validate_enum_declarations(program)?;
+    enums_impl::validate_enum_constructor_semantics(program)?;
     let enum_def = &program.enums[0];
     Err(LowerError {
         message: "enum declarations are parsed, but Enums v0 semantic lowering/codegen is not implemented yet"
@@ -99,5 +111,16 @@ mod tests {
             .expect_err("duplicate variants should fail before unsupported enum execution");
         assert!(error.message.contains("duplicate variant name"));
         assert_eq!(error.span.line, 3);
+    }
+
+    #[test]
+    fn constructor_payload_type_errors_are_diagnosed_before_fail_closed_gate() {
+        let program = parse_source(
+            "enum MaybeInt\nNone\nSome int\nend\nvalue = true\nwrapped = MaybeInt.Some(value)\n",
+        );
+        let error = validate_record_declarations(&program)
+            .expect_err("constructor payload mismatch should precede unsupported codegen gate");
+        assert!(error.message.contains("expects int, found bool"));
+        assert_eq!(error.span.line, 6);
     }
 }
