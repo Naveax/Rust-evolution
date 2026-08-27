@@ -9,96 +9,105 @@ This file is the durable project handoff. Fresh sessions should read `AGENTS.md`
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
 - Rust toolchain: **1.98.0**
-- Records v0 final feature baseline: `ce3018d158d2ce4084a9e569b8eebac6eeb51f8f`.
-- Records post-merge CI #197 / run `33074128274`: **SUCCESS**.
-- Records parent #41 and child issues #43, #46, #47 are completed.
+- Records v0 final feature baseline: `ce3018d158d2ce4084a9e569b8eebac6eeb51f8f`
+- Records post-merge CI #197 / run `33074128274`: **SUCCESS**
+- Records parent #41 and child issues #43, #46, #47 are completed
 
 ## Completed Records v0 milestone
 
 Records v0 remains the accepted ZERO-cost nominal product-type baseline: static Rust structs/field access, by-value move tracking, no hidden allocation/boxing/GC/RC/clone/dynamic dispatch/runtime metadata, with its dedicated differential performance gate preserved.
 
-## Enums v0 parser milestone completed
+## Completed Enums parser milestone
 
-Parent:
+Parent: **#50 — Enums v0: nominal sum types + exhaustive static matching**
 
-- **#50 — Enums v0: nominal sum types + exhaustive static matching**
+Parser / formatter child #51 is completed.
 
-Completed parser / formatter child:
-
-- **#51 — Enums parser: declarations, qualified variants and case-match surface**
 - declaration slice PR #52 merged as `f6796fa8f9f87530b98de0e13bf636fa95c2254a`
 - constructor/match slice PR #53 squash-merged as `c454fcfe5811a9122b8dfeefad7f4eb4c22c8afa`
 - PR #53 final CI #215 / run `33091101594`: **SUCCESS**
 - post-merge main CI #216 / run `33091396504`: **SUCCESS**
-- issue #51 closed completed
 
-Ubuntu #216 passed format, Clippy, workspace tests, benchmark smoke, runtime repeat, control-flow, logical operators, Functions v0, Block Locals v0, Records v0 and release build. Windows/macOS passed format, Clippy, workspace tests, benchmark smoke and release build.
+The stable parser supports source-spanned enum declarations, structured qualified constructors, statement-only match/case patterns, bounded recovery and canonical formatting. Enum execution remains intentionally fail-closed before unsupported runtime semantics/codegen.
 
-The stable parser/formatter surface includes:
-
-- exact-boundary `enum`, `match`, `case` keywords;
-- source-spanned enum declarations and unit/single-payload variants;
-- structured `Enum.Variant(...)` constructor AST;
-- statement-only source-spanned `match` with explicit `case` arms;
-- fully qualified unit and one-payload-binding patterns;
-- bounded nested recovery with sibling-case/end preservation;
-- canonical/idempotent enum constructor and match formatting;
-- CLI fail-closed regressions proving unsupported enum execution stops at Evolution source spans before rustc.
-
-No enum runtime semantics were introduced by #51.
-
-## Active semantic child — #54
+## Active semantic umbrella — #54
 
 **#54 — Enums semantics: nominal typing, constructors and exhaustive match**
 
-Working staging branch:
+Delivery is split into atomic slices:
 
-`work/enums-semantics-v0`
+1. **PR #55 — nominal declaration validation**
+2. **#56 — resolved variants and constructor typing**
+3. **#57 — exhaustive match typing and arm scopes**
 
-The branch was reset to the actual parser merge baseline `c454fcfe5811a9122b8dfeefad7f4eb4c22c8afa` before semantic work began.
+Ownership/codegen/performance remain later work.
 
-Current staging changes, not yet accepted on `main`:
+## PR #55 current validated slice
 
-- introduced an internal `TypeEnvironment` wrapper while preserving `RecordEnvironment` as a temporary compatibility alias;
-- existing Records type resolution, constructor validation and field lookup remain delegated unchanged;
-- added enum declaration semantic validation before the existing enum fail-closed gate;
-- duplicate enum names reject source-natively;
-- duplicate variants within one enum reject source-natively;
-- variant names remain scoped by enum;
-- record/enum nominal namespace collisions reject source-natively;
-- enum/function name collisions reject source-natively;
-- valid enum programs still fail closed before semantic lowering/codegen.
+PR branch: `feature/enums-semantics-v0`
 
-These staging changes still require their own PR CI. They must not be treated as stable behavior merely because the parser baseline is green.
+Validated code head: `ccfc0f3e5cfad8e6c66c171725e3b58576c60dcf`
 
-## #54 semantic direction
+CI #219 / run `33092454867`: **SUCCESS**.
 
-The next accepted semantic layer should establish one nominal type graph:
+Ubuntu #219 passed format, Clippy, workspace tests, benchmark smoke, all existing runtime/performance gates including Records v0, and release build. Windows/macOS passed format, Clippy, workspace tests, benchmark smoke and release build.
 
-- builtin scalar types;
-- record nominal types;
-- enum nominal types;
-- resolved enum variant payloads;
-- deterministic record/enum/function namespace rules;
-- by-value layout-cycle rejection across records and enums;
-- exact enum/variant constructor resolution and payload arity/type checking;
-- enum-typed match scrutinees;
-- arm enum membership, duplicate-arm rejection and exhaustiveness;
-- typed payload bindings scoped to one arm;
-- structured lowered enum schemas/constructors/matches.
+Implemented on #55:
 
-## Deliberate #54 boundary
+- internal `TypeEnvironment` semantic boundary;
+- existing record environment retained behind delegated storage with a transitional `RecordEnvironment` compatibility name;
+- duplicate enum-name rejection;
+- duplicate variant rejection within one enum;
+- same variant name allowed across different enums;
+- record/enum nominal namespace collision rejection;
+- enum/function namespace collision rejection;
+- builtin/record/enum payload-reference validation;
+- acyclic record-to-enum and enum-to-record references accepted at declaration-validation level;
+- unknown named types rejected source-natively in mixed nominal programs;
+- direct and indirect record/enum by-value layout cycles rejected without hidden boxing;
+- valid enum programs still stop at the existing Enums semantic/codegen fail-closed gate.
+
+A later docs-synchronized #55 head still requires its own final CI before merge. Until #55 lands on `main`, the items above are PR evidence rather than stable language behavior.
+
+## Next slice — #56 resolved variants + constructor typing
+
+After #55 merges, start #56 from the actual squash-merge baseline.
+
+Required direction:
+
+- resolved enum schemas retain enum name, variant name, optional resolved payload type and source spans;
+- semantic type model distinguishes scalars, records and enums nominally;
+- enum/function signatures resolve deterministically where required for constructor expression type checking;
+- `Enum.Variant(...)` resolves exactly one enum + variant;
+- unit variants require zero arguments;
+- payload variants require exactly one argument;
+- payload expression is statically type checked;
+- constructor expression receives the nominal enum type;
+- unknown enum/variant/wrong arity/wrong payload type reject at Evolution source spans;
+- constructor execution remains fail-closed before ownership/codegen.
+
+## Following slice — #57 exhaustive match typing
+
+After #56 lands:
+
+- require enum-typed scrutinees;
+- validate arm enum/variant membership;
+- reject duplicate arms;
+- require deterministic exhaustive coverage;
+- type payload bindings from variant payloads;
+- keep bindings lexical to one arm and sibling scopes independent;
+- keep ownership joins and Rust match codegen out of the slice.
+
+## Deliberate semantic boundary
 
 Do not add yet:
 
-- enum ownership/move/reinitialization rules;
+- enum move/reinitialization rules;
 - payload extraction partial-move behavior;
 - Rust enum/match codegen;
 - source-map codegen snapshots;
 - dedicated Enums performance gate;
-- generics, wildcard/guards/or-patterns/nested arbitrary patterns, Option/Result sugar.
-
-Any runtime-facing enum surface must remain explicitly fail-closed until its later child work lands.
+- generics, guards, wildcard/or/nested arbitrary patterns, Option/Result sugar.
 
 Enums v0 remains a **ZERO** cost-class target: ordinary static Rust enums/matches, no hidden allocation, boxing, clone, dispatch or runtime metadata.
 
@@ -107,7 +116,8 @@ Enums v0 remains a **ZERO** cost-class target: ordinary static Rust enums/matche
 - `main`: `c454fcfe5811a9122b8dfeefad7f4eb4c22c8afa`
 - post-merge CI #216 / run `33091396504`: **SUCCESS**
 - parser child #51: completed
-- active semantic child: #54
+- semantic umbrella #54: active
+- nominal declaration PR #55: code head green in CI #219, final docs-synchronized head pending
 
 ## Durable continuation infrastructure
 
