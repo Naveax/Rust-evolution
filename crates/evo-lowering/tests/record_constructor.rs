@@ -1,9 +1,9 @@
 pub use evo_lowering::LowerError;
 
-#[path = "../src/record_environment.rs"]
-mod record_environment;
 #[path = "../src/record_constructor.rs"]
 mod record_constructor;
+#[path = "../src/record_environment.rs"]
+mod record_environment;
 
 use evo_lexer::{Span, lex};
 use evo_parser::parse;
@@ -59,7 +59,10 @@ fn zero_field_constructor_normalizes_to_empty_field_list() {
     let records = environment("record Marker\nend\n");
     let lowered = lower_constructor_fields(&records, "Marker", Vec::new(), span(1))
         .expect("zero-field record should construct without synthetic fields");
-    assert_eq!(lowered.value_type, SemanticType::Record("Marker".to_owned()));
+    assert_eq!(
+        lowered.value_type,
+        SemanticType::Record("Marker".to_owned())
+    );
     assert!(lowered.fields.is_empty());
 }
 
