@@ -26,151 +26,139 @@ Completed parser surface:
 - PR #53 final CI #215 / run `33091101594`: **SUCCESS**
 - post-merge main CI #216 / run `33091396504`: **SUCCESS**
 
-The parser supports source-spanned enum declarations, structured qualified constructors, statement-only match/case patterns, bounded recovery and canonical formatting. Runtime enum execution is still intentionally fail-closed.
+The parser supports source-spanned enum declarations, structured qualified constructors, statement-only match/case patterns, bounded recovery and canonical formatting.
 
-## Semantic umbrella — #54
+## Completed semantic umbrella — #54
 
-**#54 — Enums semantics: nominal typing, constructors and exhaustive match**
+**#54 — Enums semantics: nominal typing, constructors and exhaustive match** is closed completed.
 
-Delivery slices:
+Merged delivery slices:
 
-1. **PR #55 — nominal declaration validation — MERGED**
-2. **#56 / PR #58 — resolved variants and constructor typing — MERGED**
-3. **#57 / PR #59 — exhaustive match typing and arm scopes — ACTIVE / FINAL DOCS VALIDATION**
+1. **PR #55 — nominal declaration validation**
+   - squash merge `ca9641d6c7c57ab603cda8b6a4a091f50cfd625d`
+   - post-merge main CI #221 / run `33098011627`: **SUCCESS**
+2. **#56 / PR #58 — resolved variants and constructor typing**
+   - squash merge `875b4d8fc255d6699b4f89b5e5c769d8dd34383b`
+   - final PR CI #229 / run `33103924169`: **SUCCESS**
+   - post-merge main CI #230 / run `33104226016`: **SUCCESS**
+3. **#57 / PR #59 — exhaustive match typing and arm scopes**
+   - final PR head `8bb8e7b56f92910c64943d470455e5820bbca346`
+   - final PR CI #235 / run `33113751852`: **SUCCESS**
+   - squash merge `e698b7f094863f017b3a29ad0210b638b6bd6a3f`
+   - post-merge main CI #236 / run `33113950293`: **SUCCESS**
 
-Ownership, executable Rust codegen and dedicated Enums performance remain separate following children.
+## Stable semantic behavior on `main`
 
-## Landed semantic slice — PR #55
+Current authoritative semantic baseline:
 
-Squash merge:
+`e698b7f094863f017b3a29ad0210b638b6bd6a3f`
 
-`ca9641d6c7c57ab603cda8b6a4a091f50cfd625d`
+Validated behavior includes:
 
-Validation:
+- source-spanned nominal enum schemas;
+- duplicate enum/variant and namespace collision rejection;
+- builtin/record/enum payload-reference validation;
+- direct/indirect by-value nominal layout cycle rejection without hidden indirection;
+- structured exact `Enum.Variant(...)` resolution;
+- unit/payload constructor arity checks;
+- static payload expression typing through literals/operators/nested constructors/locals/functions/records;
+- statically known nominal enum match scrutinees;
+- arm enum/variant membership validation;
+- duplicate-arm rejection;
+- deterministic exhaustive coverage in declaration order;
+- unit/payload match binding shape checks;
+- typed lexical payload bindings with sibling-scope isolation and no post-match leakage;
+- source-native semantic failures before rustc;
+- a non-executable resolved match sidecar retaining structured enum/variant identity, source spans, typed payload-binding metadata and exhaustive-only return-path summary;
+- explicit fail-closed runtime boundary before enum ownership and Rust enum/match codegen.
 
-- final PR CI #220 / run `33097848047`: **SUCCESS**
-- post-merge main CI #221 / run `33098011627`: **SUCCESS**
+Post-merge CI #236 preserved every existing Ubuntu runtime/performance gate including Records v0 and the Windows/macOS quality/test/release matrix.
 
-Stable behavior includes duplicate enum/variant rejection, explicit nominal namespaces, builtin/record/enum payload reference validation and direct/indirect by-value nominal cycle rejection without hidden boxing.
+## Active ownership child — #60
 
-## Landed semantic slice — #56 / PR #58
+**#60 — Enums v0 ownership + match payload extraction** is now active.
 
-Squash merge:
+Staging:
 
-`875b4d8fc255d6699b4f89b5e5c769d8dd34383b`
+- branch: `work/enums-ownership-v0`
+- exact base: `e698b7f094863f017b3a29ad0210b638b6bd6a3f`
+- no feature PR yet; first create a coherent ownership-infrastructure slice
 
-Validation:
+### Ownership architecture
 
-- final PR CI #229 / run `33103924169`: **SUCCESS**
-- post-merge main CI #230 / run `33104226016`: **SUCCESS**
-- Ubuntu #230 preserved every existing runtime/performance gate including Records v0
-- Windows/macOS preserved the quality/test/release matrix
+The existing executable Records lowerer uses `ValueType`, Records `SemanticType`, `Analyzer` and `MoveTracker`. Enum programs are intentionally rejected before that executable Analyzer. Therefore #60 should not begin by punching `Enum` through the executable Records type path.
 
-Stable constructor semantics on `main`:
+Instead:
 
-- resolved enum schemas retain structured enum/variant identity, optional payload type and source spans;
-- semantic payload typing distinguishes int/bool/string, record nominal types and enum nominal types without changing Records move tracking;
-- exact `Enum.Variant(...)` resolution;
-- zero arguments for unit variants and exactly one for payload variants;
-- payload expression type checking through literals/operators/nested constructors/locals/functions/records;
-- invalid constructors stop source-natively before rustc;
-- valid enum execution remains fail-closed before ownership/codegen.
+1. extract the availability/reinitialization/control-flow-join mechanics from Records `MoveTracker` into a diagnostics-free generic state core;
+2. keep Records `MoveTracker` as a compatibility wrapper with unchanged diagnostics and behavior;
+3. reuse that state core from a separate enum pre-codegen ownership validator under `record_environment::enums_impl`;
+4. reuse the already-proven enum static type environment and resolved match sidecar rather than creating a competing enum type model.
 
-## Active semantic slice — #57 / PR #59
+Conservative v0 ownership target:
 
-PR: **#59 — type-check Enums v0 exhaustive matches**
+- nominal enum values are move-only regardless of payload;
+- record/enum payload bindings are move-only and scalar/static payloads trivially reusable;
+- by-value enum reads, arguments, returns and constructor payload uses consume move-only values;
+- matching an owned enum consumes the whole scrutinee;
+- payload ownership follows the declared payload type;
+- same-type explicit reinitialization restores availability;
+- whole-enum reuse after consuming match fails source-natively;
+- partial reuse/partial moves are not inferred;
+- no implicit clone, boxing, borrow/reference inference or dynamic runtime machinery.
 
-Branches:
+The current match sidecar retains only `all_arms_return`. #60 may extend each resolved arm with terminal/continuing metadata because ownership joins need to ignore terminal arms individually when some arms return and others continue.
 
-- PR branch: `feature/enums-match-typing-v0`
-- staging: `work/enums-match-typing-v0`
+## Remaining Enums v0 queue
 
-Verified code head before final docs sync:
+After #60:
 
-`a5270d2a86b1103a431382325c5d77752ccebcf1`
-
-Implemented match semantics:
-
-- scrutinee must have a statically known nominal enum type;
-- arm qualifiers must name the scrutinee enum;
-- every arm variant must resolve in the enum schema;
-- duplicate variant arms are rejected;
-- exhaustive coverage requires every declared variant exactly once;
-- non-exhaustive diagnostics list missing variants deterministically in declaration order;
-- unit variants reject payload bindings;
-- payload variants require one binding under the frozen parser surface;
-- payload bindings receive the declared payload type;
-- bindings are lexical to one arm only;
-- sibling arm scopes are independent;
-- arm locals do not leak after the match;
-- payload bindings obey the current no-shadowing policy;
-- nested `if` / `repeat` / `match` semantic scopes remain deterministic;
-- invalid match programs fail at Evolution source spans before rustc.
-
-## Retained match semantic sidecar
-
-#57 also introduces a non-executable semantic sidecar for later ownership/codegen work:
-
-- structured enum name and variant name for each validated arm;
-- match and arm source spans;
-- typed payload-binding metadata;
-- source-statement indexing without concatenated magic names;
-- `all_arms_return`, computed only after structural exhaustiveness succeeds;
-- parser ↔ resolved-sidecar invariant validation before the existing fail-closed runtime boundary.
-
-This is semantic metadata, not Rust enum/match codegen. It creates no ownership joins and no runtime representation.
-
-## PR #59 CI evidence
-
-- structural head `661786a4...`: CI #231 / run `33104721456` — **SUCCESS**
-- first typed-match head `a5a8fb8e...`: CI #232 / run `33105128042` — failed only because one new test expected line 9 while the correct payload-binding pattern span was line 10; fmt/Clippy and all other relevant tests were green; failed SHA was not rerun
-- corrected typed-match head `d7d6818937c1d1f353b271938ca14b643b2ac01c`: CI #233 / run `33105515592` — **SUCCESS**
-- resolved-sidecar head `a5270d2a86b1103a431382325c5d77752ccebcf1`: CI #234 / run `33113246845` — **SUCCESS**
-- Ubuntu #234 passed format, Clippy, workspace tests, benchmark smoke, runtime repeat, control-flow, logical operators, Functions v0, Block Locals v0, Records v0 and release build
-- Windows/macOS #234 passed format, Clippy, workspace tests, benchmark smoke and release build
-
-The staging branch is now newer only because durable handoff docs are being synchronized with #234 and the following queue. That docs-synchronized SHA must receive its own final CI after one fast-forward to PR #59.
-
-## Following Enums v0 queue
-
-The remaining #50 work is now atomized:
-
-1. **#60 — Enums v0 ownership + match payload extraction**
-   - explicit by-value enum move/reinitialization semantics;
-   - source-native reuse-after-move;
-   - payload extraction ownership and conservative control-flow joins;
-   - no hidden clone/boxing.
-2. **#61 — static Rust enum/match codegen + source maps**
+1. **#61 — static Rust enum/match codegen + source maps**
    - executable lowered enum/match IR;
-   - direct Rust enum definitions, constructors and `match`;
+   - direct static Rust enum definitions, constructors and `match`;
    - generated-source mapping and native correctness corpus.
-3. **#62 — differential performance parity + final spec sync**
-   - runtime-dependent Enums v0 benchmark against equivalent Rust;
-   - #4/#5 parity evidence;
-   - `LANGUAGE_SPEC_V0.md` synchronization only after correctness/ownership/codegen/performance are proven.
+2. **#62 — differential performance parity + final spec sync**
+   - runtime-dependent Enums v0 differential benchmark against equivalent Rust;
+   - #4/#5 evidence;
+   - final `LANGUAGE_SPEC_V0.md` synchronization only after correctness/ownership/codegen/performance are accepted.
+
+## Parent #50 state
+
+Completed:
+
+- syntax/parser/formatter surface;
+- nominal/type semantics;
+- constructor semantics;
+- exhaustive static match semantics;
+- current cross-platform quality matrix and preservation of all prior runtime gates.
+
+Still open:
+
+- explicit enum ownership/move model (#60);
+- executable static Rust enum/match lowering and source maps (#61);
+- native correctness corpus (#61);
+- dedicated Enums performance parity evidence (#62);
+- final stable language spec synchronization (#62).
 
 ## Deliberate current boundary
 
-Do not add in #57:
+Do not add in #60:
 
-- enum move/reinitialization rules;
-- payload extraction ownership/partial moves;
 - Rust enum/match codegen;
-- source-map codegen snapshots;
+- generated enum source-map snapshots;
 - dedicated Enums performance gate;
+- final language spec sync;
 - generics, guards, wildcard/or/nested arbitrary patterns, Option/Result sugar.
 
 Enums v0 remains a **ZERO** cost-class target: eventually ordinary static Rust enums/matches, never hidden allocation, boxing, clone, dispatch or runtime metadata.
 
 ## Current stable baseline
 
-- `main`: `875b4d8fc255d6699b4f89b5e5c769d8dd34383b`
-- post-merge main CI #230 / run `33104226016`: **SUCCESS**
+- `main`: `e698b7f094863f017b3a29ad0210b638b6bd6a3f`
+- post-merge main CI #236 / run `33113950293`: **SUCCESS**
 - parser child #51: completed
-- nominal declaration PR #55: merged and validated
-- constructor child #56 / PR #58: merged and validated
-- match child #57 / PR #59: code head #234 green, final docs-synchronized CI then merge
-- ownership child #60: queued after #57/#54 merged-main completion
+- semantic umbrella #54: completed
+- ownership child #60: active on `work/enums-ownership-v0`
 - codegen child #61: queued after #60
 - performance/spec child #62: queued after #61
 
