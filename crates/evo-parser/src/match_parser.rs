@@ -71,7 +71,10 @@ impl<'a> Parser<'a> {
                 span: enum_token.span,
             });
         };
-        self.expect_kind(TokenKind::Dot, "expected '.' after enum name in case pattern")?;
+        self.expect_kind(
+            TokenKind::Dot,
+            "expected '.' after enum name in case pattern",
+        )?;
         let variant_token = self.advance();
         let TokenKind::Identifier(variant_name) = variant_token.kind else {
             return Err(ParseError {
@@ -148,8 +151,7 @@ impl<'a> Parser<'a> {
         }
 
         let mut arms = Vec::new();
-        while matches!(self.current().kind, TokenKind::Case)
-            && errors.len() < MAX_RECOVERED_ERRORS
+        while matches!(self.current().kind, TokenKind::Case) && errors.len() < MAX_RECOVERED_ERRORS
         {
             let arm_start = self.advance().span;
             let pattern = match self.parse_match_pattern() {
@@ -202,9 +204,7 @@ impl<'a> Parser<'a> {
     }
 
     fn skip_until_case_or_end(&mut self) {
-        while !self.is_eof()
-            && !matches!(self.current().kind, TokenKind::Case | TokenKind::End)
-        {
+        while !self.is_eof() && !matches!(self.current().kind, TokenKind::Case | TokenKind::End) {
             self.advance();
         }
     }
