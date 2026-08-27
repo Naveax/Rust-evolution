@@ -44,6 +44,9 @@ pub enum TokenKind {
     Fn,
     Return,
     Record,
+    Enum,
+    Match,
+    Case,
     TypeInt,
     TypeBool,
     TypeString,
@@ -425,6 +428,9 @@ impl<'a> Lexer<'a> {
             "fn" => TokenKind::Fn,
             "return" => TokenKind::Return,
             "record" => TokenKind::Record,
+            "enum" => TokenKind::Enum,
+            "match" => TokenKind::Match,
+            "case" => TokenKind::Case,
             "int" => TokenKind::TypeInt,
             "bool" => TokenKind::TypeBool,
             "string" => TokenKind::TypeString,
@@ -585,6 +591,17 @@ mod tests {
     fn function_keyword_prefixes_remain_identifiers() {
         let tokens = kinds("fnord = 1\nreturning = 2\ninteger = 3\nboolean = 4\nstringify = 5\n");
         for name in ["fnord", "returning", "integer", "boolean", "stringify"] {
+            assert!(tokens.contains(&TokenKind::Identifier(name.to_owned())));
+        }
+    }
+
+    #[test]
+    fn tokenizes_enum_match_case_keywords_and_preserves_prefix_identifiers() {
+        let tokens = kinds("enum match case\nenumerate matcher casework\n");
+        assert_eq!(tokens[0], TokenKind::Enum);
+        assert_eq!(tokens[1], TokenKind::Match);
+        assert_eq!(tokens[2], TokenKind::Case);
+        for name in ["enumerate", "matcher", "casework"] {
             assert!(tokens.contains(&TokenKind::Identifier(name.to_owned())));
         }
     }
