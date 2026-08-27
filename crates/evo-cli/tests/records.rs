@@ -63,9 +63,7 @@ fn emit_rust_uses_static_record_structs_without_runtime_scaffolding() {
     assert!(stdout.contains("__evo_field_x: i64,"), "{stdout}");
     assert!(stdout.contains("__evo_field_y: i64,"), "{stdout}");
     assert!(
-        stdout.contains(
-            "__EvoRecord_Point { __evo_field_x: 40, __evo_field_y: 2 }"
-        ),
+        stdout.contains("__EvoRecord_Point { __evo_field_x: 40, __evo_field_y: 2 }"),
         "{stdout}"
     );
     assert!(!stdout.contains(".clone()"), "{stdout}");
@@ -90,7 +88,10 @@ fn build_compiles_static_record_program_and_binary_runs() {
 
     let build_stderr = String::from_utf8_lossy(&build.stderr);
     assert!(build.status.success(), "{build_stderr}");
-    assert!(binary.exists(), "record program should compile to a native binary");
+    assert!(
+        binary.exists(),
+        "record program should compile to a native binary"
+    );
 
     let run = Command::new(&binary)
         .output()
