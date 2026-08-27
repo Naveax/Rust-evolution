@@ -17,7 +17,9 @@ pub fn try_generate_lowered_rust(program: &Program) -> Result<String, CodegenErr
     Ok(generate_lowered_rust(program))
 }
 
-pub fn try_generate_lowered_rust_with_map(program: &Program) -> Result<GeneratedRust, CodegenError> {
+pub fn try_generate_lowered_rust_with_map(
+    program: &Program,
+) -> Result<GeneratedRust, CodegenError> {
     Ok(generate_lowered_rust_with_map(program))
 }
 
