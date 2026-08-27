@@ -150,6 +150,42 @@ fn check_rejects_match_payload_binding_scope_escape_before_codegen() {
 }
 
 #[test]
+fn check_rejects_enum_reuse_after_move_before_codegen() {
+    assert_check_fails_before_rustc(
+        "enum-ownership-reuse",
+        "reuse-after-move.evo",
+        "enum Flag\nOff\nOn\nend\nvalue = Flag.On()\nfirst = value\nsecond = value\n",
+        "moved enum local \"value\"",
+        7,
+        10,
+    );
+}
+
+#[test]
+fn check_rejects_enum_reuse_after_owned_match_before_codegen() {
+    assert_check_fails_before_rustc(
+        "enum-ownership-match-reuse",
+        "reuse-after-match.evo",
+        "enum Flag\nOff\nOn\nend\nvalue = Flag.On()\nmatch value\ncase Flag.Off\nprint 0\ncase Flag.On\nprint 1\nend\nagain = value\n",
+        "moved enum local \"value\"",
+        12,
+        9,
+    );
+}
+
+#[test]
+fn check_rejects_record_payload_binding_reuse_before_codegen() {
+    assert_check_fails_before_rustc(
+        "enum-ownership-record-payload",
+        "record-payload-reuse.evo",
+        "record Item\nvalue int\nend\nenum Wrapped\nNone\nSome Item\nend\nfn use(value Wrapped) int\nmatch value\ncase Wrapped.None\nreturn 0\ncase Wrapped.Some(x)\nfirst = x\nsecond = x\nreturn 1\nend\nend\n",
+        "moved record local \"x\"",
+        14,
+        10,
+    );
+}
+
+#[test]
 fn check_keeps_match_statements_fail_closed_before_codegen() {
     assert_check_fails_before_rustc(
         "enum-match-check-gate",
