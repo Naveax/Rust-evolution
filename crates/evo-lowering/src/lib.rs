@@ -111,14 +111,15 @@ impl fmt::Display for LowerError {
 
 impl Error for LowerError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueType {
     Integer,
     String,
     Bool,
+    Record(String),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct BindingState {
     value_type: ValueType,
     declaration_start: usize,
@@ -133,9 +134,9 @@ struct FunctionSignature {
 pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
     records::validate_record_declarations(program)?;
     let records = record_ir::lower_record_schemas(program);
-    reject_unlowered_record_signature_types(program)?;
+    let record_names: HashSet<String> = records.iter().map(|record| record.name.clone()).collect();
 
-    let signatures = collect_function_signatures(&program.functions)?;
+    let signatures = collect_function_signatures(&program.functions, &record_names)?;
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
         functions.push(lower_function(function, &signatures)?);
@@ -152,32 +153,9 @@ pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
     })
 }
 
-fn reject_unlowered_record_signature_types(program: &SyntaxProgram) -> Result<(), LowerError> {
-    for function in &program.functions {
-        for parameter in &function.parameters {
-            if let SyntaxTypeName::Named(name) = &parameter.type_name {
-                return Err(LowerError {
-                    message: format!(
-                        "record type {name:?} is parsed but Records v0 semantic lowering is not implemented yet"
-                    ),
-                    span: parameter.span,
-                });
-            }
-        }
-        if let SyntaxTypeName::Named(name) = &function.return_type {
-            return Err(LowerError {
-                message: format!(
-                    "record return type {name:?} is parsed but Records v0 semantic lowering is not implemented yet"
-                ),
-                span: function.span,
-            });
-        }
-    }
-    Ok(())
-}
-
 fn collect_function_signatures(
     functions: &[SyntaxFunction],
+    record_names: &HashSet<String>,
 ) -> Result<HashMap<String, FunctionSignature>, LowerError> {
     let mut signatures = HashMap::new();
     for function in functions {
@@ -197,14 +175,18 @@ fn collect_function_signatures(
                     span: parameter.span,
                 });
             }
-            parameter_types.push(value_type(&parameter.type_name));
+            parameter_types.push(value_type(
+                &parameter.type_name,
+                record_names,
+                parameter.span,
+            )?);
         }
 
         signatures.insert(
             function.name.clone(),
             FunctionSignature {
                 parameter_types,
-                return_type: value_type(&function.return_type),
+                return_type: value_type(&function.return_type, record_names, function.span)?,
             },
         );
     }
@@ -215,13 +197,20 @@ fn lower_function(
     function: &SyntaxFunction,
     signatures: &HashMap<String, FunctionSignature>,
 ) -> Result<Function, LowerError> {
-    let return_type = value_type(&function.return_type);
-    let mut analyzer = Analyzer::new(signatures, Some(return_type));
+    let signature = signatures
+        .get(&function.name)
+        .expect("function signatures are collected before lowering bodies");
+    let return_type = signature.return_type.clone();
+    let mut analyzer = Analyzer::new(signatures, Some(return_type.clone()));
     let mut parameters = Vec::with_capacity(function.parameters.len());
 
-    for parameter in &function.parameters {
-        let parameter_type = value_type(&parameter.type_name);
-        analyzer.define_binding(parameter.name.clone(), parameter_type, parameter.span.start);
+    for (parameter, parameter_type) in function.parameters.iter().zip(&signature.parameter_types) {
+        let parameter_type = parameter_type.clone();
+        analyzer.define_binding(
+            parameter.name.clone(),
+            parameter_type.clone(),
+            parameter.span.start,
+        );
         parameters.push(Parameter {
             name: parameter.name.clone(),
             value_type: parameter_type,
@@ -243,7 +232,7 @@ fn lower_function(
             message: format!(
                 "function {:?} must return {} on every terminal path",
                 function.name,
-                type_label(return_type)
+                type_label(&return_type)
             ),
             span: function.span,
         });
@@ -281,22 +270,31 @@ fn statement_always_returns(statement: &Stmt) -> bool {
     }
 }
 
-fn value_type(type_name: &SyntaxTypeName) -> ValueType {
+fn value_type(
+    type_name: &SyntaxTypeName,
+    record_names: &HashSet<String>,
+    span: Span,
+) -> Result<ValueType, LowerError> {
     match type_name {
-        SyntaxTypeName::Int => ValueType::Integer,
-        SyntaxTypeName::Bool => ValueType::Bool,
-        SyntaxTypeName::String => ValueType::String,
-        SyntaxTypeName::Named(name) => {
-            unreachable!("named record type {name:?} must be rejected before scalar lowering")
+        SyntaxTypeName::Int => Ok(ValueType::Integer),
+        SyntaxTypeName::Bool => Ok(ValueType::Bool),
+        SyntaxTypeName::String => Ok(ValueType::String),
+        SyntaxTypeName::Named(name) if record_names.contains(name) => {
+            Ok(ValueType::Record(name.clone()))
         }
+        SyntaxTypeName::Named(name) => Err(LowerError {
+            message: format!("unknown record type {name:?}"),
+            span,
+        }),
     }
 }
 
-fn type_label(value_type: ValueType) -> &'static str {
+fn type_label(value_type: &ValueType) -> &str {
     match value_type {
         ValueType::Integer => "int",
         ValueType::Bool => "bool",
         ValueType::String => "string",
+        ValueType::Record(name) => name,
     }
 }
 
@@ -324,7 +322,7 @@ impl<'a> Analyzer<'a> {
         self.scopes
             .iter()
             .rev()
-            .find_map(|scope| scope.get(name).copied())
+            .find_map(|scope| scope.get(name).cloned())
     }
 
     fn define_binding(&mut self, name: String, value_type: ValueType, declaration_start: usize) {
@@ -359,6 +357,13 @@ impl<'a> Analyzer<'a> {
         let kind = match &statement.kind {
             SyntaxStmtKind::Bind { name, expr } => {
                 let (expr, expression_type) = self.lower_expr(expr)?;
+                if matches!(&expression_type, ValueType::Record(_)) {
+                    return Err(LowerError {
+                        message: "record-valued bindings are typed but remain fail-closed until Records v0 move analysis lands"
+                            .to_owned(),
+                        span: statement.span,
+                    });
+                }
                 if let Some(binding) = self.visible_binding(name) {
                     if binding.value_type != expression_type {
                         return Err(LowerError {
@@ -383,21 +388,28 @@ impl<'a> Analyzer<'a> {
                 }
             }
             SyntaxStmtKind::Print(expr) => {
-                let (expr, _) = self.lower_expr(expr)?;
+                let (expr, expression_type) = self.lower_expr(expr)?;
+                if matches!(&expression_type, ValueType::Record(_)) {
+                    return Err(LowerError {
+                        message: "printing whole record values is not supported in Records v0"
+                            .to_owned(),
+                        span: expr.span,
+                    });
+                }
                 StmtKind::Print(expr)
             }
             SyntaxStmtKind::Return(expr) => {
-                let expected_return = self.expected_return.ok_or_else(|| LowerError {
+                let expected_return = self.expected_return.as_ref().ok_or_else(|| LowerError {
                     message: "return is only valid inside a function".to_owned(),
                     span: statement.span,
                 })?;
                 let (expr, actual_type) = self.lower_expr(expr)?;
-                if actual_type != expected_return {
+                if &actual_type != expected_return {
                     return Err(LowerError {
                         message: format!(
                             "return type mismatch: expected {}, found {}",
                             type_label(expected_return),
-                            type_label(actual_type)
+                            type_label(&actual_type)
                         ),
                         span: statement.span,
                     });
@@ -480,14 +492,21 @@ impl<'a> Analyzer<'a> {
                     arguments.iter().zip(&signature.parameter_types).enumerate()
                 {
                     let (argument, actual_type) = self.lower_expr(argument)?;
-                    if actual_type != *expected_type {
+                    if &actual_type != expected_type {
                         return Err(LowerError {
                             message: format!(
                                 "argument {} for function {name:?} expects {}, found {}",
                                 index + 1,
-                                type_label(*expected_type),
-                                type_label(actual_type)
+                                type_label(expected_type),
+                                type_label(&actual_type)
                             ),
+                            span: argument.span,
+                        });
+                    }
+                    if matches!(&actual_type, ValueType::Record(_)) {
+                        return Err(LowerError {
+                            message: "record-valued function arguments are typed but remain fail-closed until Records v0 move analysis lands"
+                                .to_owned(),
                             span: argument.span,
                         });
                     }
@@ -498,7 +517,7 @@ impl<'a> Analyzer<'a> {
                         name: name.clone(),
                         arguments: lowered_arguments,
                     },
-                    signature.return_type,
+                    signature.return_type.clone(),
                 )
             }
             SyntaxExprKind::Construct { .. } => {
@@ -550,6 +569,14 @@ impl<'a> Analyzer<'a> {
                         ValueType::Integer
                     }
                     BinaryOp::Equal | BinaryOp::NotEqual => {
+                        if matches!(&left_type, ValueType::Record(_))
+                            || matches!(&right_type, ValueType::Record(_))
+                        {
+                            return Err(LowerError {
+                                message: "record equality is not supported in Records v0".to_owned(),
+                                span: expr.span,
+                            });
+                        }
                         if left_type != right_type {
                             return Err(LowerError {
                                 message: "equality operands must have the same value type"
@@ -651,10 +678,49 @@ mod tests {
     }
 
     #[test]
-    fn rejects_named_record_signature_types_until_semantic_lowering_lands() {
-        let error = lower_source("fn identity(point Point) Point\nreturn point\nend\n")
-            .expect_err("named record signature types must not reach scalar lowering");
-        assert!(error.message.contains("record type"));
+    fn lowers_declared_record_signature_types_nominally() {
+        let program = lower_source(
+            "record Point\nx int\nend\nfn identity(point Point) Point\nreturn point\nend\n",
+        )
+        .expect("declared record types should lower nominally in function signatures");
+        assert_eq!(program.functions.len(), 1);
+        assert_eq!(
+            program.functions[0].parameters[0].value_type,
+            ValueType::Record("Point".to_owned())
+        );
+        assert_eq!(
+            program.functions[0].return_type,
+            ValueType::Record("Point".to_owned())
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_record_signature_types() {
+        let error = lower_source("fn bad(point Missing) int\nreturn 1\nend\n")
+            .expect_err("unknown record signature type must fail");
+        assert!(error.message.contains("unknown record type"));
+        assert_eq!(error.span.line, 1);
+    }
+
+    #[test]
+    fn keeps_record_value_operations_fail_closed_before_move_analysis() {
+        let binding = lower_source(
+            "record Point\nx int\nend\nfn copy(point Point) Point\nother = point\nreturn other\nend\n",
+        )
+        .expect_err("record-valued local binding must await move analysis");
+        assert!(binding.message.contains("record-valued bindings"));
+
+        let printing = lower_source(
+            "record Point\nx int\nend\nfn show(point Point) int\nprint point\nreturn 1\nend\n",
+        )
+        .expect_err("whole-record print must remain unsupported");
+        assert!(printing.message.contains("printing whole record"));
+
+        let equality = lower_source(
+            "record Point\nx int\nend\nfn same(point Point) bool\nreturn point == point\nend\n",
+        )
+        .expect_err("record equality must remain unsupported");
+        assert!(equality.message.contains("record equality"));
     }
 
     #[test]

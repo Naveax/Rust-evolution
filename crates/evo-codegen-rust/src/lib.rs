@@ -96,10 +96,10 @@ impl Generator {
             }
             signature.push_str(&generated_identifier(&parameter.name));
             signature.push_str(": ");
-            signature.push_str(rust_type(parameter.value_type));
+            signature.push_str(rust_type(&parameter.value_type));
         }
         signature.push_str(") -> ");
-        signature.push_str(rust_type(function.return_type));
+        signature.push_str(rust_type(&function.return_type));
         signature.push_str(" {\n");
         self.push_mapped_line(signature, function.span);
         for statement in &function.body {
@@ -202,11 +202,14 @@ impl Generator {
     }
 }
 
-fn rust_type(value_type: ValueType) -> &'static str {
+fn rust_type(value_type: &ValueType) -> &'static str {
     match value_type {
         ValueType::Integer => "i64",
         ValueType::Bool => "bool",
         ValueType::String => "&'static str",
+        ValueType::Record(_) => {
+            unreachable!("record value type reached Rust codegen before Records v0 codegen lands")
+        }
     }
 }
 
