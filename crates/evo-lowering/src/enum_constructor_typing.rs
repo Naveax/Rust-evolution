@@ -1,9 +1,9 @@
 use crate::LowerError;
 use evo_lexer::Span;
 use evo_parser::{
-    BinaryOp, Expr as SyntaxExpr, ExprKind as SyntaxExprKind, Program as SyntaxProgram,
-    RecordFieldType as SyntaxRecordFieldType, Stmt as SyntaxStmt, StmtKind as SyntaxStmtKind,
-    TypeName as SyntaxTypeName,
+    BinaryOp, Expr as SyntaxExpr, ExprKind as SyntaxExprKind, MatchArm as SyntaxMatchArm,
+    Program as SyntaxProgram, RecordFieldType as SyntaxRecordFieldType, Stmt as SyntaxStmt,
+    StmtKind as SyntaxStmtKind, TypeName as SyntaxTypeName,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -15,17 +15,14 @@ struct RecordView {
 }
 
 #[derive(Debug)]
-struct ConstructorTypeEnvironment<'a> {
+struct EnumTypeEnvironment<'a> {
     enums: &'a EnumEnvironment,
     records: HashMap<String, RecordView>,
     function_returns: HashMap<String, ResolvedPayloadType>,
 }
 
-impl<'a> ConstructorTypeEnvironment<'a> {
-    fn collect(
-        program: &SyntaxProgram,
-        enums: &'a EnumEnvironment,
-    ) -> Result<Self, LowerError> {
+impl<'a> EnumTypeEnvironment<'a> {
+    fn collect(program: &SyntaxProgram, enums: &'a EnumEnvironment) -> Result<Self, LowerError> {
         let record_names: HashSet<&str> = program
             .records
             .iter()
@@ -36,12 +33,8 @@ impl<'a> ConstructorTypeEnvironment<'a> {
         for record in &program.records {
             let mut fields = HashMap::new();
             for field in &record.fields {
-                let value_type = resolve_record_field_type(
-                    &field.type_name,
-                    &record_names,
-                    enums,
-                    field.span,
-                )?;
+                let value_type =
+                    resolve_record_field_type(&field.type_name, &record_names, enums, field.span)?;
                 fields.insert(field.name.clone(), value_type);
             }
             records.insert(record.name.clone(), RecordView { fields });
@@ -78,7 +71,14 @@ impl<'a> ConstructorTypeEnvironment<'a> {
             }
             SyntaxExprKind::String(_) => Ok(Some(ResolvedPayloadType::String)),
             SyntaxExprKind::Bool(_) => Ok(Some(ResolvedPayloadType::Bool)),
-            SyntaxExprKind::Identifier(name) => Ok(lookup_local(scopes, name)),
+            SyntaxExprKind::Identifier(name) => lookup_local(scopes, name)
+                .map(Some)
+                .ok_or_else(|| LowerError {
+                    message: format!(
+                        "use of local {name:?} before definition or outside its scope"
+                    ),
+                    span: expr.span,
+                }),
             SyntaxExprKind::Call { name, arguments } => {
                 for argument in arguments {
                     let _ = self.infer_expr(argument, scopes)?;
@@ -160,11 +160,11 @@ impl<'a> ConstructorTypeEnvironment<'a> {
     }
 }
 
-pub(super) fn validate_constructor_payload_types(
+pub(super) fn validate_enum_type_semantics(
     program: &SyntaxProgram,
     enums: &EnumEnvironment,
 ) -> Result<(), LowerError> {
-    let environment = ConstructorTypeEnvironment::collect(program, enums)?;
+    let environment = EnumTypeEnvironment::collect(program, enums)?;
 
     for function in &program.functions {
         let record_names: HashSet<&str> = program
@@ -192,7 +192,7 @@ pub(super) fn validate_constructor_payload_types(
 
 fn validate_statements(
     statements: &[SyntaxStmt],
-    environment: &ConstructorTypeEnvironment<'_>,
+    environment: &EnumTypeEnvironment<'_>,
     scopes: &mut [HashMap<String, ResolvedPayloadType>],
 ) -> Result<(), LowerError> {
     for statement in statements {
@@ -220,21 +220,92 @@ fn validate_statements(
                 validate_child_scope(else_body, environment, scopes)?;
             }
             SyntaxStmtKind::Match { value, arms } => {
-                let _ = environment.infer_expr(value, scopes)?;
-                for arm in arms {
-                    // The pattern payload binding is deliberately not introduced here.
-                    // Its type and lexical scope belong to exhaustive match semantics (#57).
-                    validate_child_scope(&arm.body, environment, scopes)?;
-                }
+                validate_match(value, arms, environment, scopes)?;
             }
         }
     }
     Ok(())
 }
 
+fn validate_match(
+    value: &SyntaxExpr,
+    arms: &[SyntaxMatchArm],
+    environment: &EnumTypeEnvironment<'_>,
+    scopes: &[HashMap<String, ResolvedPayloadType>],
+) -> Result<(), LowerError> {
+    let scrutinee_type = environment.infer_expr(value, scopes)?;
+    let scrutinee_enum = match scrutinee_type {
+        Some(ResolvedPayloadType::Enum(name)) => name,
+        Some(actual) => {
+            return Err(LowerError {
+                message: format!(
+                    "match scrutinee must have an enum type; found {}",
+                    type_label(&actual)
+                ),
+                span: value.span,
+            });
+        }
+        None => {
+            return Err(LowerError {
+                message: "match scrutinee must have a statically known enum type".to_owned(),
+                span: value.span,
+            });
+        }
+    };
+
+    let schema = environment
+        .enums
+        .schema(&scrutinee_enum)
+        .expect("enum expression types originate from the resolved enum environment");
+
+    for arm in arms {
+        if arm.pattern.enum_name != scrutinee_enum {
+            return Err(LowerError {
+                message: format!(
+                    "match arm uses enum {:?}, but scrutinee has enum type {:?}",
+                    arm.pattern.enum_name, scrutinee_enum
+                ),
+                span: arm.pattern.span,
+            });
+        }
+
+        let variant = schema
+            .variants
+            .iter()
+            .find(|candidate| candidate.name == arm.pattern.variant_name)
+            .expect("structural match validation resolves every arm variant first");
+
+        let mut arm_scopes = scopes.to_vec();
+        arm_scopes.push(HashMap::new());
+        match (&variant.payload_type, &arm.pattern.binding) {
+            (Some(payload_type), Some(binding)) => {
+                if lookup_local(scopes, binding).is_some() {
+                    return Err(LowerError {
+                        message: format!(
+                            "match payload binding {binding:?} conflicts with an already-visible local"
+                        ),
+                        span: arm.pattern.span,
+                    });
+                }
+                arm_scopes
+                    .last_mut()
+                    .expect("match arm always has a lexical child scope")
+                    .insert(binding.clone(), payload_type.clone());
+            }
+            (None, None) => {}
+            (None, Some(_)) | (Some(_), None) => {
+                unreachable!("structural match validation checks payload binding shape first")
+            }
+        }
+        validate_statements(&arm.body, environment, &mut arm_scopes)?;
+    }
+
+    Ok(())
+}
+
 fn validate_child_scope(
     statements: &[SyntaxStmt],
-    environment: &ConstructorTypeEnvironment<'_>,
+    environment: &EnumTypeEnvironment<'_>,
     scopes: &[HashMap<String, ResolvedPayloadType>],
 ) -> Result<(), LowerError> {
     let mut child_scopes = scopes.to_vec();
@@ -256,7 +327,7 @@ fn remember_binding_type(
     }
     scopes
         .last_mut()
-        .expect("constructor typing always has a lexical scope")
+        .expect("enum typing always has a lexical scope")
         .insert(name.to_owned(), value_type);
 }
 
@@ -360,16 +431,16 @@ fn type_label(value_type: &ResolvedPayloadType) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_constructor_payload_types;
+    use super::validate_enum_type_semantics;
     use crate::record_environment::enums_impl::collect_enum_environment;
     use evo_lexer::lex;
     use evo_parser::parse;
 
     fn validate(source: &str) -> Result<(), crate::LowerError> {
-        let tokens = lex(source).expect("constructor typing source should lex");
-        let program = parse(&tokens).expect("constructor typing source should parse");
+        let tokens = lex(source).expect("enum typing source should lex");
+        let program = parse(&tokens).expect("enum typing source should parse");
         let enums = collect_enum_environment(&program)?;
-        validate_constructor_payload_types(&program, &enums)
+        validate_enum_type_semantics(&program, &enums)
     }
 
     #[test]
@@ -416,5 +487,71 @@ mod tests {
         .expect_err("bool record field should not satisfy int payload");
         assert!(error.message.contains("expects int, found bool"));
         assert_eq!(error.span.line, 9);
+    }
+
+    #[test]
+    fn match_scrutinee_must_have_enum_type() {
+        let error = validate(
+            "enum Flag\nOff\nOn\nend\nmatch true\ncase Flag.Off\nprint 0\ncase Flag.On\nprint 1\nend\n",
+        )
+        .expect_err("boolean scrutinee must not type-check as an enum");
+        assert!(error.message.contains("scrutinee must have an enum type"));
+        assert_eq!(error.span.line, 5);
+    }
+
+    #[test]
+    fn arm_enum_must_match_scrutinee_nominal_type() {
+        let error = validate(
+            "enum Left\nOne\nend\nenum Right\nOther\nend\nvalue = Left.One()\nmatch value\ncase Right.Other\nprint 0\nend\n",
+        )
+        .expect_err("arm qualifier must match the scrutinee enum type");
+        assert!(error.message.contains("scrutinee has enum type \"Left\""));
+        assert_eq!(error.span.line, 9);
+    }
+
+    #[test]
+    fn payload_binding_type_flows_inside_its_arm() {
+        let error = validate(
+            "enum MaybeInt\nNone\nSome int\nend\nenum MaybeBool\nNone\nSome bool\nend\nvalue = MaybeInt.Some(1)\nmatch value\ncase MaybeInt.None\nprint 0\ncase MaybeInt.Some(x)\nwrapped = MaybeBool.Some(x)\nend\n",
+        )
+        .expect_err("int payload binding must retain its declared type inside the arm");
+        assert!(error.message.contains("expects bool, found int"));
+        assert_eq!(error.span.line, 14);
+    }
+
+    #[test]
+    fn sibling_arm_payload_bindings_are_independent() {
+        validate(
+            "enum Choice\nLeft int\nRight bool\nend\nenum MaybeInt\nNone\nSome int\nend\nenum MaybeBool\nNone\nSome bool\nend\nvalue = Choice.Left(1)\nmatch value\ncase Choice.Left(x)\na = MaybeInt.Some(x)\ncase Choice.Right(x)\nb = MaybeBool.Some(x)\nend\n",
+        )
+        .expect("same binding spelling should be independent across sibling arms");
+    }
+
+    #[test]
+    fn payload_binding_does_not_leak_after_match() {
+        let error = validate(
+            "enum MaybeInt\nNone\nSome int\nend\nvalue = MaybeInt.Some(1)\nmatch value\ncase MaybeInt.None\nprint 0\ncase MaybeInt.Some(x)\nprint x\nend\nwrapped = MaybeInt.Some(x)\n",
+        )
+        .expect_err("payload binding must not escape its match arm");
+        assert!(error.message.contains("outside its scope"));
+        assert_eq!(error.span.line, 12);
+    }
+
+    #[test]
+    fn payload_binding_conflicts_with_visible_outer_local() {
+        let error = validate(
+            "enum MaybeInt\nNone\nSome int\nend\nx = 1\nvalue = MaybeInt.Some(2)\nmatch value\ncase MaybeInt.None\nprint 0\ncase MaybeInt.Some(x)\nprint x\nend\n",
+        )
+        .expect_err("payload binding must not shadow an already-visible local");
+        assert!(error.message.contains("conflicts with an already-visible local"));
+        assert_eq!(error.span.line, 10);
+    }
+
+    #[test]
+    fn enum_typed_function_parameter_can_be_matched() {
+        validate(
+            "enum MaybeInt\nNone\nSome int\nend\nfn read(value MaybeInt) int\nmatch value\ncase MaybeInt.None\nreturn 0\ncase MaybeInt.Some(x)\nreturn x\nend\nend\n",
+        )
+        .expect("enum-typed parameters should be valid match scrutinees");
     }
 }

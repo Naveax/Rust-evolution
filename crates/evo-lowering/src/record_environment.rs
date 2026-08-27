@@ -9,12 +9,22 @@ mod enums_impl {
         include!("enum_constructor_typing.rs");
     }
 
-    pub(crate) fn validate_enum_constructor_semantics(
+    mod match_validation {
+        include!("enum_match_validation.rs");
+    }
+
+    mod match_sidecar {
+        include!("enum_match_sidecar.rs");
+    }
+
+    pub(crate) fn validate_enum_pre_codegen_semantics(
         program: &SyntaxProgram,
     ) -> Result<(), LowerError> {
         validate_enum_declarations(program)?;
         let environment = collect_enum_environment(program)?;
-        constructor_typing::validate_constructor_payload_types(program, &environment)
+        let matches = match_validation::collect_match_environment(program, &environment)?;
+        constructor_typing::validate_enum_type_semantics(program, &environment)?;
+        match_sidecar::validate_match_sidecar(program, &matches)
     }
 }
 
@@ -61,7 +71,7 @@ fn reject_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
         return Ok(());
     }
 
-    enums_impl::validate_enum_constructor_semantics(program)?;
+    enums_impl::validate_enum_pre_codegen_semantics(program)?;
     let enum_def = &program.enums[0];
     Err(LowerError {
         message: "enum declarations are parsed, but Enums v0 semantic lowering/codegen is not implemented yet"
@@ -122,5 +132,27 @@ mod tests {
             .expect_err("constructor payload mismatch should precede unsupported codegen gate");
         assert!(error.message.contains("expects int, found bool"));
         assert_eq!(error.span.line, 6);
+    }
+
+    #[test]
+    fn match_pattern_errors_are_diagnosed_before_fail_closed_gate() {
+        let program = parse_source(
+            "enum Flag\nOff\nOn\nend\nvalue = Flag.On()\nmatch value\ncase Flag.On\nprint 1\nend\n",
+        );
+        let error = validate_record_declarations(&program)
+            .expect_err("non-exhaustive match should precede unsupported codegen gate");
+        assert!(error.message.contains("missing variant(s): Off"));
+        assert_eq!(error.span.line, 6);
+    }
+
+    #[test]
+    fn match_scrutinee_type_errors_are_diagnosed_before_fail_closed_gate() {
+        let program = parse_source(
+            "enum Flag\nOff\nOn\nend\nmatch true\ncase Flag.Off\nprint 0\ncase Flag.On\nprint 1\nend\n",
+        );
+        let error = validate_record_declarations(&program)
+            .expect_err("non-enum scrutinee should precede unsupported codegen gate");
+        assert!(error.message.contains("scrutinee must have an enum type"));
+        assert_eq!(error.span.line, 5);
     }
 }
