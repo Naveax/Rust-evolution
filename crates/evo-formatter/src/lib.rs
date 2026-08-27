@@ -26,7 +26,9 @@ pub fn format_source(source: &str, tokens: &[Token]) -> String {
             .collect();
 
         let first_kind = line_tokens.first().map(|token| &token.kind);
-        if first_kind.is_some_and(|kind| matches!(kind, TokenKind::End | TokenKind::Else)) {
+        if first_kind
+            .is_some_and(|kind| matches!(kind, TokenKind::End | TokenKind::Else | TokenKind::Case))
+        {
             depth = depth.saturating_sub(1);
         }
 
@@ -55,6 +57,8 @@ pub fn format_source(source: &str, tokens: &[Token]) -> String {
                     | TokenKind::Fn
                     | TokenKind::Record
                     | TokenKind::Enum
+                    | TokenKind::Match
+                    | TokenKind::Case
             )
         }) {
             depth += 1;
@@ -186,7 +190,13 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
 fn is_expression_prefix(kind: &TokenKind) -> bool {
     matches!(
         kind,
-        TokenKind::Print | TokenKind::Repeat | TokenKind::If | TokenKind::Not | TokenKind::Return
+        TokenKind::Print
+            | TokenKind::Repeat
+            | TokenKind::If
+            | TokenKind::Match
+            | TokenKind::Case
+            | TokenKind::Not
+            | TokenKind::Return
     )
 }
 
@@ -311,6 +321,59 @@ mod tests {
         );
         assert_eq!(format(source), expected);
         assert_eq!(format(expected), expected);
+    }
+
+    #[test]
+    fn formats_enum_constructors_and_match_cases_idempotently() {
+        let source = concat!(
+            "value=MaybeInt.Some(41)# construct\n",
+            "match(value)# inspect\n",
+            "case MaybeInt.Some(x)# payload\n",
+            "print x\n",
+            "case MaybeInt.None# unit\n",
+            "print 0\n",
+            "end\n"
+        );
+        let expected = concat!(
+            "value = MaybeInt.Some(41)  # construct\n",
+            "match (value)  # inspect\n",
+            "case MaybeInt.Some(x)  # payload\n",
+            "    print x\n",
+            "case MaybeInt.None  # unit\n",
+            "    print 0\n",
+            "end\n"
+        );
+        assert_eq!(format(source), expected);
+        assert_eq!(format(expected), expected);
+    }
+
+    #[test]
+    fn formats_nested_match_cases_without_stealing_outer_indentation() {
+        let source = concat!(
+            "if true\n",
+            "match value\n",
+            "case MaybeInt.Some(x)\n",
+            "repeat 1\n",
+            "print x\n",
+            "end\n",
+            "case MaybeInt.None\n",
+            "print 0\n",
+            "end\n",
+            "end\n"
+        );
+        let expected = concat!(
+            "if true\n",
+            "    match value\n",
+            "    case MaybeInt.Some(x)\n",
+            "        repeat 1\n",
+            "            print x\n",
+            "        end\n",
+            "    case MaybeInt.None\n",
+            "        print 0\n",
+            "    end\n",
+            "end\n"
+        );
+        assert_eq!(format(source), expected);
     }
 
     #[test]

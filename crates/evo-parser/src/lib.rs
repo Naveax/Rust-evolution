@@ -1,3 +1,5 @@
+mod match_parser;
+
 use evo_lexer::{Span, Token, TokenKind};
 use std::error::Error;
 use std::fmt;
@@ -95,6 +97,25 @@ pub enum StmtKind {
         then_body: Vec<Stmt>,
         else_body: Vec<Stmt>,
     },
+    Match {
+        value: Expr,
+        arms: Vec<MatchArm>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchArm {
+    pub pattern: MatchPattern,
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchPattern {
+    pub enum_name: String,
+    pub variant_name: String,
+    pub binding: Option<String>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +144,11 @@ pub enum ExprKind {
     Construct {
         name: String,
         fields: Vec<NamedFieldValue>,
+    },
+    EnumConstruct {
+        enum_name: String,
+        variant_name: String,
+        arguments: Vec<Expr>,
     },
     FieldAccess {
         base: Box<Expr>,
@@ -184,25 +210,35 @@ pub fn parse_recovering(tokens: &[Token]) -> Result<Program, Vec<ParseError>> {
 struct StopSet {
     end: bool,
     else_: bool,
+    case_: bool,
 }
 
 impl StopSet {
     const NONE: Self = Self {
         end: false,
         else_: false,
+        case_: false,
     };
     const END: Self = Self {
         end: true,
         else_: false,
+        case_: false,
     };
     const END_OR_ELSE: Self = Self {
         end: true,
         else_: true,
+        case_: false,
+    };
+    const END_OR_CASE: Self = Self {
+        end: true,
+        else_: false,
+        case_: true,
     };
 
     fn contains(self, kind: &TokenKind) -> bool {
         (self.end && matches!(kind, TokenKind::End))
             || (self.else_ && matches!(kind, TokenKind::Else))
+            || (self.case_ && matches!(kind, TokenKind::Case))
     }
 }
 
@@ -696,10 +732,21 @@ impl<'a> Parser<'a> {
                 self.skip_newlines();
                 continue;
             }
+            if matches!(self.current().kind, TokenKind::Case) {
+                self.record_error(
+                    errors,
+                    self.error_here("unexpected 'case' without matching 'match'"),
+                );
+                self.advance();
+                self.synchronize_statement(StopSet::NONE);
+                self.skip_newlines();
+                continue;
+            }
             let start_index = self.index;
             let statement = match self.current().kind {
                 TokenKind::Repeat => self.parse_repeat_recovering(errors),
                 TokenKind::If => self.parse_if_recovering(errors),
+                TokenKind::Match => self.parse_match_recovering(errors),
                 _ => match self.parse_statement() {
                     Ok(statement) => Some(statement),
                     Err(error) => {
@@ -847,11 +894,13 @@ impl<'a> Parser<'a> {
             TokenKind::Return => Err(self.error_here("'return' is only valid inside a function")),
             TokenKind::Repeat => self.parse_repeat(),
             TokenKind::If => self.parse_if(),
+            TokenKind::Match => self.parse_match(),
             TokenKind::Fn | TokenKind::Record | TokenKind::Enum => {
                 Err(self.error_here("nested declarations are not supported in v0"))
             }
             TokenKind::End => Err(self.error_here("unexpected 'end' without matching block")),
             TokenKind::Else => Err(self.error_here("unexpected 'else' without matching 'if'")),
+            TokenKind::Case => Err(self.error_here("unexpected 'case' without matching 'match'")),
             TokenKind::Identifier(name) => {
                 let start = self.advance().span;
                 if !matches!(self.current().kind, TokenKind::Equal) {
@@ -865,10 +914,9 @@ impl<'a> Parser<'a> {
                     span,
                 })
             }
-            _ => {
-                Err(self
-                    .error_here("expected binding, 'print', 'return', 'repeat', or 'if' statement"))
-            }
+            _ => Err(self.error_here(
+                "expected binding, 'print', 'return', 'repeat', 'if', or 'match' statement",
+            )),
         }
     }
 
@@ -1086,6 +1134,41 @@ impl<'a> Parser<'a> {
                     span: field_token.span,
                 });
             };
+
+            if matches!(self.current().kind, TokenKind::LParen)
+                && let ExprKind::Identifier(enum_name) = &expr.kind
+            {
+                let enum_name = enum_name.clone();
+                self.advance();
+                let mut arguments = Vec::new();
+                if !matches!(self.current().kind, TokenKind::RParen) {
+                    loop {
+                        arguments.push(self.parse_expression()?);
+                        if !matches!(self.current().kind, TokenKind::Comma) {
+                            break;
+                        }
+                        self.advance();
+                        if matches!(self.current().kind, TokenKind::RParen) {
+                            return Err(self.error_here("expected enum variant argument after ','"));
+                        }
+                    }
+                }
+                if !matches!(self.current().kind, TokenKind::RParen) {
+                    return Err(self.error_here("expected ')' after enum variant arguments"));
+                }
+                let close = self.advance().span;
+                let span = expr.span.join(close);
+                expr = Expr {
+                    kind: ExprKind::EnumConstruct {
+                        enum_name,
+                        variant_name: field,
+                        arguments,
+                    },
+                    span,
+                };
+                continue;
+            }
+
             let span = expr.span.join(field_token.span);
             expr = Expr {
                 kind: ExprKind::FieldAccess {
@@ -1261,6 +1344,7 @@ impl<'a> Parser<'a> {
             match self.current().kind {
                 TokenKind::Repeat
                 | TokenKind::If
+                | TokenKind::Match
                 | TokenKind::Fn
                 | TokenKind::Record
                 | TokenKind::Enum => {
@@ -1517,6 +1601,82 @@ mod tests {
             base.kind,
             ExprKind::FieldAccess { ref field, .. } if field == "inner"
         ));
+    }
+
+    #[test]
+    fn parses_qualified_enum_variant_construction_without_regressing_field_access() {
+        let program = parse_source(
+            "none = MaybeInt.None()\nsome = MaybeInt.Some(41)\nplain = MaybeInt.Some\nprint value.inner.field\n",
+        );
+
+        let StmtKind::Bind { expr, .. } = &program.statements[0].kind else {
+            panic!("expected unit variant binding");
+        };
+        let ExprKind::EnumConstruct {
+            enum_name,
+            variant_name,
+            arguments,
+        } = &expr.kind
+        else {
+            panic!("expected qualified enum constructor");
+        };
+        assert_eq!(enum_name, "MaybeInt");
+        assert_eq!(variant_name, "None");
+        assert!(arguments.is_empty());
+        assert_eq!(expr.span.line, 1);
+
+        let StmtKind::Bind { expr, .. } = &program.statements[1].kind else {
+            panic!("expected payload variant binding");
+        };
+        let ExprKind::EnumConstruct {
+            enum_name,
+            variant_name,
+            arguments,
+        } = &expr.kind
+        else {
+            panic!("expected payload enum constructor");
+        };
+        assert_eq!(enum_name, "MaybeInt");
+        assert_eq!(variant_name, "Some");
+        assert_eq!(arguments.len(), 1);
+        assert!(matches!(arguments[0].kind, ExprKind::Integer(41)));
+
+        let StmtKind::Bind { expr, .. } = &program.statements[2].kind else {
+            panic!("expected plain qualified field-shaped binding");
+        };
+        assert!(matches!(
+            expr.kind,
+            ExprKind::FieldAccess { ref field, .. } if field == "Some"
+        ));
+
+        let StmtKind::Print(expr) = &program.statements[3].kind else {
+            panic!("expected chained field access print");
+        };
+        let ExprKind::FieldAccess { base, field } = &expr.kind else {
+            panic!("expected outer field access");
+        };
+        assert_eq!(field, "field");
+        assert!(matches!(base.kind, ExprKind::FieldAccess { .. }));
+    }
+
+    #[test]
+    fn enum_variant_constructor_retains_nested_argument_expressions() {
+        let program = parse_source("value = MaybeInt.Some(add(1, 2 * 3))\n");
+        let StmtKind::Bind { expr, .. } = &program.statements[0].kind else {
+            panic!("expected binding");
+        };
+        let ExprKind::EnumConstruct { arguments, .. } = &expr.kind else {
+            panic!("expected enum constructor");
+        };
+        assert_eq!(arguments.len(), 1);
+        assert!(matches!(arguments[0].kind, ExprKind::Call { .. }));
+    }
+
+    #[test]
+    fn rejects_trailing_enum_variant_argument_comma() {
+        let tokens = lex("value = MaybeInt.Some(1,)\n").expect("lexing should succeed");
+        let error = parse(&tokens).expect_err("trailing enum constructor comma should fail");
+        assert!(error.message.contains("enum variant argument"));
     }
 
     #[test]
