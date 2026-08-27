@@ -40,6 +40,31 @@ fn check_rejects_records_at_evolution_source_until_semantic_lowering_lands() {
 }
 
 #[test]
+fn check_reports_record_schema_error_before_feature_gate() {
+    let dir = temp_dir("records-schema");
+    fs::create_dir_all(&dir).expect("temporary directory should be created");
+    let source = dir.join("invalid-record.evo");
+    fs::write(&source, "record Point\nx int\nx bool\nend\n")
+        .expect("invalid record source should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_evo"))
+        .arg("check")
+        .arg(&source)
+        .output()
+        .expect("evo check should run");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let location = format!(" --> {}:3:1", source.display());
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("duplicate field"), "{stderr}");
+    assert!(stderr.contains(&location), "{stderr}");
+    assert!(stderr.contains("3 | x bool"), "{stderr}");
+    assert!(!stderr.contains("main.rs"), "{stderr}");
+}
+
+#[test]
 fn build_stops_before_rustc_for_parsed_records() {
     let dir = temp_dir("records-build");
     fs::create_dir_all(&dir).expect("temporary directory should be created");
@@ -61,8 +86,5 @@ fn build_stops_before_rustc_for_parsed_records() {
     assert!(!output.status.success());
     assert!(stderr.contains("Records v0 semantic lowering"), "{stderr}");
     assert!(!stderr.contains("rustc failed"), "{stderr}");
-    assert!(
-        !binary_exists,
-        "record source must not reach native compilation"
-    );
+    assert!(!binary_exists, "record source must not reach native compilation");
 }

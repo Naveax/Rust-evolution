@@ -1,3 +1,5 @@
+mod records;
+
 use evo_lexer::Span;
 pub use evo_parser::BinaryOp;
 use evo_parser::{
@@ -127,8 +129,9 @@ struct FunctionSignature {
 
 pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
     if let Some(record) = program.records.first() {
+        records::validate_record_declarations(program)?;
         return Err(LowerError {
-            message: "record declarations are parsed but Records v0 semantic lowering is not implemented yet"
+            message: "record declarations passed Records v0 declaration validation, but Records v0 semantic lowering/codegen is not implemented yet"
                 .to_owned(),
             span: record.span,
         });
