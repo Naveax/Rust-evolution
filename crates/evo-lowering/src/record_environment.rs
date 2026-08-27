@@ -12,8 +12,8 @@ mod enums_impl {
     pub(crate) fn validate_enum_constructor_semantics(
         program: &SyntaxProgram,
     ) -> Result<(), LowerError> {
+        validate_enum_declarations(program)?;
         let environment = collect_enum_environment(program)?;
-        validate_constructor_shapes(program, &environment)?;
         constructor_typing::validate_constructor_payload_types(program, &environment)
     }
 }
