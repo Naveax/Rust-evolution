@@ -6,127 +6,136 @@ Last verified update: **2026-08-27**
 
 ## Active P0
 
-**Parent #41 — Records v0: typed product data**
+**#50 — Enums v0: nominal sum types + exhaustive static matching**
 
-PR #48 is merged. Issue #46 is closed. Only PR #49 remains before Records v0 can be closed on `main`.
+First implementation slice:
 
-## Current repository evidence
+**#51 — Enums parser: declarations, qualified variants and case-match surface**
 
-### `main`
+Records v0 is complete on `main`; do not reopen its merge stack unless new evidence appears.
 
-- head: `9f55b3ac44f17c52cbda5f5d6a5a626075e9a6e8`
-- merge: PR #48, production typed lowering / ownership / static Rust codegen
-- post-merge CI #195 / run `33073491890`: **SUCCESS**
-- Ubuntu / Windows / macOS: format, Clippy, workspace tests, benchmark smoke, release build green
-- Ubuntu: all pre-Records runtime performance gates green
-- #46: closed as completed
+## Accepted baseline
 
-### PR #49
+Records final feature merge:
 
-- branch: `feature/records-parity-v0`
-- desired base: `main`
-- pre-clean validated head: `007655f3056616df26c01941e21a93ecce2e8f1b`
-- CI #194 / run `33073047724`: **SUCCESS**
-- PR remains draft until ancestry is normalized, base is `main`, and the resulting CI is green
+`ce3018d158d2ce4084a9e569b8eebac6eeb51f8f`
 
-Dedicated Records parity evidence from CI #190 / run `33071967025`:
+Final Records validation:
+
+- CI #197 / run `33074128274`: **SUCCESS**
+- Ubuntu / Windows / macOS quality and release green
+- Ubuntu all previous runtime gates green
+- Ubuntu `Records v0 performance gate` green
+- #41, #43, #46, #47 completed
+
+Dedicated Records parity evidence remains:
 
 - correctness PASS
 - normalized LLVM equal
-- executable bytes equal
+- exact executable bytes equal
 - binary size `2,267,104 B / 2,267,104 B`
-- timing ratio `1.000226357`
-- timing-only verdict FAIL
-- final verdict PASS
-- verdict basis `byte-identical-binary-parity`
+- raw timing ratio `1.000226357`
+- final verdict PASS via `byte-identical-binary-parity`
 
-## Important squash-merge ancestry detail
+## #51 syntax target
 
-PR #48 was squash-merged. Therefore the old PR #49 branch history and `main` diverge at commit ancestry even though the PR #48 base tree is already present on `main`.
+### Enum declaration
 
-A naive retarget can make GitHub show the already-merged #48 history again. Normalize PR #49 first:
+```text
+enum MaybeInt
+    None
+    Some int
+end
+```
 
-1. preserve the validated PR #49 final tree contents;
-2. create a clean PR #49 commit whose parent is `9f55b3ac44f17c52cbda5f5d6a5a626075e9a6e8`;
-3. include updated `PROJECT_STATE.md` / `NEXT_ACTION.md` reflecting the completed #48 merge;
-4. move `feature/records-parity-v0` to that clean commit only after confirming no active CI remains for the old state;
-5. use force only because the rewrite intentionally replaces obsolete stacked ancestry, never to overwrite unknown concurrent work.
+Only unit variants and one typed payload variant form are in the first parser slice.
+
+### Qualified variant construction
+
+```text
+value = MaybeInt.None()
+value = MaybeInt.Some(41)
+```
+
+The enum qualifier is mandatory. Do not introduce bare global variant constructors in v0.
+
+### Match statement
+
+```text
+match value
+case MaybeInt.Some(x)
+    print x
+case MaybeInt.None
+    print 0
+end
+```
+
+First-slice restrictions:
+
+- statement-only `match`;
+- explicit `case` arm boundaries;
+- fully qualified patterns;
+- unit pattern or one payload-binding pattern only;
+- no wildcard;
+- no guards;
+- no arbitrary nested destructuring;
+- no generic enums;
+- no `Option` / `Result` sugar yet.
 
 ## Resume here
 
-### 1. Clean and retarget PR #49
+1. Confirm `main` head and latest CI are still green before branching.
+2. Create `feature/enums-parser-v0` from current `main`.
+3. Read #50 and #51 plus current lexer/parser/formatter/lowering code.
+4. Add exact-boundary lexer keywords:
+   - `enum`
+   - `match`
+   - `case`
+5. Add prefix regressions so `enumerate`, `matcher`, `casework` remain identifiers.
+6. Extend public parser AST with:
+   - `Program.enums`;
+   - source-spanned enum/variant declarations;
+   - optional single payload type;
+   - qualified variant construction expression;
+   - match statement / match arms / source-spanned patterns.
+7. Use the record declaration-region policy for enums: records/enums before executable top-level statements; preserve current function-placement compatibility.
+8. Extend postfix parsing without regressing field access:
+   - `value.field` remains field access;
+   - `Enum.Variant(...)` becomes qualified variant construction;
+   - plain `Enum.Variant` remains ordinary field-access-shaped syntax outside a `case` pattern.
+9. Parse `match` arms with explicit `case` stop boundaries and existing nested block semantics.
+10. Update recovery depth/stop logic so nested `match` / `if` / `repeat` do not consume sibling cases or wrong `end`s.
+11. Add formatter support for enum declarations, qualified constructors and match/case indentation.
+12. Keep lowering fail-closed for any enum-bearing executable surface until the semantic child slice lands. Parsed enums must never disappear silently into generated Rust.
+13. Add lexer/parser/formatter/CLI fail-closed tests from #51.
+14. Run one CI per pushed SHA. While CI runs, work independent tasks; never dispatch/rerun the same active SHA/workflow/input.
+15. Require all existing Ubuntu performance gates, including Records v0, to remain green even though this parser slice has no runtime feature impact.
 
-1. Confirm PR #49 has not moved unexpectedly.
-2. Confirm the clean commit preserves the accepted parity tree except for intentional handoff-document updates.
-3. Move `feature/records-parity-v0` to the clean `main`-parented commit.
-4. Retarget PR #49 base to `main`.
-5. Inspect the new PR diff. It must not reintroduce the already-merged #48 implementation history.
-6. Record the single CI run ID for the new head; do not dispatch or rerun manually.
+## First implementation constraints
 
-### 2. Validate PR #49
+Do not add enum runtime semantics in the parser slice merely because the AST makes it tempting.
 
-Require:
+The parser PR should prove syntax, recovery, formatting and fail-closed safety. Nominal enum type collection, exhaustiveness and move ownership belong in the next child slice after the parser surface is green.
 
-- format green on Ubuntu, Windows, macOS;
-- Clippy green;
-- workspace tests green;
-- benchmark smoke green;
-- all older Ubuntu runtime gates green;
-- Ubuntu `Records v0 performance gate` green;
-- release build green;
-- no duplicate workflow run for the same SHA/workflow/input.
+Do not add:
 
-If CI fails, fix only the actual failing evidence and create a new SHA. Do not rerun a failed old SHA merely to obtain a different scheduler sample.
-
-### 3. Merge PR #49
-
-After the cleaned PR is mergeable and green:
-
-1. mark PR #49 ready for review;
-2. squash-merge through the normal authorized repository path using the verified head SHA;
-3. track the resulting `main` push CI by run ID;
-4. do not manually dispatch another run.
-
-### 4. Close Records v0 P0
-
-Only after final post-merge `main` CI is green, including the Records gate:
-
-1. close #47 as completed;
-2. update #41 with the final merge SHA and post-merge CI run;
-3. close #41 as completed;
-4. update `docs/PROJECT_STATE.md` and this file on `main` to remove Records merge-stack instructions;
-5. re-read current issue #1 / roadmap / weakness map and select the next atomic P0 from repository truth.
-
-## Accepted Records v0 boundaries
-
-Preserve these deliberate v0 limitations unless a new tracked feature explicitly changes them:
-
-- no whole-record `print`;
-- no whole-record equality;
-- no record-valued partial field move;
-- no implicit clone/copy insertion;
-- no implicit borrow/reference inference;
-- no recursive by-value layout that would require hidden boxing;
-- no runtime object dictionary/reflection layer.
+- implicit clone/copy;
+- boxing;
+- runtime variant maps;
+- reflection metadata;
+- dynamic dispatch;
+- generic payloads;
+- methods/traits/derive;
+- match guards/wildcards/or-patterns.
 
 ## CI rule
 
-A running CI is work in progress, not a reason to stop. Work on independent tasks while it runs, but do not retrigger it.
+A running CI is work in progress, not a reason to stop. Continue independent work, but never create multiple active Actions for the same SHA/workflow/input.
 
-Never create multiple active Actions for the same SHA/workflow/input.
+If a run fails, fix the actual failure on a new SHA. Do not rerun an old failed SHA just to obtain a different timing sample.
 
 ## Performance rule
 
-For ZERO/native core work:
+Enums v0 targets ordinary static Rust enum/match lowering and remains cost class **ZERO**.
 
-`T_evolution <= T_reference_rust`
-
-Evidence priority:
-
-1. correctness PASS;
-2. generated Rust inspection;
-3. normalized LLVM equality;
-4. exact executable equality;
-5. otherwise stable hard runtime ratio gate.
-
-Records v0 currently reaches level 4: exact executable parity.
+The dedicated enum performance gate comes only after parser + nominal semantics + ownership + codegen are proven. All prior gates remain mandatory throughout.

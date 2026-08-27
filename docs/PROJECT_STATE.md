@@ -9,89 +9,91 @@ This file is the durable project handoff. Fresh sessions should read `AGENTS.md`
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
 - Rust toolchain: **1.98.0**
-- `main` head after Records production-lowering merge: `9f55b3ac44f17c52cbda5f5d6a5a626075e9a6e8` (`feat: add Records v0 typed lowering and static codegen`).
-- Post-merge `main` CI #195 / run `33073491890`: **SUCCESS** on Ubuntu, Windows, and macOS.
-- Ubuntu #195 passed format, Clippy, workspace tests, benchmark smoke, all pre-Records runtime gates, and release build.
-- PR #48 is merged and typed-lowering/ownership issue #46 is closed as completed.
+- Records v0 final feature baseline on `main`: `ce3018d158d2ce4084a9e569b8eebac6eeb51f8f` (`perf: complete Records v0 parity acceptance`).
+- Final Records post-merge CI: **#197 / run `33074128274` — SUCCESS** on Ubuntu, Windows and macOS.
+- Ubuntu #197 passed format, Clippy, workspace tests, benchmark smoke, release build, every older runtime gate, and the dedicated Records v0 performance gate.
+- Records parent #41 and child issues #43, #46, #47 are completed.
 
-## Active P0
+## Completed Records v0 milestone
 
-**Parent #41 — Records v0: typed product data**
+Records v0 is now part of the accepted experimental language surface on `main`.
 
-Only the parity/acceptance PR remains:
-
-### PR #49 — Records v0 parity / acceptance evidence
-
-- Branch: `feature/records-parity-v0`
-- Target after unstacking: `main`
-- Pre-clean validation head: `007655f3056616df26c01941e21a93ecce2e8f1b`.
-- CI #194 / run `33073047724`: **SUCCESS** on Ubuntu, Windows, and macOS with the Ubuntu Records v0 performance gate green.
-- Because PR #48 was squash-merged, the old stacked branch ancestry diverges from `main` even though its base tree content is equivalent. Normalize PR #49 onto `main` before final review so GitHub does not re-display the already-merged #48 history.
-- Preserve the accepted PR #49 tree contents; ancestry cleanup is not a semantic rewrite.
-
-## Records v0 accepted behavior
-
-The merged production foundation plus PR #49 contain:
+Implemented and validated:
 
 - nominal record declarations and named record types;
-- validated field definitions retaining schema order and source spans;
-- exact named constructors with deterministic declaration-order lowering;
-- zero-field `Name()` constructors;
+- exact named constructors with deterministic schema-order lowering;
+- builtin and acyclic record-valued fields;
+- zero-field constructors;
 - typed direct/chained scalar field access;
 - record parameters and return values;
-- Rust-style by-value record moves with source-native reuse-after-move diagnostics;
-- same-type explicit reinitialization after move;
-- conservative `if` ownership joins;
-- `repeat` loop-carried move safety;
+- by-value move tracking with source-native reuse-after-move diagnostics;
+- same-type explicit reinitialization;
+- conservative ownership joins across `if`;
+- loop-carried move safety across `repeat`;
 - explicit rejection of whole-record print/equality and record-valued partial field moves;
-- static Rust structs, struct literals, direct field access, and by-value record signatures;
-- CLI `check`, `emit-rust`, `build`, and native execution for valid record programs;
-- record declaration/field source mapping plus statement-level constructor/access mapping regressions;
-- native process coverage for nested records, chained access, zero-field record roundtrip, record return, explicit reinitialization, and rejected builds producing no binary;
-- `docs/LANGUAGE_SPEC_V0.md` describing the accepted Records v0 grammar, semantics, codegen, source-map policy, ownership limits, and parity evidence.
+- static Rust structs, struct literals and direct field access;
+- record declaration/field source mapping plus constructor/access owning-statement mapping;
+- real CLI/native process coverage;
+- canonical formatter/spec support;
+- dedicated Ubuntu differential performance gate.
 
-## Zero-cost evidence
+Records v0 cost class is **ZERO**: no hidden allocation, boxing, GC/RC, implicit clone, dynamic dispatch, runtime object map or reflection metadata.
 
-Records v0 remains a **ZERO** cost-class feature. The generated path adds no hidden allocation, boxing, GC/RC, implicit clone, dynamic dispatch, runtime object map, or reflection metadata.
+Dedicated parity evidence from CI #190 / run `33071967025`, artifact `9646205940`:
 
-Dedicated `records-v0` differential evidence from CI #190 / run `33071967025`, artifact `9646205940`:
+- correctness: PASS;
+- normalized LLVM IR equality: true;
+- exact executable equality: true;
+- binary size: `2,267,104 B / 2,267,104 B`;
+- raw median ratio: `1.000226357`;
+- final verdict: PASS;
+- verdict basis: `byte-identical-binary-parity`.
 
-- correctness: **PASS**;
-- normalized LLVM IR equality: **true**;
-- exact executable equality: **true**;
-- binary size: **2,267,104 B / 2,267,104 B**;
-- median reference time: **18,806,589 ns**;
-- median Evolution time: **18,810,846 ns**;
-- observed timing ratio: **1.000226357**;
-- timing-only verdict: **FAIL**;
-- final verdict: **PASS**;
-- verdict basis: **`byte-identical-binary-parity`**.
+## Active P0 — Enums v0
 
-The raw timing remains visible, but byte-identical executables after correctness PASS establish deterministic runtime parity under the project benchmark policy.
+The next Core data-model milestone is:
 
-## Validation chain
+- Parent issue **#50 — Enums v0: nominal sum types + exhaustive static matching**
+- First implementation slice **#51 — Enums parser: declarations, qualified variants and case-match surface**
 
-- PR #48 head `7d72530169cd8180033056a70730eb6523e9d6ed`: CI #189 / run `33071591641` green.
-- PR #48 squash merge: `9f55b3ac44f17c52cbda5f5d6a5a626075e9a6e8`.
-- Post-merge main CI #195 / run `33073491890`: green.
-- PR #49 benchmark head: CI #190 / run `33071967025` green.
-- PR #49 expanded native/source-map corpus: CI #192 / run `33072503739` green.
-- PR #49 accepted language spec: CI #193 / run `33072815054` green.
-- PR #49 pre-clean current tree: CI #194 / run `33073047724` green.
+Why this follows Records:
 
-## Remaining P0 lifecycle work
+- Records established nominal user types, typed aggregate layout, source-spanned declarations and move analysis.
+- Enums add closed alternatives and exhaustive control flow without requiring collections, generics or managed runtime machinery.
+- This foundation is required before useful `Option` / `Result` ergonomics and richer error handling.
 
-No additional Records v0 implementation slice should be invented before the lifecycle is closed.
+## Enums v0 current syntax experiment
 
-1. Normalize PR #49 branch ancestry onto `main` while preserving the validated parity tree and updated handoff docs.
-2. Retarget PR #49 to `main`.
-3. Verify the resulting PR diff contains only the Records parity benchmark/gate, source-map/native regressions, spec, and handoff changes.
-4. Track the single CI run for the cleaned head; do not rerun or duplicate it.
-5. Mark PR #49 ready after green CI.
-6. Squash-merge PR #49 through the normal authorized repository path.
-7. Verify post-merge `main` CI including the new Ubuntu Records v0 performance gate.
-8. Close #47 and parent #41 only after final `main` evidence is green.
-9. Refresh durable handoff one last time on `main`, then select the next roadmap feature from current GitHub state.
+The first parser slice deliberately keeps the surface small:
+
+```text
+enum MaybeInt
+    None
+    Some int
+end
+
+value = MaybeInt.Some(41)
+match value
+case MaybeInt.Some(x)
+    print x
+case MaybeInt.None
+    print 0
+end
+```
+
+Parser-v0 decisions for #51:
+
+- `enum`, `match`, `case` are explicit keywords;
+- variants are unit or one typed payload only;
+- construction is fully qualified as `Enum.Variant(...)`;
+- `match` is statement-only;
+- arms begin with explicit `case` for deterministic recovery;
+- patterns are fully enum-qualified;
+- unit patterns and one-payload binding patterns only;
+- no wildcard, guards, nested arbitrary patterns, generics or Option/Result sugar yet;
+- semantic lowering remains fail-closed until nominal enum semantics/exhaustiveness/ownership land.
+
+Enums v0 is also a **ZERO** cost-class target: ordinary Rust enums/matches, no hidden allocation/boxing/clone/dispatch/runtime metadata.
 
 ## Durable continuation infrastructure
 
@@ -100,7 +102,8 @@ Read order:
 1. `AGENTS.md`
 2. `docs/PROJECT_STATE.md`
 3. `docs/NEXT_ACTION.md`
-4. active issue/PR/Actions referenced there
+4. `docs/LANGUAGE_SPEC_V0.md`
+5. active issue/PR/Actions referenced there
 
 Authority hierarchy:
 
@@ -108,6 +111,6 @@ Authority hierarchy:
 
 ## Handoff invariant
 
-Every significant merge or incomplete stopping point must keep `PROJECT_STATE.md`, `NEXT_ACTION.md`, issue/PR evidence, and durable decisions synchronized with GitHub reality.
+Every significant merge or incomplete stopping point must keep `PROJECT_STATE.md`, `NEXT_ACTION.md`, issue/PR evidence and durable decisions synchronized with GitHub reality.
 
 The repository is the project memory. The chat transcript is not.
