@@ -415,6 +415,6 @@ mod tests {
         )
         .expect_err("bool record field should not satisfy int payload");
         assert!(error.message.contains("expects int, found bool"));
-        assert_eq!(error.span.line, 8);
+        assert_eq!(error.span.line, 9);
     }
 }
