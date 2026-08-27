@@ -166,7 +166,10 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
         );
     }
 
-    if matches!(previous, TokenKind::Fn | TokenKind::Record | TokenKind::Enum) {
+    if matches!(
+        previous,
+        TokenKind::Fn | TokenKind::Record | TokenKind::Enum
+    ) {
         return true;
     }
 
