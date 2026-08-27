@@ -66,6 +66,30 @@ fn check_keeps_qualified_enum_constructors_fail_closed_before_codegen() {
 }
 
 #[test]
+fn check_rejects_unknown_enum_variant_before_codegen() {
+    assert_check_fails_before_rustc(
+        "enum-unknown-variant",
+        "unknown-variant.evo",
+        "enum MaybeInt\nNone\nSome int\nend\nvalue = MaybeInt.Missing()\n",
+        "unknown variant \"Missing\" for enum \"MaybeInt\"",
+        5,
+        9,
+    );
+}
+
+#[test]
+fn check_rejects_wrong_enum_payload_type_before_codegen() {
+    assert_check_fails_before_rustc(
+        "enum-payload-type",
+        "payload-type.evo",
+        "enum MaybeInt\nNone\nSome int\nend\nvalue = MaybeInt.Some(true)\n",
+        "expects int, found bool",
+        5,
+        23,
+    );
+}
+
+#[test]
 fn check_keeps_match_statements_fail_closed_before_codegen() {
     assert_check_fails_before_rustc(
         "enum-match-check-gate",
