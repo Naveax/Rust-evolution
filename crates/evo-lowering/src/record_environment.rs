@@ -16,7 +16,7 @@ mod enums_impl {
             include!("enum_ownership.rs");
         }
 
-        pub(super) use ownership::{OwnershipUseMode, ResolvedOwnershipUse};
+        pub(super) use ownership::ResolvedOwnershipUse;
 
         pub(super) fn collect_enum_ownership(
             program: &SyntaxProgram,
