@@ -1,126 +1,127 @@
 # Rust Evolution — NEXT ACTION
 
-This file is intentionally operational. A fresh chat/agent should be able to resume the project from here without prior conversation history.
+This file is intentionally operational. A fresh chat/agent should be able to resume from here without prior conversation history.
 
 Last verified update: **2026-08-27**
 
 ## Active P0
 
-**Parent issue #41 — Records v0: typed product data**
+**Parent #41 — Records v0: typed product data**
 
-Completed typed-lowering/ownership child: **#46**
+PR #48 is merged. Issue #46 is closed. Only PR #49 remains before Records v0 can be closed on `main`.
 
-Remaining acceptance child: **#47 — Records v0 zero-cost Rust codegen / differential parity**
+## Current repository evidence
 
-Current implementation PR: **#48 — `feat: add typed record lowering IR`**
+### `main`
 
-Branch: `feature/records-typed-lowering-v0`
+- head: `9f55b3ac44f17c52cbda5f5d6a5a626075e9a6e8`
+- merge: PR #48, production typed lowering / ownership / static Rust codegen
+- post-merge CI #195 / run `33073491890`: **SUCCESS**
+- Ubuntu / Windows / macOS: format, Clippy, workspace tests, benchmark smoke, release build green
+- Ubuntu: all pre-Records runtime performance gates green
+- #46: closed as completed
 
-Validated head:
+### PR #49
 
-`97dae87c42108571e6dfd0c0f87b0010bded97e9`
+- branch: `feature/records-parity-v0`
+- desired base: `main`
+- pre-clean validated head: `007655f3056616df26c01941e21a93ecce2e8f1b`
+- CI #194 / run `33073047724`: **SUCCESS**
+- PR remains draft until ancestry is normalized, base is `main`, and the resulting CI is green
 
-Authoritative validation:
+Dedicated Records parity evidence from CI #190 / run `33071967025`:
 
-- CI run ID: **33069876396**
-- run number: **188**
-- conclusion: **SUCCESS**
-- Ubuntu / Windows / macOS: fmt, Clippy, workspace tests and release path green
-- Ubuntu: all existing runtime gates green
-- real CLI/native Records v0 process test builds and runs with output `42`
+- correctness PASS
+- normalized LLVM equal
+- executable bytes equal
+- binary size `2,267,104 B / 2,267,104 B`
+- timing ratio `1.000226357`
+- timing-only verdict FAIL
+- final verdict PASS
+- verdict basis `byte-identical-binary-parity`
 
-PR #48 is no longer draft and is mergeable. An assistant-triggered merge attempt was blocked by the product safety layer, not by GitHub repository state or CI.
+## Important squash-merge ancestry detail
 
-## What PR #48 already proves
+PR #48 was squash-merged. Therefore the old PR #49 branch history and `main` diverge at commit ancestry even though the PR #48 base tree is already present on `main`.
 
-- nominal lowered record types and schemas;
-- exact named construction with deterministic schema field order;
-- zero-field constructor resolution;
-- typed/chained scalar field access;
-- record values in function parameters and returns;
-- by-value record move semantics with no implicit clone;
-- source-native reuse-after-move diagnostics;
-- same-type explicit reinitialization;
-- conservative `if` ownership merge;
-- `repeat` loop-carried move safety;
-- explicit fail-closed behavior for whole-record print/equality and record-valued partial field moves;
-- static Rust `struct`/literal/direct-field codegen;
-- valid record programs through `check`, `emit-rust`, native `build` and execution;
-- no runtime record map, boxing, GC/RC, reflection metadata or dynamic dispatch.
+A naive retarget can make GitHub show the already-merged #48 history again. Normalize PR #49 first:
+
+1. preserve the validated PR #49 final tree contents;
+2. create a clean PR #49 commit whose parent is `9f55b3ac44f17c52cbda5f5d6a5a626075e9a6e8`;
+3. include updated `PROJECT_STATE.md` / `NEXT_ACTION.md` reflecting the completed #48 merge;
+4. move `feature/records-parity-v0` to that clean commit only after confirming no active CI remains for the old state;
+5. use force only because the rewrite intentionally replaces obsolete stacked ancestry, never to overwrite unknown concurrent work.
 
 ## Resume here
 
-Do **not** start enums, collections, error-handling sugar or another language feature yet. Finish Records v0 acceptance first.
+### 1. Clean and retarget PR #49
 
-### Step 1 — land PR #48
+1. Confirm PR #49 has not moved unexpectedly.
+2. Confirm the clean commit preserves the accepted parity tree except for intentional handoff-document updates.
+3. Move `feature/records-parity-v0` to the clean `main`-parented commit.
+4. Retarget PR #49 base to `main`.
+5. Inspect the new PR diff. It must not reintroduce the already-merged #48 implementation history.
+6. Record the single CI run ID for the new head; do not dispatch or rerun manually.
 
-1. Re-read PR #48 head and CI #188.
-2. If the head is still `97dae87c42108571e6dfd0c0f87b0010bded97e9` (or a descendant containing only verified handoff docs) and CI is green, merge PR #48 using the repository's normal squash-merge convention.
-3. Verify post-merge `main` CI.
-4. Close #46 as completed after the merge if GitHub did not auto-close it from the PR body.
+### 2. Validate PR #49
 
-Do not rerun an already-running workflow and do not create duplicate Actions for the same SHA/workflow/input.
+Require:
 
-### Step 2 — continue #47 from updated `main`
+- format green on Ubuntu, Windows, macOS;
+- Clippy green;
+- workspace tests green;
+- benchmark smoke green;
+- all older Ubuntu runtime gates green;
+- Ubuntu `Records v0 performance gate` green;
+- release build green;
+- no duplicate workflow run for the same SHA/workflow/input.
 
-After PR #48 is merged, create/continue a dedicated #47 branch from the new `main` head. Keep the next slice evidence-driven and atomic.
+If CI fails, fix only the actual failing evidence and create a new SHA. Do not rerun a failed old SHA merely to obtain a different scheduler sample.
 
-Implementation order:
+### 3. Merge PR #49
 
-1. **Record-specific source mapping**
-   - map generated record declaration lines to declaration/field spans where useful;
-   - add constructor/access mapping regressions under the existing source-map policy;
-   - verify backend-owned rustc diagnostics remap cleanly when applicable.
+After the cleaned PR is mergeable and green:
 
-2. **Expand real CLI/native correctness corpus**
-   - nested acyclic record construction;
-   - chained scalar access;
-   - zero-field record construction;
-   - record parameter + record return roundtrip;
-   - explicit record reinitialization after move;
-   - rejected record source produces no native binary.
+1. mark PR #49 ready for review;
+2. squash-merge through the normal authorized repository path using the verified head SHA;
+3. track the resulting `main` push CI by run ID;
+4. do not manually dispatch another run.
 
-3. **Dedicated Records v0 differential benchmark**
-   - use runtime input so constant folding cannot erase the workload;
-   - Evolution and reference Rust must use the same record layout, algorithm, inputs, outputs and release flags;
-   - correctness must pass before any performance verdict.
+### 4. Close Records v0 P0
 
-4. **Codegen evidence**
-   - retain generated Rust artifact;
-   - compare normalized LLVM;
-   - report binary sizes;
-   - report exact executable byte equality when achieved;
-   - retain raw timing even when exact equality establishes deterministic parity.
+Only after final post-merge `main` CI is green, including the Records gate:
 
-5. **CI performance gate**
-   - add the Ubuntu Records v0 gate;
-   - preserve the hard `T_evolution / T_reference <= 1.00` rule unless exact executable equality establishes parity;
-   - keep all older runtime gates green.
+1. close #47 as completed;
+2. update #41 with the final merge SHA and post-merge CI run;
+3. close #41 as completed;
+4. update `docs/PROJECT_STATE.md` and this file on `main` to remove Records merge-stack instructions;
+5. re-read current issue #1 / roadmap / weakness map and select the next atomic P0 from repository truth.
 
-6. **Specification and closure**
-   - only after source-map + benchmark evidence is green, update `docs/LANGUAGE_SPEC_V0.md` with Records v0 syntax, nominal typing, constructor/access rules, move semantics and explicit limitations;
-   - update `docs/PROJECT_STATE.md`, this file and parent #41;
-   - close #47 and #41 after final CI/post-merge validation.
+## Accepted Records v0 boundaries
 
-## Records v0 explicit limitations to preserve
+Preserve these deliberate v0 limitations unless a new tracked feature explicitly changes them:
 
 - no whole-record `print`;
-- no record equality;
-- no partial move of record-valued fields;
+- no whole-record equality;
+- no record-valued partial field move;
 - no implicit clone/copy insertion;
 - no implicit borrow/reference inference;
-- no heap/self-referential by-value recursion;
-- no runtime object dictionaries/reflection machinery.
+- no recursive by-value layout that would require hidden boxing;
+- no runtime object dictionary/reflection layer.
 
-These are deliberate v0 boundaries. Do not weaken them merely to make a test convenient.
+## CI rule
+
+A running CI is work in progress, not a reason to stop. Work on independent tasks while it runs, but do not retrigger it.
+
+Never create multiple active Actions for the same SHA/workflow/input.
 
 ## Performance rule
 
-For ZERO-cost/native core work:
+For ZERO/native core work:
 
 `T_evolution <= T_reference_rust`
 
-Prefer stronger codegen evidence in this order:
+Evidence priority:
 
 1. correctness PASS;
 2. generated Rust inspection;
@@ -128,4 +129,4 @@ Prefer stronger codegen evidence in this order:
 4. exact executable equality;
 5. otherwise stable hard runtime ratio gate.
 
-The next accepted language feature is chosen only after Records v0 parent #41 is closed.
+Records v0 currently reaches level 4: exact executable parity.
