@@ -33,15 +33,35 @@ mod enums_impl {
         include!("enum_match_sidecar.rs");
     }
 
-    pub(crate) fn validate_enum_pre_codegen_semantics(
+    mod ir {
+        include!("enum_ir.rs");
+    }
+
+    pub(crate) fn collect_validated_enum_environment(
         program: &SyntaxProgram,
-    ) -> Result<(), LowerError> {
+    ) -> Result<EnumEnvironment, LowerError> {
         validate_enum_declarations(program)?;
         let environment = collect_enum_environment(program)?;
         let matches = match_validation::collect_match_environment(program, &environment)?;
         constructor_typing::validate_enum_type_semantics(program, &environment)?;
         match_sidecar::validate_match_sidecar(program, &matches)?;
-        constructor_typing::validate_enum_ownership(program, &environment, &matches)
+        constructor_typing::validate_enum_ownership(program, &environment, &matches)?;
+
+        let schemas = ir::lower_enum_schemas(&environment);
+        debug_assert_eq!(schemas.len(), program.enums.len());
+        debug_assert!(schemas.iter().all(|schema| {
+            environment.schema(&schema.name).is_some_and(|resolved| {
+                resolved.span == schema.span && resolved.variants.len() == schema.variants.len()
+            })
+        }));
+
+        Ok(environment)
+    }
+
+    pub(crate) fn validate_enum_pre_codegen_semantics(
+        program: &SyntaxProgram,
+    ) -> Result<(), LowerError> {
+        collect_validated_enum_environment(program).map(|_| ())
     }
 }
 
