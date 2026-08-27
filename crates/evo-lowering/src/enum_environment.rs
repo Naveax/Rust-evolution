@@ -658,7 +658,7 @@ mod tests {
         )
         .expect_err("wrong nested enum nominal payload should fail");
         assert!(error.message.contains("expects MaybeInt, found Flag"));
-        assert_eq!(error.span.line, 12);
+        assert_eq!(error.span.line, 13);
     }
 
     #[test]
