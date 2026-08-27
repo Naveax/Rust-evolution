@@ -261,20 +261,21 @@ fn render_expr(expr: &Expr) -> String {
         }
         ExprKind::Construct { name, fields } => {
             if fields.is_empty() {
-                return format!("{} {{}}", generated_record_name(name));
+                format!("{} {{}}", generated_record_name(name))
+            } else {
+                let fields = fields
+                    .iter()
+                    .map(|field| {
+                        format!(
+                            "{}: {}",
+                            generated_record_field_name(&field.name),
+                            render_expr(&field.value)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{} {{ {fields} }}", generated_record_name(name))
             }
-            let fields = fields
-                .iter()
-                .map(|field| {
-                    format!(
-                        "{}: {}",
-                        generated_record_field_name(&field.name),
-                        render_expr(&field.value)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{} {{ {fields} }}", generated_record_name(name))
         }
         ExprKind::FieldAccess { base, field } => format!(
             "({}).{}",
@@ -450,26 +451,24 @@ mod tests {
         assert!(generated.contains("struct __EvoRecord_Wrapper {"));
         assert!(generated.contains("__evo_field_point: __EvoRecord_Point,"));
         assert!(generated.contains("__evo_point: __EvoRecord_Point) -> __EvoRecord_Wrapper"));
-        assert!(generated.contains(
-            "return __EvoRecord_Wrapper { __evo_field_point: __evo_point };"
-        ));
+        assert!(
+            generated.contains("return __EvoRecord_Wrapper { __evo_field_point: __evo_point };")
+        );
         assert!(generated.contains("return ((__evo_wrapper).__evo_field_point).__evo_field_x;"));
     }
 
     #[test]
     fn zero_field_record_codegen_uses_empty_struct_literal() {
-        let generated = compile_source(
-            "record Marker\nend\nfn make() Marker\nreturn Marker()\nend\n",
-        );
+        let generated =
+            compile_source("record Marker\nend\nfn make() Marker\nreturn Marker()\nend\n");
         assert!(generated.contains("struct __EvoRecord_Marker {\n}\n"));
         assert!(generated.contains("return __EvoRecord_Marker {};"));
     }
 
     #[test]
     fn record_codegen_adds_no_hidden_runtime_or_clone_scaffolding() {
-        let generated = compile_source(
-            "record Point\nx int\nend\nfn make() Point\nreturn Point(x = 1)\nend\n",
-        );
+        let generated =
+            compile_source("record Point\nx int\nend\nfn make() Point\nreturn Point(x = 1)\nend\n");
         assert!(!generated.contains(".clone()"));
         assert!(!generated.contains("Box<"));
         assert!(!generated.contains("dyn "));
