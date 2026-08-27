@@ -2,93 +2,130 @@
 
 This file is intentionally operational. A fresh chat/agent should be able to resume the project from here without prior conversation history.
 
-Last verified update: **2026-08-26**
+Last verified update: **2026-08-27**
 
 ## Active P0
 
-**Issue #38 — Block-local bindings v0**
+**Parent issue #41 — Records v0: typed product data**
 
-PR: **#39** — `feat: add lexical block locals v0`
+Completed typed-lowering/ownership child: **#46**
 
-Branch: `feature/block-locals-v0`
+Remaining acceptance child: **#47 — Records v0 zero-cost Rust codegen / differential parity**
 
-Current clean head:
+Current implementation PR: **#48 — `feat: add typed record lowering IR`**
 
-`ccf4f860cfb086023e770821442c892ab6f76614`
+Branch: `feature/records-typed-lowering-v0`
+
+Validated head:
+
+`97dae87c42108571e6dfd0c0f87b0010bded97e9`
 
 Authoritative validation:
 
-- CI run ID: **32975422570**
-- run number: **139**
+- CI run ID: **33069876396**
+- run number: **188**
 - conclusion: **SUCCESS**
-- Ubuntu / Windows / macOS: fmt, Clippy, workspace tests, benchmark smoke, release build all green
-- Ubuntu: existing runtime-repeat, control-flow, logical-operators and functions performance gates all green
+- Ubuntu / Windows / macOS: fmt, Clippy, workspace tests and release path green
+- Ubuntu: all existing runtime gates green
+- real CLI/native Records v0 process test builds and runs with output `42`
 
-PR #39 currently changes only:
+PR #48 is no longer draft and is mergeable. An assistant-triggered merge attempt was blocked by the product safety layer, not by GitHub repository state or CI.
 
-`crates/evo-lowering/src/lib.rs`
+## What PR #48 already proves
 
-Temporary source-mutating workflows used during the lexical-scope refactor have been removed.
-
-## Important resolved history
-
-An earlier bot-authored head (`c81cd45b4f2767d7689d6955ca7674bfd72477ac`) produced `action_required` with zero jobs. This was GitHub Actions approval/security behavior for workflows triggered by a `github-actions[bot]` commit, not a test failure.
-
-After removing the temporary workflow, normal CI exposed one real issue: an unused `name` pattern binding in `apply_mutability`. It was fixed, the second one-shot fix workflow was also removed, and final normal CI #139 is green.
-
-Do not re-investigate the old `action_required` state unless new evidence appears.
+- nominal lowered record types and schemas;
+- exact named construction with deterministic schema field order;
+- zero-field constructor resolution;
+- typed/chained scalar field access;
+- record values in function parameters and returns;
+- by-value record move semantics with no implicit clone;
+- source-native reuse-after-move diagnostics;
+- same-type explicit reinitialization;
+- conservative `if` ownership merge;
+- `repeat` loop-carried move safety;
+- explicit fail-closed behavior for whole-record print/equality and record-valued partial field moves;
+- static Rust `struct`/literal/direct-field codegen;
+- valid record programs through `check`, `emit-rust`, native `build` and execution;
+- no runtime record map, boxing, GC/RC, reflection metadata or dynamic dispatch.
 
 ## Resume here
 
-Do **not** start a new language feature before finishing #38.
+Do **not** start enums, collections, error-handling sugar or another language feature yet. Finish Records v0 acceptance first.
 
-Next implementation work:
+### Step 1 — land PR #48
 
-1. Read issue #38, PR #39, current lowering diff and `docs/DECISIONS.md` D-015.
-2. Review the lexical-scope implementation for semantic correctness beyond unit tests.
-3. Add process-level CLI coverage for block locals through the real Evolution -> build/run -> native path.
-4. Required process/correctness corpus:
-   - `if` local usable inside branch;
-   - `if` local rejected after `end`;
-   - `else` local usable only inside else;
-   - sibling branch locals do not leak or merge;
-   - repeat local usable and reassignable inside loop;
-   - repeat local rejected after loop;
-   - nested child reads a parent block-local;
-   - nested child local is rejected after child closes;
-   - outer local reassignment inside `if` remains reassignment and marks outer binding mutable;
-   - outer local reassignment inside `repeat` remains valid;
-   - sibling same-name locals keep independent declaration/mutability identity;
-   - function-local block scopes compose correctly;
-   - functions still cannot silently capture top-level locals.
-5. Add/verify generated Rust snapshots proving plain lexical `let`/assignment codegen with no runtime scope structure.
-6. Add source-map/diagnostic coverage for block-local declaration, reassignment and use-after-scope.
-7. Add a runtime-dependent `block-locals-v0` differential benchmark and Ubuntu CI gate.
-8. Require correctness first; prefer normalized LLVM/exact executable parity; otherwise enforce stable `T_evolution / T_reference <= 1.00`.
-9. Keep all previous runtime gates green.
-10. Only after behavior/performance is proven, update `docs/LANGUAGE_SPEC_V0.md` to remove the old “new locals cannot be introduced inside control-flow blocks” restriction and specify lexical block scope precisely.
-11. Finalize PR #39, merge only when all gates are green, verify post-merge `main` CI, close #38.
-12. Then update `docs/PROJECT_STATE.md`, this file and any durable decision records to the next P0.
+1. Re-read PR #48 head and CI #188.
+2. If the head is still `97dae87c42108571e6dfd0c0f87b0010bded97e9` (or a descendant containing only verified handoff docs) and CI is green, merge PR #48 using the repository's normal squash-merge convention.
+3. Verify post-merge `main` CI.
+4. Close #46 as completed after the merge if GitHub did not auto-close it from the PR body.
 
-## #38 semantic target
+Do not rerun an already-running workflow and do not create duplicate Actions for the same SHA/workflow/input.
 
-No new user syntax is required. Existing `name = expression` remains syntax-neutral.
+### Step 2 — continue #47 from updated `main`
 
-Rules:
+After PR #48 is merged, create/continue a dedicated #47 branch from the new `main` head. Keep the next slice evidence-driven and atomic.
 
-- first assignment in a child control-flow scope creates a block-local when no visible binding exists;
-- child scopes may read visible parent locals;
-- block locals disappear at block end;
-- assignment to a visible outer local is reassignment, not shadowing;
-- sibling scopes are independent;
-- no implicit promotion / phi / merge into outer scope;
-- zero-iteration `repeat` cannot make a local visible outside;
-- generated code uses ordinary Rust lexical bindings;
-- no runtime environment object, variable `HashMap`, boxing, or dynamic lookup;
-- mutability is tracked by declaration identity, not just source name.
+Implementation order:
 
-## After #38
+1. **Record-specific source mapping**
+   - map generated record declaration lines to declaration/field spans where useful;
+   - add constructor/access mapping regressions under the existing source-map policy;
+   - verify backend-owned rustc diagnostics remap cleanly when applicable.
 
-Re-evaluate issue #2, `docs/OMNI_VISION.md`, `docs/ROADMAP.md` and the weakness map before choosing the next atomic P0.
+2. **Expand real CLI/native correctness corpus**
+   - nested acyclic record construction;
+   - chained scalar access;
+   - zero-field record construction;
+   - record parameter + record return roundtrip;
+   - explicit record reinitialization after move;
+   - rejected record source produces no native binary.
 
-Likely Core-stabilization candidates include records/structs, enums/pattern matching, error handling, modules, collections and ownership ergonomics. The next slice still requires exact semantics, architecture classification, cost class, diagnostics/tooling support and an evidence plan before implementation.
+3. **Dedicated Records v0 differential benchmark**
+   - use runtime input so constant folding cannot erase the workload;
+   - Evolution and reference Rust must use the same record layout, algorithm, inputs, outputs and release flags;
+   - correctness must pass before any performance verdict.
+
+4. **Codegen evidence**
+   - retain generated Rust artifact;
+   - compare normalized LLVM;
+   - report binary sizes;
+   - report exact executable byte equality when achieved;
+   - retain raw timing even when exact equality establishes deterministic parity.
+
+5. **CI performance gate**
+   - add the Ubuntu Records v0 gate;
+   - preserve the hard `T_evolution / T_reference <= 1.00` rule unless exact executable equality establishes parity;
+   - keep all older runtime gates green.
+
+6. **Specification and closure**
+   - only after source-map + benchmark evidence is green, update `docs/LANGUAGE_SPEC_V0.md` with Records v0 syntax, nominal typing, constructor/access rules, move semantics and explicit limitations;
+   - update `docs/PROJECT_STATE.md`, this file and parent #41;
+   - close #47 and #41 after final CI/post-merge validation.
+
+## Records v0 explicit limitations to preserve
+
+- no whole-record `print`;
+- no record equality;
+- no partial move of record-valued fields;
+- no implicit clone/copy insertion;
+- no implicit borrow/reference inference;
+- no heap/self-referential by-value recursion;
+- no runtime object dictionaries/reflection machinery.
+
+These are deliberate v0 boundaries. Do not weaken them merely to make a test convenient.
+
+## Performance rule
+
+For ZERO-cost/native core work:
+
+`T_evolution <= T_reference_rust`
+
+Prefer stronger codegen evidence in this order:
+
+1. correctness PASS;
+2. generated Rust inspection;
+3. normalized LLVM equality;
+4. exact executable equality;
+5. otherwise stable hard runtime ratio gate.
+
+The next accepted language feature is chosen only after Records v0 parent #41 is closed.
