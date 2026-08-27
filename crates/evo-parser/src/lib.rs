@@ -1135,40 +1135,40 @@ impl<'a> Parser<'a> {
                 });
             };
 
-            if matches!(self.current().kind, TokenKind::LParen) {
-                if let ExprKind::Identifier(enum_name) = &expr.kind {
-                    let enum_name = enum_name.clone();
-                    self.advance();
-                    let mut arguments = Vec::new();
-                    if !matches!(self.current().kind, TokenKind::RParen) {
-                        loop {
-                            arguments.push(self.parse_expression()?);
-                            if !matches!(self.current().kind, TokenKind::Comma) {
-                                break;
-                            }
-                            self.advance();
-                            if matches!(self.current().kind, TokenKind::RParen) {
-                                return Err(
-                                    self.error_here("expected enum variant argument after ','")
-                                );
-                            }
+            if matches!(self.current().kind, TokenKind::LParen)
+                && let ExprKind::Identifier(enum_name) = &expr.kind
+            {
+                let enum_name = enum_name.clone();
+                self.advance();
+                let mut arguments = Vec::new();
+                if !matches!(self.current().kind, TokenKind::RParen) {
+                    loop {
+                        arguments.push(self.parse_expression()?);
+                        if !matches!(self.current().kind, TokenKind::Comma) {
+                            break;
+                        }
+                        self.advance();
+                        if matches!(self.current().kind, TokenKind::RParen) {
+                            return Err(
+                                self.error_here("expected enum variant argument after ','")
+                            );
                         }
                     }
-                    if !matches!(self.current().kind, TokenKind::RParen) {
-                        return Err(self.error_here("expected ')' after enum variant arguments"));
-                    }
-                    let close = self.advance().span;
-                    let span = expr.span.join(close);
-                    expr = Expr {
-                        kind: ExprKind::EnumConstruct {
-                            enum_name,
-                            variant_name: field,
-                            arguments,
-                        },
-                        span,
-                    };
-                    continue;
                 }
+                if !matches!(self.current().kind, TokenKind::RParen) {
+                    return Err(self.error_here("expected ')' after enum variant arguments"));
+                }
+                let close = self.advance().span;
+                let span = expr.span.join(close);
+                expr = Expr {
+                    kind: ExprKind::EnumConstruct {
+                        enum_name,
+                        variant_name: field,
+                        arguments,
+                    },
+                    span,
+                };
+                continue;
             }
 
             let span = expr.span.join(field_token.span);
