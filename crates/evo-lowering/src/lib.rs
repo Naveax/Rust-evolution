@@ -508,7 +508,8 @@ impl<'a> Analyzer<'a> {
                 (ExprKind::Local(name.clone()), binding.value_type)
             }
             SyntaxExprKind::Call { name, arguments } => {
-                match resolve_call_name(self.record_environment, name, arguments.len(), expr.span)? {
+                match resolve_call_name(self.record_environment, name, arguments.len(), expr.span)?
+                {
                     CallNameResolution::ZeroFieldRecordConstructor => (
                         ExprKind::Construct {
                             name: name.clone(),
