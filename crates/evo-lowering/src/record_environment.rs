@@ -64,7 +64,8 @@ pub(crate) fn collect_record_environment(
 }
 
 pub(crate) fn validate_record_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
-    collect_record_environment(program).map(|_| ())
+    reject_enum_declarations(program)?;
+    records_impl::validate_record_declarations(program)
 }
 
 fn reject_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
