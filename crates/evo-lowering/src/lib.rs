@@ -573,7 +573,8 @@ impl<'a> Analyzer<'a> {
                             || matches!(&right_type, ValueType::Record(_))
                         {
                             return Err(LowerError {
-                                message: "record equality is not supported in Records v0".to_owned(),
+                                message: "record equality is not supported in Records v0"
+                                    .to_owned(),
                                 span: expr.span,
                             });
                         }
