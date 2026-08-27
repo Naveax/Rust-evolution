@@ -55,11 +55,13 @@ mod enums_impl {
         include!("enum_program_ir.rs");
     }
 
-    pub(crate) use program_ir::EnumProgramIr;
+    mod executable_ir {
+        include!("enum_executable_ir.rs");
+    }
 
     fn collect_validated_enum_state(
         program: &SyntaxProgram,
-    ) -> Result<(EnumEnvironment, EnumProgramIr), LowerError> {
+    ) -> Result<(EnumEnvironment, program_ir::EnumProgramIr), LowerError> {
         validate_enum_declarations(program)?;
         let environment = collect_enum_environment(program)?;
         let matches = match_validation::collect_match_environment(program, &environment)?;
@@ -109,7 +111,7 @@ mod enums_impl {
 
         Ok((
             environment,
-            EnumProgramIr {
+            program_ir::EnumProgramIr {
                 enums,
                 records,
                 constructors,
@@ -128,12 +130,19 @@ mod enums_impl {
 
     pub(crate) fn collect_validated_enum_program_ir(
         program: &SyntaxProgram,
-    ) -> Result<EnumProgramIr, LowerError> {
+    ) -> Result<program_ir::EnumProgramIr, LowerError> {
         collect_validated_enum_state(program).map(|(_, lowered)| lowered)
     }
-}
 
-pub(crate) use enums_impl::EnumProgramIr;
+    pub(crate) fn collect_executable_enum_program_ir(
+        program: &SyntaxProgram,
+    ) -> Result<executable_ir::ExecutableEnumProgramIr, LowerError> {
+        let validated = collect_validated_enum_program_ir(program)?;
+        Ok(executable_ir::lower_executable_enum_program(
+            program, &validated,
+        ))
+    }
+}
 
 mod records_impl {
     include!("record_environment_records.rs");
@@ -160,12 +169,6 @@ impl Deref for TypeEnvironment {
     }
 }
 
-pub(crate) fn collect_enum_program_ir(
-    program: &SyntaxProgram,
-) -> Result<EnumProgramIr, LowerError> {
-    enums_impl::collect_validated_enum_program_ir(program)
-}
-
 pub(crate) fn collect_record_environment(
     program: &SyntaxProgram,
 ) -> Result<RecordEnvironment, LowerError> {
@@ -184,14 +187,11 @@ fn reject_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
         return Ok(());
     }
 
-    let enum_ir = collect_enum_program_ir(program)?;
-    debug_assert_eq!(enum_ir.enums.len(), program.enums.len());
-    debug_assert_eq!(enum_ir.records.len(), program.records.len());
-    let _ = (
-        enum_ir.constructors.len(),
-        enum_ir.matches.len(),
-        enum_ir.ownership_uses.len(),
-    );
+    let executable = enums_impl::collect_executable_enum_program_ir(program)?;
+    debug_assert_eq!(executable.enums.len(), program.enums.len());
+    debug_assert_eq!(executable.records.len(), program.records.len());
+    debug_assert_eq!(executable.functions.len(), program.functions.len());
+    let _ = executable.statements.len();
 
     let enum_def = &program.enums[0];
     Err(LowerError {
