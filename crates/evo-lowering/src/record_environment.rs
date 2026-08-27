@@ -60,12 +60,10 @@ mod enums_impl {
         debug_assert!(
             constructor_typing::validate_enum_ownership(program, &environment, &matches).is_ok()
         );
-        debug_assert!(
-            ownership.iter().all(|usage| {
-                let _ = (&usage.value_type, usage.mode);
-                !usage.name.is_empty() && usage.span.start < usage.span.end
-            })
-        );
+        debug_assert!(ownership.iter().all(|usage| {
+            let _ = (&usage.value_type, usage.mode);
+            !usage.name.is_empty() && usage.span.start < usage.span.end
+        }));
 
         let schemas = ir::lower_enum_schemas(&environment);
         debug_assert_eq!(schemas.len(), program.enums.len());
