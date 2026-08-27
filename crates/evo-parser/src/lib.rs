@@ -1,3 +1,5 @@
+mod match_parser;
+
 use evo_lexer::{Span, Token, TokenKind};
 use std::error::Error;
 use std::fmt;
@@ -95,6 +97,25 @@ pub enum StmtKind {
         then_body: Vec<Stmt>,
         else_body: Vec<Stmt>,
     },
+    Match {
+        value: Expr,
+        arms: Vec<MatchArm>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchArm {
+    pub pattern: MatchPattern,
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchPattern {
+    pub enum_name: String,
+    pub variant_name: String,
+    pub binding: Option<String>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,25 +210,35 @@ pub fn parse_recovering(tokens: &[Token]) -> Result<Program, Vec<ParseError>> {
 struct StopSet {
     end: bool,
     else_: bool,
+    case_: bool,
 }
 
 impl StopSet {
     const NONE: Self = Self {
         end: false,
         else_: false,
+        case_: false,
     };
     const END: Self = Self {
         end: true,
         else_: false,
+        case_: false,
     };
     const END_OR_ELSE: Self = Self {
         end: true,
         else_: true,
+        case_: false,
+    };
+    const END_OR_CASE: Self = Self {
+        end: true,
+        else_: false,
+        case_: true,
     };
 
     fn contains(self, kind: &TokenKind) -> bool {
         (self.end && matches!(kind, TokenKind::End))
             || (self.else_ && matches!(kind, TokenKind::Else))
+            || (self.case_ && matches!(kind, TokenKind::Case))
     }
 }
 
@@ -701,10 +732,21 @@ impl<'a> Parser<'a> {
                 self.skip_newlines();
                 continue;
             }
+            if matches!(self.current().kind, TokenKind::Case) {
+                self.record_error(
+                    errors,
+                    self.error_here("unexpected 'case' without matching 'match'"),
+                );
+                self.advance();
+                self.synchronize_statement(StopSet::NONE);
+                self.skip_newlines();
+                continue;
+            }
             let start_index = self.index;
             let statement = match self.current().kind {
                 TokenKind::Repeat => self.parse_repeat_recovering(errors),
                 TokenKind::If => self.parse_if_recovering(errors),
+                TokenKind::Match => self.parse_match_recovering(errors),
                 _ => match self.parse_statement() {
                     Ok(statement) => Some(statement),
                     Err(error) => {
@@ -852,11 +894,13 @@ impl<'a> Parser<'a> {
             TokenKind::Return => Err(self.error_here("'return' is only valid inside a function")),
             TokenKind::Repeat => self.parse_repeat(),
             TokenKind::If => self.parse_if(),
+            TokenKind::Match => self.parse_match(),
             TokenKind::Fn | TokenKind::Record | TokenKind::Enum => {
                 Err(self.error_here("nested declarations are not supported in v0"))
             }
             TokenKind::End => Err(self.error_here("unexpected 'end' without matching block")),
             TokenKind::Else => Err(self.error_here("unexpected 'else' without matching 'if'")),
+            TokenKind::Case => Err(self.error_here("unexpected 'case' without matching 'match'")),
             TokenKind::Identifier(name) => {
                 let start = self.advance().span;
                 if !matches!(self.current().kind, TokenKind::Equal) {
@@ -870,10 +914,9 @@ impl<'a> Parser<'a> {
                     span,
                 })
             }
-            _ => {
-                Err(self
-                    .error_here("expected binding, 'print', 'return', 'repeat', or 'if' statement"))
-            }
+            _ => Err(self.error_here(
+                "expected binding, 'print', 'return', 'repeat', 'if', or 'match' statement",
+            )),
         }
     }
 
@@ -1303,6 +1346,7 @@ impl<'a> Parser<'a> {
             match self.current().kind {
                 TokenKind::Repeat
                 | TokenKind::If
+                | TokenKind::Match
                 | TokenKind::Fn
                 | TokenKind::Record
                 | TokenKind::Enum => {
