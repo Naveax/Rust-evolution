@@ -18,8 +18,8 @@ mod enums_impl {
     ) -> Result<(), LowerError> {
         validate_enum_declarations(program)?;
         let environment = collect_enum_environment(program)?;
-        constructor_typing::validate_constructor_payload_types(program, &environment)?;
-        match_validation::validate_match_patterns(program, &environment)
+        match_validation::validate_match_patterns(program, &environment)?;
+        constructor_typing::validate_enum_type_semantics(program, &environment)
     }
 }
 
@@ -138,5 +138,16 @@ mod tests {
             .expect_err("non-exhaustive match should precede unsupported codegen gate");
         assert!(error.message.contains("missing variant(s): Off"));
         assert_eq!(error.span.line, 6);
+    }
+
+    #[test]
+    fn match_scrutinee_type_errors_are_diagnosed_before_fail_closed_gate() {
+        let program = parse_source(
+            "enum Flag\nOff\nOn\nend\nmatch true\ncase Flag.Off\nprint 0\ncase Flag.On\nprint 1\nend\n",
+        );
+        let error = validate_record_declarations(&program)
+            .expect_err("non-enum scrutinee should precede unsupported codegen gate");
+        assert!(error.message.contains("scrutinee must have an enum type"));
+        assert_eq!(error.span.line, 5);
     }
 }
