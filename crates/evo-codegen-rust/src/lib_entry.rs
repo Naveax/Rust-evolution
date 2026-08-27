@@ -3,6 +3,19 @@ include!("lib.rs");
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodegenError {
     message: String,
+    span: Option<evo_lexer::Span>,
+}
+
+impl CodegenError {
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    #[must_use]
+    pub const fn span(&self) -> Option<evo_lexer::Span> {
+        self.span
+    }
 }
 
 impl std::fmt::Display for CodegenError {

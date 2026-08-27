@@ -1,4 +1,4 @@
-use evo_codegen_rust::{GeneratedRust, generate_lowered_rust_with_map};
+use evo_codegen_rust::{GeneratedRust, try_generate_lowered_rust_with_map};
 use evo_diagnostics::render_error;
 use evo_formatter::format_source;
 use evo_lexer::lex_recovering;
@@ -130,7 +130,13 @@ fn load_program(path: &Path) -> Result<LoadedProgram, String> {
         parse_recovering(&tokens).map_err(|errors| render_parse_errors(path, &source, &errors))?;
     let program =
         lower(&syntax).map_err(|error| render_error(path, &source, &error.message, error.span))?;
-    let generated = generate_lowered_rust_with_map(&program);
+    let generated = try_generate_lowered_rust_with_map(&program).map_err(|error| {
+        if let Some(span) = error.span() {
+            render_error(path, &source, error.message(), span)
+        } else {
+            format!("Rust code generation failed: {error}")
+        }
+    })?;
     Ok(LoadedProgram { source, generated })
 }
 
