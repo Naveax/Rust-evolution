@@ -37,7 +37,7 @@ The stable parser supports source-spanned enum declarations, structured qualifie
 Delivery is split into atomic slices:
 
 1. **PR #55 — nominal declaration validation — MERGED**
-2. **#56 / PR #58 — resolved variants and constructor typing — ACTIVE**
+2. **#56 / PR #58 — resolved variants and constructor typing — ACTIVE / FINAL VALIDATION**
 3. **#57 — exhaustive match typing and arm scopes — NEXT**
 
 Ownership/codegen/performance remain later work.
@@ -77,7 +77,7 @@ Branches:
 - PR branch: `feature/enums-constructor-typing-v0`
 - staging: `work/enums-constructor-typing-v0`
 
-Current implementation direction:
+Implemented:
 
 - resolved enum schemas retain enum/variant identity, optional resolved payload type and source spans;
 - semantic payload view distinguishes int/bool/string, record nominal types and enum nominal types without touching Records move tracking;
@@ -98,20 +98,27 @@ Current implementation direction:
 - first payload typing `702fa089...`: CI #224 / run `33099006049` — failed only on a new test's incorrect expected line; production diagnostic correctly pointed to line 13, fmt/Clippy were green
 - corrected payload span `6c0342ec...`: CI #225 / run `33099288196` — **SUCCESS**
 - first full payload-propagation integration `4c4f1d2f...`: CI #226 / run `33099643034` — Clippy found an unused validation wrapper and `&mut Vec` API; both fixed on a new SHA, no rerun
-- code head `e8f84fb2c2c193f4d30c8b513653edf53bdee604`: CI #227 / run `33099872021` is the active validation at this handoff point
+- `e8f84fb2...`: CI #227 / run `33099872021` — format/Clippy and CLI regressions passed; 89/90 lowering tests passed, with the sole failure caused by a test expecting line 8 instead of the correct record-field payload span line 9; the failed SHA was not rerun
+- corrected docs-synchronized head `2a6e7dbbe47e52c0c02499da5de5d1a7a40610cb`: CI #228 / run `33103658784` — **SUCCESS**
+- Ubuntu #228 passed format, Clippy, workspace tests, benchmark smoke, runtime repeat, control-flow, logical operators, Functions v0, Block Locals v0, Records v0 and release build
+- Windows/macOS #228 passed format, Clippy, workspace tests, benchmark smoke and release build
 
-Do not duplicate #227 while it is active. Staging may be ahead with docs-only commits; those require their own final CI after the code head is proven green.
+A final docs-only staging update records #228 itself. That newer docs head must receive its own CI after a single fast-forward before merge.
 
 ## Following slice — #57 exhaustive match typing
 
-After #56 lands on `main`:
+After #56 lands on `main`, start from the actual #58 squash-merge commit.
+
+Required behavior:
 
 - require enum-typed scrutinees;
 - validate arm enum/variant membership;
 - reject duplicate arms;
 - require deterministic exhaustive coverage;
 - type payload bindings from variant schemas;
+- unit variants reject bindings and payload variants require them under the frozen parser surface;
 - keep bindings lexical to one arm and sibling scopes independent;
+- retain structured enum/variant identity and source spans for later lowering/codegen;
 - keep ownership joins and Rust match codegen out of the slice.
 
 ## Deliberate semantic boundary
@@ -134,8 +141,8 @@ Enums v0 remains a **ZERO** cost-class target: ordinary static Rust enums/matche
 - parser child #51: completed
 - nominal declaration PR #55: merged and validated on main
 - semantic umbrella #54: active
-- constructor child #56 / PR #58: active
-- match child #57: queued after #56
+- constructor child #56 / PR #58: final docs-synchronized CI then merge
+- match child #57: queued after #56 merge
 
 ## Durable continuation infrastructure
 
