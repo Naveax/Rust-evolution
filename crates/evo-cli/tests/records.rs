@@ -83,7 +83,10 @@ fn check_reports_recursive_record_layout_at_field_span() {
     let _ = fs::remove_dir_all(&dir);
 
     assert!(!output.status.success());
-    assert!(stderr.contains("recursive by-value record layout"), "{stderr}");
+    assert!(
+        stderr.contains("recursive by-value record layout"),
+        "{stderr}"
+    );
     assert!(stderr.contains("Node -> Node"), "{stderr}");
     assert!(stderr.contains(&location), "{stderr}");
     assert!(stderr.contains("2 | next Node"), "{stderr}");
