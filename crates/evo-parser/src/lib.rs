@@ -7,6 +7,7 @@ const MAX_RECOVERED_ERRORS: usize = 8;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
     pub records: Vec<RecordDef>,
+    pub enums: Vec<EnumDef>,
     pub functions: Vec<FunctionDef>,
     pub statements: Vec<Stmt>,
 }
@@ -31,6 +32,20 @@ pub enum RecordFieldType {
     Bool,
     String,
     Named(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumDef {
+    pub name: String,
+    pub variants: Vec<EnumVariant>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumVariant {
+    pub name: String,
+    pub payload_type: Option<TypeName>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -210,26 +225,36 @@ impl<'a> Parser<'a> {
         if self.tokens.is_empty() {
             return Ok(Program {
                 records: Vec::new(),
+                enums: Vec::new(),
                 functions: Vec::new(),
                 statements: Vec::new(),
             });
         }
 
         let mut records = Vec::new();
+        let mut enums = Vec::new();
         let mut functions = Vec::new();
         let mut statements = Vec::new();
-        let mut record_declaration_region = true;
+        let mut type_declaration_region = true;
         self.skip_newlines();
         while !self.is_eof() {
             match self.current().kind {
-                TokenKind::Record if record_declaration_region => {
+                TokenKind::Record if type_declaration_region => {
                     records.push(self.parse_record()?);
+                    self.require_statement_terminator()?;
+                }
+                TokenKind::Enum if type_declaration_region => {
+                    enums.push(self.parse_enum()?);
                     self.require_statement_terminator()?;
                 }
                 TokenKind::Record => {
                     return Err(self.error_here(
                         "record declarations must appear before executable statements",
                     ));
+                }
+                TokenKind::Enum => {
+                    return Err(self
+                        .error_here("enum declarations must appear before executable statements"));
                 }
                 TokenKind::Fn => {
                     functions.push(self.parse_function()?);
@@ -245,7 +270,7 @@ impl<'a> Parser<'a> {
                     return Err(self.error_here("'return' is only valid inside a function"));
                 }
                 _ => {
-                    record_declaration_region = false;
+                    type_declaration_region = false;
                     let statement = self.parse_statement()?;
                     self.require_statement_terminator()?;
                     statements.push(statement);
@@ -255,6 +280,7 @@ impl<'a> Parser<'a> {
         }
         Ok(Program {
             records,
+            enums,
             functions,
             statements,
         })
@@ -264,6 +290,7 @@ impl<'a> Parser<'a> {
         if self.tokens.is_empty() {
             return Ok(Program {
                 records: Vec::new(),
+                enums: Vec::new(),
                 functions: Vec::new(),
                 statements: Vec::new(),
             });
@@ -271,15 +298,16 @@ impl<'a> Parser<'a> {
 
         let mut errors = Vec::new();
         let mut records = Vec::new();
+        let mut enums = Vec::new();
         let mut functions = Vec::new();
         let mut statements = Vec::new();
-        let mut record_declaration_region = true;
+        let mut type_declaration_region = true;
         self.skip_newlines();
 
         while !self.is_eof() && errors.len() < MAX_RECOVERED_ERRORS {
             if matches!(self.current().kind, TokenKind::Record) {
                 let start_index = self.index;
-                if !record_declaration_region {
+                if !type_declaration_region {
                     self.record_error(
                         &mut errors,
                         self.error_here(
@@ -300,6 +328,39 @@ impl<'a> Parser<'a> {
                         Err(error) => {
                             self.record_error(&mut errors, error);
                             self.recover_record_definition();
+                        }
+                    }
+                }
+                self.skip_newlines();
+                if self.index == start_index && !self.is_eof() {
+                    self.advance();
+                }
+                continue;
+            }
+
+            if matches!(self.current().kind, TokenKind::Enum) {
+                let start_index = self.index;
+                if !type_declaration_region {
+                    self.record_error(
+                        &mut errors,
+                        self.error_here(
+                            "enum declarations must appear before executable statements",
+                        ),
+                    );
+                    self.recover_enum_definition();
+                } else {
+                    match self.parse_enum() {
+                        Ok(enum_def) => {
+                            if let Err(error) = self.require_statement_terminator() {
+                                self.record_error(&mut errors, error);
+                                self.synchronize_statement(StopSet::NONE);
+                            } else {
+                                enums.push(enum_def);
+                            }
+                        }
+                        Err(error) => {
+                            self.record_error(&mut errors, error);
+                            self.recover_enum_definition();
                         }
                     }
                 }
@@ -334,7 +395,7 @@ impl<'a> Parser<'a> {
             }
 
             if matches!(self.current().kind, TokenKind::Return) {
-                record_declaration_region = false;
+                type_declaration_region = false;
                 self.record_error(
                     &mut errors,
                     self.error_here("'return' is only valid inside a function"),
@@ -344,7 +405,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            record_declaration_region = false;
+            type_declaration_region = false;
             let before = self.index;
             let recovered = self.parse_statements_recovering(StopSet::NONE, &mut errors);
             statements.extend(recovered);
@@ -357,6 +418,7 @@ impl<'a> Parser<'a> {
         if errors.is_empty() {
             Ok(Program {
                 records,
+                enums,
                 functions,
                 statements,
             })
@@ -426,6 +488,63 @@ impl<'a> Parser<'a> {
                 span: token.span,
             }),
         }
+    }
+
+    fn parse_enum(&mut self) -> Result<EnumDef, ParseError> {
+        let start = self.expect_kind(TokenKind::Enum, "expected 'enum'")?.span;
+        let name_token = self.advance();
+        let TokenKind::Identifier(name) = name_token.kind else {
+            return Err(ParseError {
+                message: "expected enum name after 'enum'".to_owned(),
+                span: name_token.span,
+            });
+        };
+        if !matches!(self.current().kind, TokenKind::Newline) {
+            return Err(self.error_here("expected end of line after enum name"));
+        }
+        self.skip_newlines();
+
+        let mut variants = Vec::new();
+        while !matches!(self.current().kind, TokenKind::End) {
+            if self.is_eof() {
+                return Err(self.error_here("missing 'end' for enum"));
+            }
+            let variant_name_token = self.advance();
+            let TokenKind::Identifier(variant_name) = variant_name_token.kind else {
+                return Err(ParseError {
+                    message: "expected enum variant name".to_owned(),
+                    span: variant_name_token.span,
+                });
+            };
+
+            let payload_token = self.current().clone();
+            let payload_type = if matches!(self.current().kind, TokenKind::Newline) {
+                None
+            } else {
+                Some(self.parse_type_name()?)
+            };
+            let span = if payload_type.is_some() {
+                variant_name_token.span.join(payload_token.span)
+            } else {
+                variant_name_token.span
+            };
+            variants.push(EnumVariant {
+                name: variant_name,
+                payload_type,
+                span,
+            });
+            self.require_statement_terminator()?;
+            self.skip_newlines();
+        }
+
+        let close = self
+            .expect_kind(TokenKind::End, "missing 'end' for enum")?
+            .span;
+        Ok(EnumDef {
+            name,
+            variants,
+            span: start.join(close),
+        })
     }
 
     fn parse_function(&mut self) -> Result<FunctionDef, ParseError> {
@@ -516,7 +635,10 @@ impl<'a> Parser<'a> {
             if self.is_eof() {
                 return Err(self.error_here("missing 'end' for function"));
             }
-            if matches!(self.current().kind, TokenKind::Fn | TokenKind::Record) {
+            if matches!(
+                self.current().kind,
+                TokenKind::Fn | TokenKind::Record | TokenKind::Enum
+            ) {
                 return Err(self.error_here("nested declarations are not supported in v0"));
             }
             let statement = self.parse_statement()?;
@@ -538,15 +660,18 @@ impl<'a> Parser<'a> {
             if stop.contains(&self.current().kind) {
                 break;
             }
-            if matches!(self.current().kind, TokenKind::Fn | TokenKind::Record) {
+            if matches!(
+                self.current().kind,
+                TokenKind::Fn | TokenKind::Record | TokenKind::Enum
+            ) {
                 self.record_error(
                     errors,
                     self.error_here("nested declarations are not supported in v0"),
                 );
-                if matches!(self.current().kind, TokenKind::Record) {
-                    self.recover_record_definition();
-                } else {
-                    self.recover_function_definition();
+                match self.current().kind {
+                    TokenKind::Record => self.recover_record_definition(),
+                    TokenKind::Enum => self.recover_enum_definition(),
+                    _ => self.recover_function_definition(),
                 }
                 self.skip_newlines();
                 continue;
@@ -722,7 +847,7 @@ impl<'a> Parser<'a> {
             TokenKind::Return => Err(self.error_here("'return' is only valid inside a function")),
             TokenKind::Repeat => self.parse_repeat(),
             TokenKind::If => self.parse_if(),
-            TokenKind::Fn | TokenKind::Record => {
+            TokenKind::Fn | TokenKind::Record | TokenKind::Enum => {
                 Err(self.error_here("nested declarations are not supported in v0"))
             }
             TokenKind::End => Err(self.error_here("unexpected 'end' without matching block")),
@@ -1134,7 +1259,11 @@ impl<'a> Parser<'a> {
         let mut depth = 1usize;
         while !self.is_eof() {
             match self.current().kind {
-                TokenKind::Repeat | TokenKind::If | TokenKind::Fn | TokenKind::Record => {
+                TokenKind::Repeat
+                | TokenKind::If
+                | TokenKind::Fn
+                | TokenKind::Record
+                | TokenKind::Enum => {
                     depth += 1;
                     self.advance();
                 }
@@ -1161,6 +1290,12 @@ impl<'a> Parser<'a> {
     }
 
     fn recover_record_definition(&mut self) {
+        if !self.is_eof() {
+            let _ = self.skip_invalid_block();
+        }
+    }
+
+    fn recover_enum_definition(&mut self) {
         if !self.is_eof() {
             let _ = self.skip_invalid_block();
         }
@@ -1240,6 +1375,7 @@ mod tests {
     fn existing_top_level_program_has_no_declarations() {
         let program = parse_source("x = 1\nprint x\n");
         assert!(program.records.is_empty());
+        assert!(program.enums.is_empty());
         assert!(program.functions.is_empty());
         assert_eq!(program.statements.len(), 2);
     }
@@ -1267,6 +1403,39 @@ mod tests {
     }
 
     #[test]
+    fn parses_unit_and_single_payload_enum_variants() {
+        let program = parse_source(
+            "enum MaybeValue\nNone\nNumber int\nFlag bool\nLabel string\nPointValue Point\nend\n",
+        );
+        assert_eq!(program.enums.len(), 1);
+        let enum_def = &program.enums[0];
+        assert_eq!(enum_def.name, "MaybeValue");
+        assert_eq!(enum_def.variants.len(), 5);
+        assert_eq!(enum_def.variants[0].name, "None");
+        assert_eq!(enum_def.variants[0].payload_type, None);
+        assert_eq!(enum_def.variants[1].payload_type, Some(TypeName::Int));
+        assert_eq!(enum_def.variants[2].payload_type, Some(TypeName::Bool));
+        assert_eq!(enum_def.variants[3].payload_type, Some(TypeName::String));
+        assert_eq!(
+            enum_def.variants[4].payload_type,
+            Some(TypeName::Named("Point".to_owned()))
+        );
+        assert_eq!(enum_def.span.line, 1);
+        assert_eq!(enum_def.variants[1].span.line, 3);
+    }
+
+    #[test]
+    fn records_enums_and_functions_may_interleave_before_executable_statements() {
+        let program = parse_source(
+            "record A\nvalue int\nend\nenum MaybeA\nNone\nSome A\nend\nfn read() int\nreturn 1\nend\nrecord B\nvalue bool\nend\nenum Flag\nOff\nOn\nend\nprint read()\n",
+        );
+        assert_eq!(program.records.len(), 2);
+        assert_eq!(program.enums.len(), 2);
+        assert_eq!(program.functions.len(), 1);
+        assert_eq!(program.statements.len(), 1);
+    }
+
+    #[test]
     fn records_and_functions_may_interleave_before_executable_statements() {
         let program = parse_source(
             "record A\nvalue int\nend\nfn read() int\nreturn 1\nend\nrecord B\nvalue bool\nend\nprint read()\n",
@@ -1281,6 +1450,14 @@ mod tests {
         let tokens = lex("x = 1\nrecord Late\nvalue int\nend\n").expect("lexing should succeed");
         let error = parse(&tokens).expect_err("late record declaration should fail");
         assert!(error.message.contains("before executable"));
+    }
+
+    #[test]
+    fn rejects_enum_declaration_after_executable_statement() {
+        let tokens = lex("x = 1\nenum Late\nNone\nend\n").expect("lexing should succeed");
+        let error = parse(&tokens).expect_err("late enum declaration should fail");
+        assert!(error.message.contains("before executable"));
+        assert_eq!(error.span.line, 2);
     }
 
     #[test]
@@ -1396,6 +1573,14 @@ mod tests {
     }
 
     #[test]
+    fn rejects_nested_enum_declaration() {
+        let tokens = lex("fn outer() int\nenum Inner\nNone\nend\nreturn 2\nend\n")
+            .expect("lexing should succeed");
+        let error = parse(&tokens).expect_err("nested enum declaration should fail");
+        assert!(error.message.contains("nested declaration"));
+    }
+
+    #[test]
     fn rejects_trailing_parameter_comma() {
         let tokens = lex("fn add(a int,) int\nreturn a\nend\n").expect("lexing should succeed");
         let error = parse(&tokens).expect_err("trailing comma should fail");
@@ -1432,7 +1617,7 @@ mod tests {
 
     #[test]
     fn recovering_parser_matches_fail_fast_on_valid_declaration_source() {
-        let source = "record Point\nx int\nend\nfn add(a int, b int) int\nreturn a + b\nend\nprint add(2, 3)\n";
+        let source = "record Point\nx int\nend\nenum MaybePoint\nNone\nSome Point\nend\nfn add(a int, b int) int\nreturn a + b\nend\nprint add(2, 3)\n";
         let tokens = lex(source).expect("lexing should succeed");
         assert_eq!(
             parse_recovering(&tokens).expect("recovery parse should succeed"),

@@ -54,6 +54,7 @@ pub fn format_source(source: &str, tokens: &[Token]) -> String {
                     | TokenKind::Else
                     | TokenKind::Fn
                     | TokenKind::Record
+                    | TokenKind::Enum
             )
         }) {
             depth += 1;
@@ -165,7 +166,10 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
         );
     }
 
-    if matches!(previous, TokenKind::Fn | TokenKind::Record) {
+    if matches!(
+        previous,
+        TokenKind::Fn | TokenKind::Record | TokenKind::Enum
+    ) {
         return true;
     }
 
@@ -284,6 +288,26 @@ mod tests {
             "end\n",
             "p = Point(x = 1, y = 2)\n",
             "print p.x\n"
+        );
+        assert_eq!(format(source), expected);
+        assert_eq!(format(expected), expected);
+    }
+
+    #[test]
+    fn formats_enum_unit_and_payload_variants_idempotently() {
+        let source = concat!(
+            "enum MaybeValue# enum\n",
+            "None\n",
+            "Some int# payload\n",
+            "PointValue Point\n",
+            "end\n"
+        );
+        let expected = concat!(
+            "enum MaybeValue  # enum\n",
+            "    None\n",
+            "    Some int  # payload\n",
+            "    PointValue Point\n",
+            "end\n"
         );
         assert_eq!(format(source), expected);
         assert_eq!(format(expected), expected);
