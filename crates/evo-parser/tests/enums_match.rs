@@ -75,7 +75,8 @@ fn rejects_stray_case_and_malformed_case_patterns_source_natively() {
 
 #[test]
 fn diagnoses_missing_match_expression_case_and_end() {
-    let missing_expression = lex("match\ncase Maybe.None\nprint 0\nend\n").expect("source should lex");
+    let missing_expression =
+        lex("match\ncase Maybe.None\nprint 0\nend\n").expect("source should lex");
     let error = parse(&missing_expression).expect_err("match expression is required");
     assert!(error.message.contains("expression after 'match'"));
     assert_eq!(error.span.line, 1);
@@ -85,8 +86,7 @@ fn diagnoses_missing_match_expression_case_and_end() {
     assert!(error.message.contains("at least one 'case'"));
     assert_eq!(error.span.line, 2);
 
-    let missing_end =
-        lex("match value\ncase Maybe.None\nprint 0\n").expect("source should lex");
+    let missing_end = lex("match value\ncase Maybe.None\nprint 0\n").expect("source should lex");
     let error = parse(&missing_end).expect_err("match needs a closing end");
     assert!(error.message.contains("missing 'end' for match"));
 }
