@@ -3,49 +3,31 @@ use crate::{
     record_environment::{RecordEnvironment, SemanticType},
 };
 use evo_lexer::Span;
-use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
-struct MoveBinding {
-    value_type: SemanticType,
-    available: bool,
+mod move_state {
+    include!("move_state.rs");
 }
+
+use move_state::{MoveState, MoveStateError};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct MoveTracker {
-    bindings: HashMap<String, MoveBinding>,
+    state: MoveState<SemanticType>,
 }
 
 impl MoveTracker {
     pub(crate) fn define(&mut self, name: String, value_type: SemanticType) {
-        let previous = self.bindings.insert(
-            name,
-            MoveBinding {
-                value_type,
-                available: true,
-            },
-        );
-        debug_assert!(previous.is_none());
+        self.state.define(name, value_type);
     }
 
     pub(crate) fn forget(&mut self, name: &str) {
-        let removed = self.bindings.remove(name);
-        debug_assert!(removed.is_some());
+        self.state.forget(name);
     }
 
     pub(crate) fn inspect_value(&self, name: &str, span: Span) -> Result<SemanticType, LowerError> {
-        let binding = self.bindings.get(name).ok_or_else(|| LowerError {
-            message: format!("use of local {name:?} before definition or outside its scope"),
-            span,
-        })?;
-
-        if !binding.available {
-            return Err(LowerError {
-                message: format!("use of moved record local {name:?}"),
-                span,
-            });
-        }
-        Ok(binding.value_type.clone())
+        self.state
+            .inspect(name)
+            .map_err(|error| record_read_error(name, span, error))
     }
 
     pub(crate) fn consume_value(
@@ -53,22 +35,9 @@ impl MoveTracker {
         name: &str,
         span: Span,
     ) -> Result<SemanticType, LowerError> {
-        let binding = self.bindings.get_mut(name).ok_or_else(|| LowerError {
-            message: format!("use of local {name:?} before definition or outside its scope"),
-            span,
-        })?;
-
-        if !binding.available {
-            return Err(LowerError {
-                message: format!("use of moved record local {name:?}"),
-                span,
-            });
-        }
-
-        if !binding.value_type.is_trivially_reusable_v0() {
-            binding.available = false;
-        }
-        Ok(binding.value_type.clone())
+        self.state
+            .consume(name, SemanticType::is_trivially_reusable_v0)
+            .map_err(|error| record_read_error(name, span, error))
     }
 
     pub(crate) fn reinitialize(
@@ -77,18 +46,20 @@ impl MoveTracker {
         value_type: SemanticType,
         span: Span,
     ) -> Result<(), LowerError> {
-        let binding = self.bindings.get_mut(name).ok_or_else(|| LowerError {
-            message: format!("assignment to local {name:?} before definition"),
-            span,
-        })?;
-        if binding.value_type != value_type {
-            return Err(LowerError {
+        match self.state.reinitialize(name, value_type) {
+            Ok(()) => Ok(()),
+            Err(MoveStateError::MissingBinding) => Err(LowerError {
+                message: format!("assignment to local {name:?} before definition"),
+                span,
+            }),
+            Err(MoveStateError::TypeMismatch) => Err(LowerError {
                 message: format!("cannot assign a different value type to existing local {name:?}"),
                 span,
-            });
+            }),
+            Err(MoveStateError::UnavailableBinding | MoveStateError::RepeatWouldConsume) => {
+                unreachable!("reinitialization only reports missing bindings or type mismatches")
+            }
         }
-        binding.available = true;
-        Ok(())
     }
 
     pub(crate) fn merge_if(&mut self, then_exit: &Self, else_exit: &Self) {
@@ -101,61 +72,30 @@ impl MoveTracker {
         then_exit: Option<&Self>,
         else_exit: Option<&Self>,
     ) -> bool {
-        match (then_exit, else_exit) {
-            (None, None) => false,
-            (Some(exit), None) | (None, Some(exit)) => {
-                for (name, binding) in &mut self.bindings {
-                    let exit_binding = exit
-                        .bindings
-                        .get(name)
-                        .expect("branch tracker is forked from the same visible bindings");
-                    debug_assert_eq!(binding.value_type, exit_binding.value_type);
-                    binding.available = exit_binding.available;
-                }
-                true
-            }
-            (Some(then_exit), Some(else_exit)) => {
-                for (name, binding) in &mut self.bindings {
-                    let then_binding = then_exit
-                        .bindings
-                        .get(name)
-                        .expect("branch trackers are forked from the same visible bindings");
-                    let else_binding = else_exit
-                        .bindings
-                        .get(name)
-                        .expect("branch trackers are forked from the same visible bindings");
-                    debug_assert_eq!(binding.value_type, then_binding.value_type);
-                    debug_assert_eq!(binding.value_type, else_binding.value_type);
-                    binding.available = then_binding.available && else_binding.available;
-                }
-                true
-            }
-        }
+        self.state.merge_continuing(
+            [then_exit, else_exit]
+                .into_iter()
+                .flatten()
+                .map(|tracker| &tracker.state),
+        )
     }
 
     pub(crate) fn merge_repeat(&mut self, body_exit: &Self, span: Span) -> Result<(), LowerError> {
-        for (name, binding) in &mut self.bindings {
-            let body_binding = body_exit
-                .bindings
-                .get(name)
-                .expect("repeat tracker is forked from the same visible bindings");
-            debug_assert_eq!(binding.value_type, body_binding.value_type);
-
-            if binding.available
-                && !body_binding.available
-                && !binding.value_type.is_trivially_reusable_v0()
-            {
-                return Err(LowerError {
-                    message: format!(
-                        "record local {name:?} is moved by repeat body and would be unavailable on a later iteration"
-                    ),
-                    span,
-                });
-            }
-
-            binding.available = binding.available && body_binding.available;
+        match self
+            .state
+            .merge_repeat(&body_exit.state, SemanticType::is_trivially_reusable_v0)
+        {
+            Ok(()) => Ok(()),
+            Err(MoveStateError::RepeatWouldConsume) => Err(LowerError {
+                message: repeat_move_message(self, body_exit),
+                span,
+            }),
+            Err(
+                MoveStateError::MissingBinding
+                | MoveStateError::UnavailableBinding
+                | MoveStateError::TypeMismatch,
+            ) => unreachable!("repeat merge only reports a move that breaks later iterations"),
         }
-        Ok(())
     }
 
     pub(crate) fn access_field(
@@ -165,18 +105,12 @@ impl MoveTracker {
         field_name: &str,
         span: Span,
     ) -> Result<SemanticType, LowerError> {
-        let binding = self.bindings.get(base_name).ok_or_else(|| LowerError {
-            message: format!("use of local {base_name:?} before definition or outside its scope"),
-            span,
-        })?;
-        if !binding.available {
-            return Err(LowerError {
-                message: format!("use of moved record local {base_name:?}"),
-                span,
-            });
-        }
+        let base_type = self
+            .state
+            .inspect(base_name)
+            .map_err(|error| record_read_error(base_name, span, error))?;
 
-        let field_type = records.field_type(&binding.value_type, field_name, span)?;
+        let field_type = records.field_type(&base_type, field_name, span)?;
         if !field_type.is_trivially_reusable_v0() {
             return Err(LowerError {
                 message: format!(
@@ -186,6 +120,46 @@ impl MoveTracker {
             });
         }
         Ok(field_type)
+    }
+}
+
+fn record_read_error(name: &str, span: Span, error: MoveStateError) -> LowerError {
+    match error {
+        MoveStateError::MissingBinding => LowerError {
+            message: format!("use of local {name:?} before definition or outside its scope"),
+            span,
+        },
+        MoveStateError::UnavailableBinding => LowerError {
+            message: format!("use of moved record local {name:?}"),
+            span,
+        },
+        MoveStateError::TypeMismatch | MoveStateError::RepeatWouldConsume => {
+            unreachable!("record reads only report missing or unavailable bindings")
+        }
+    }
+}
+
+fn repeat_move_message(entry: &MoveTracker, body_exit: &MoveTracker) -> String {
+    // Preserve the existing source-native diagnostic without leaking generic move-state
+    // machinery into user-facing Records v0 behavior. Find the first binding that is
+    // available on entry but unavailable after one body iteration.
+    for name in entry.binding_names() {
+        if entry.is_available(name) && !body_exit.is_available(name) {
+            return format!(
+                "record local {name:?} is moved by repeat body and would be unavailable on a later iteration"
+            );
+        }
+    }
+    unreachable!("repeat merge reported a move-only availability regression")
+}
+
+impl MoveTracker {
+    fn binding_names(&self) -> impl Iterator<Item = &str> {
+        self.state.binding_names()
+    }
+
+    fn is_available(&self, name: &str) -> bool {
+        self.state.is_available(name)
     }
 }
 
