@@ -1,7 +1,9 @@
+mod record_ir;
 mod records;
 
 use evo_lexer::Span;
 pub use evo_parser::BinaryOp;
+pub use record_ir::{RecordFieldIr, RecordIr, RecordType};
 use evo_parser::{
     Expr as SyntaxExpr, ExprKind as SyntaxExprKind, FunctionDef as SyntaxFunction,
     Program as SyntaxProgram, Stmt as SyntaxStmt, StmtKind as SyntaxStmtKind,
@@ -13,6 +15,7 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
+    pub records: Vec<RecordIr>,
     pub functions: Vec<Function>,
     pub statements: Vec<Stmt>,
 }
@@ -128,14 +131,8 @@ struct FunctionSignature {
 }
 
 pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
-    if let Some(record) = program.records.first() {
-        records::validate_record_declarations(program)?;
-        return Err(LowerError {
-            message: "record declarations passed Records v0 declaration validation, but Records v0 semantic lowering/codegen is not implemented yet"
-                .to_owned(),
-            span: record.span,
-        });
-    }
+    records::validate_record_declarations(program)?;
+    let records = record_ir::lower_record_schemas(program);
     reject_unlowered_record_signature_types(program)?;
 
     let signatures = collect_function_signatures(&program.functions)?;
@@ -149,6 +146,7 @@ pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
     top_level.apply_mutability(&mut statements);
 
     Ok(Program {
+        records,
         functions,
         statements,
     })
@@ -627,7 +625,7 @@ impl<'a> Analyzer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExprKind, StmtKind, ValueType, lower};
+    use super::{ExprKind, RecordType, StmtKind, ValueType, lower};
     use evo_lexer::lex;
     use evo_parser::parse;
 
@@ -638,11 +636,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_parsed_records_until_semantic_lowering_lands() {
-        let error = lower_source("record Point\nx int\ny int\nend\nprint 1\n")
-            .expect_err("record declarations must not be silently ignored");
-        assert!(error.message.contains("Records v0 semantic lowering"));
-        assert_eq!(error.span.line, 1);
+    fn retains_validated_record_schemas_in_lowered_program() {
+        let program = lower_source("record Point\nx int\ny bool\nend\nprint 1\n")
+            .expect("validated record declarations should attach to lowered Program");
+        assert_eq!(program.records.len(), 1);
+        assert_eq!(program.records[0].name, "Point");
+        assert_eq!(program.records[0].span.line, 1);
+        assert_eq!(program.records[0].fields.len(), 2);
+        assert_eq!(program.records[0].fields[0].name, "x");
+        assert_eq!(program.records[0].fields[0].value_type, RecordType::Integer);
+        assert_eq!(program.records[0].fields[1].name, "y");
+        assert_eq!(program.records[0].fields[1].value_type, RecordType::Bool);
+        assert_eq!(program.statements.len(), 1);
     }
 
     #[test]
@@ -749,6 +754,7 @@ mod tests {
         let program =
             lower_source("n = input_int\nsum = 0\nrepeat n\nsum = sum + 1\nend\nprint sum\n")
                 .expect("existing top-level program should lower");
+        assert!(program.records.is_empty());
         assert!(program.functions.is_empty());
         assert_eq!(program.statements.len(), 4);
     }

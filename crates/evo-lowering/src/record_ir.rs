@@ -2,7 +2,7 @@ use evo_lexer::Span;
 use evo_parser::{Program as SyntaxProgram, RecordFieldType as SyntaxFieldType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum RecordType {
+pub enum RecordType {
     Integer,
     Bool,
     String,
@@ -10,17 +10,17 @@ pub(crate) enum RecordType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RecordFieldIr {
-    pub(crate) name: String,
-    pub(crate) value_type: RecordType,
-    pub(crate) span: Span,
+pub struct RecordFieldIr {
+    pub name: String,
+    pub value_type: RecordType,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RecordIr {
-    pub(crate) name: String,
-    pub(crate) fields: Vec<RecordFieldIr>,
-    pub(crate) span: Span,
+pub struct RecordIr {
+    pub name: String,
+    pub fields: Vec<RecordFieldIr>,
+    pub span: Span,
 }
 
 #[must_use]
