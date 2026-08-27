@@ -1,6 +1,6 @@
 use crate::LowerError;
-use evo_lexer::Span;
-use evo_parser::{Program as SyntaxProgram, TypeName as SyntaxTypeName};
+use evo_parser::Program as SyntaxProgram;
+use std::ops::Deref;
 
 mod enums_impl {
     include!("enum_environment.rs");
@@ -10,48 +10,24 @@ mod records_impl {
     include!("record_environment_records.rs");
 }
 
-pub(crate) use records_impl::{ConstructorFieldInput, RecordSchema, SemanticType};
+pub(crate) use records_impl::{
+    ConstructorFieldInput, RecordEnvironment as RecordStorage, SemanticType,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TypeEnvironment {
-    records: records_impl::RecordEnvironment,
+    records: RecordStorage,
 }
 
 // Transitional compatibility name for Records v0 callers. New nominal-type work
 // should use TypeEnvironment so enum support can share the same semantic boundary.
 pub(crate) type RecordEnvironment = TypeEnvironment;
 
-impl TypeEnvironment {
-    pub(crate) fn resolve_type_name(
-        &self,
-        type_name: &SyntaxTypeName,
-        span: Span,
-    ) -> Result<SemanticType, LowerError> {
-        self.records.resolve_type_name(type_name, span)
-    }
+impl Deref for TypeEnvironment {
+    type Target = RecordStorage;
 
-    pub(crate) fn validate_constructor(
-        &self,
-        name: &str,
-        fields: &[ConstructorFieldInput],
-        constructor_span: Span,
-    ) -> Result<SemanticType, LowerError> {
-        self.records
-            .validate_constructor(name, fields, constructor_span)
-    }
-
-    pub(crate) fn field_type(
-        &self,
-        base_type: &SemanticType,
-        field_name: &str,
-        access_span: Span,
-    ) -> Result<SemanticType, LowerError> {
-        self.records.field_type(base_type, field_name, access_span)
-    }
-
-    #[must_use]
-    pub(crate) fn schema(&self, name: &str) -> Option<&RecordSchema> {
-        self.records.schema(name)
+    fn deref(&self) -> &Self::Target {
+        &self.records
     }
 }
 
