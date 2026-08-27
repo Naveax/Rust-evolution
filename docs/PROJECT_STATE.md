@@ -9,138 +9,115 @@ This file is the durable project handoff. Fresh sessions should read `AGENTS.md`
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
 - Rust toolchain: **1.98.0**
-- Records v0 final feature baseline on `main`: `ce3018d158d2ce4084a9e569b8eebac6eeb51f8f` (`perf: complete Records v0 parity acceptance`).
-- Final Records post-merge CI: **#197 / run `33074128274` — SUCCESS** on Ubuntu, Windows and macOS.
-- Ubuntu #197 passed format, Clippy, workspace tests, benchmark smoke, release build, every older runtime gate, and the dedicated Records v0 performance gate.
-- Records parent #41 and child issues #43, #46, #47 are completed.
+- Records v0 final feature baseline: `ce3018d158d2ce4084a9e569b8eebac6eeb51f8f`
+- Records post-merge CI #197 / run `33074128274`: **SUCCESS**
+- Records parent #41 and child issues #43, #46, #47 are completed
 
 ## Completed Records v0 milestone
 
-Records v0 is part of the accepted experimental language surface on `main`.
+Records v0 remains the accepted ZERO-cost nominal product-type baseline: static Rust structs/field access, by-value move tracking, no hidden allocation/boxing/GC/RC/clone/dynamic dispatch/runtime metadata, with its dedicated differential performance gate preserved.
 
-Implemented and validated:
+## Completed Enums parser milestone
 
-- nominal record declarations and named record types;
-- exact named constructors with deterministic schema-order lowering;
-- builtin and acyclic record-valued fields;
-- zero-field constructors;
-- typed direct/chained scalar field access;
-- record parameters and return values;
-- by-value move tracking with source-native reuse-after-move diagnostics;
-- same-type explicit reinitialization;
-- conservative ownership joins across `if`;
-- loop-carried move safety across `repeat`;
-- explicit rejection of whole-record print/equality and record-valued partial field moves;
-- static Rust structs, struct literals and direct field access;
-- record declaration/field source mapping plus constructor/access owning-statement mapping;
-- real CLI/native process coverage;
-- canonical formatter/spec support;
-- dedicated Ubuntu differential performance gate.
+Parent: **#50 — Enums v0: nominal sum types + exhaustive static matching**
 
-Records v0 cost class is **ZERO**: no hidden allocation, boxing, GC/RC, implicit clone, dynamic dispatch, runtime object map or reflection metadata.
+Parser / formatter child #51 is completed.
 
-Dedicated parity evidence from CI #190 / run `33071967025`, artifact `9646205940`:
-
-- correctness: PASS;
-- normalized LLVM IR equality: true;
-- exact executable equality: true;
-- binary size: `2,267,104 B / 2,267,104 B`;
-- raw median ratio: `1.000226357`;
-- final verdict: PASS;
-- verdict basis: `byte-identical-binary-parity`.
-
-## Active P0 — Enums v0
-
-Parent issue:
-
-- **#50 — Enums v0: nominal sum types + exhaustive static matching**
-
-Parser / formatter child:
-
-- **#51 — Enums parser: declarations, qualified variants and case-match surface**
 - declaration slice PR #52 merged as `f6796fa8f9f87530b98de0e13bf636fa95c2254a`
-- PR #52 validation: CI #202 / run `33079158369` — SUCCESS
-- post-merge declaration validation: main CI #203 / run `33079432964` — SUCCESS
-- remaining constructor/match slice implemented in **PR #53** on `feature/enums-constructor-match-v0`
-- parser code head `acb27b1f54c7e695d46c5395a4d84c6d02cb136c` validated by **CI #214 / run `33090709840` — SUCCESS**
+- constructor/match slice PR #53 squash-merged as `c454fcfe5811a9122b8dfeefad7f4eb4c22c8afa`
+- PR #53 final CI #215 / run `33091101594`: **SUCCESS**
+- post-merge main CI #216 / run `33091396504`: **SUCCESS**
 
-Next semantic child:
+The stable parser supports source-spanned enum declarations, structured qualified constructors, statement-only match/case patterns, bounded recovery and canonical formatting. Enum execution remains intentionally fail-closed before unsupported runtime semantics/codegen.
 
-- **#54 — Enums semantics: nominal typing, constructors and exhaustive match**
-- deliberate boundary: type semantics/lowering/diagnostics only; ownership, Rust enum/match codegen and performance remain later work
+## Active semantic umbrella — #54
 
-## Enums parser / formatter surface implemented in PR #53
+**#54 — Enums semantics: nominal typing, constructors and exhaustive match**
 
-Accepted syntax:
+Delivery is split into atomic slices:
 
-```text
-value = MaybeInt.None()
-value = MaybeInt.Some(41)
+1. **PR #55 — nominal declaration validation**
+2. **#56 — resolved variants and constructor typing**
+3. **#57 — exhaustive match typing and arm scopes**
 
-match value
-case MaybeInt.Some(x)
-    print x
-case MaybeInt.None
-    print 0
-end
-```
+Ownership/codegen/performance remain later work.
 
-Implemented properties:
+## PR #55 current validated slice
 
-- exact-boundary lexer keywords `enum`, `match`, `case` with prefix-identifier regressions;
-- source-spanned enum declarations and unit/single-payload variants;
-- structured qualified constructor AST with enum name, variant name, arguments and source span;
-- existing record constructors, `value.field` and chained field access preserved;
-- plain `Enum.Variant` remains field-access-shaped syntax outside `case`;
-- statement-only `match` with source-spanned arms/patterns;
-- fully qualified unit and one-payload-binding patterns;
-- sibling `case` arm boundaries and nested `if` / `repeat` / `match` recovery;
-- source-native diagnostics for stray `case`, missing match expression, missing first case, malformed payload binding and missing final `end`;
-- canonical/idempotent formatter coverage for enum declarations, constructors, match/case indentation, payload bindings and comments;
-- explicit fail-closed lowering for enum declarations, constructors and match statements before enum semantic/codegen support;
-- real CLI gates proving unsupported enum execution stops at Evolution source spans and never reaches rustc.
+PR branch: `feature/enums-semantics-v0`
 
-## PR #53 validation evidence
+Validated code head: `ccfc0f3e5cfad8e6c66c171725e3b58576c60dcf`
 
-Code head `acb27b1f54c7e695d46c5395a4d84c6d02cb136c`:
+CI #219 / run `33092454867`: **SUCCESS**.
 
-- CI **#214 / run `33090709840` — SUCCESS**;
-- Ubuntu: format, Clippy, workspace tests, benchmark smoke, runtime repeat gate, control-flow gate, logical-operator gate, Functions v0 gate, Block Locals v0 gate, Records v0 gate and release build all SUCCESS;
-- Windows/macOS: format, Clippy, workspace tests, benchmark smoke and release build SUCCESS.
+Ubuntu #219 passed format, Clippy, workspace tests, benchmark smoke, all existing runtime/performance gates including Records v0, and release build. Windows/macOS passed format, Clippy, workspace tests, benchmark smoke and release build.
 
-Any later docs-only synchronization commit still requires its own CI before PR #53 merge. Never rerun #214 for a newer SHA.
+Implemented on #55:
 
-## Next implementation target — #54 nominal semantics
+- internal `TypeEnvironment` semantic boundary;
+- existing record environment retained behind delegated storage with a transitional `RecordEnvironment` compatibility name;
+- duplicate enum-name rejection;
+- duplicate variant rejection within one enum;
+- same variant name allowed across different enums;
+- record/enum nominal namespace collision rejection;
+- enum/function namespace collision rejection;
+- builtin/record/enum payload-reference validation;
+- acyclic record-to-enum and enum-to-record references accepted at declaration-validation level;
+- unknown named types rejected source-natively in mixed nominal programs;
+- direct and indirect record/enum by-value layout cycles rejected without hidden boxing;
+- valid enum programs still stop at the existing Enums semantic/codegen fail-closed gate.
 
-After PR #53 lands on `main`, continue with a shared nominal type environment rather than extending Records-only special cases.
+A later docs-synchronized #55 head still requires its own final CI before merge. Until #55 lands on `main`, the items above are PR evidence rather than stable language behavior.
 
-Required semantic direction:
+## Next slice — #56 resolved variants + constructor typing
 
-- `SemanticType` must represent builtin scalars, records and enums nominally;
-- record/enum/function namespace policy must be deterministic and tested;
-- enum declarations create schemas with variant identity, optional resolved payload type and source spans;
-- duplicate enum/variant names and unknown payload types reject source-natively;
-- direct/indirect by-value nominal layout cycles reject without hidden boxing;
-- `Enum.Variant(...)` resolves exactly one declared variant and validates zero/one payload arity + type;
-- constructor expressions evaluate to the nominal enum type;
-- `match` scrutinee must be enum-typed;
-- arms must belong to the scrutinee enum, be duplicate-free and exhaustive;
-- payload bindings receive the declared payload type and are lexical to one arm;
-- sibling arm scopes remain independent;
-- lowered enum schemas/constructors/matches retain structured identity and spans;
-- ownership semantics and Rust codegen remain explicitly fail-closed until their own child work.
+After #55 merges, start #56 from the actual squash-merge baseline.
+
+Required direction:
+
+- resolved enum schemas retain enum name, variant name, optional resolved payload type and source spans;
+- semantic type model distinguishes scalars, records and enums nominally;
+- enum/function signatures resolve deterministically where required for constructor expression type checking;
+- `Enum.Variant(...)` resolves exactly one enum + variant;
+- unit variants require zero arguments;
+- payload variants require exactly one argument;
+- payload expression is statically type checked;
+- constructor expression receives the nominal enum type;
+- unknown enum/variant/wrong arity/wrong payload type reject at Evolution source spans;
+- constructor execution remains fail-closed before ownership/codegen.
+
+## Following slice — #57 exhaustive match typing
+
+After #56 lands:
+
+- require enum-typed scrutinees;
+- validate arm enum/variant membership;
+- reject duplicate arms;
+- require deterministic exhaustive coverage;
+- type payload bindings from variant payloads;
+- keep bindings lexical to one arm and sibling scopes independent;
+- keep ownership joins and Rust match codegen out of the slice.
+
+## Deliberate semantic boundary
+
+Do not add yet:
+
+- enum move/reinitialization rules;
+- payload extraction partial-move behavior;
+- Rust enum/match codegen;
+- source-map codegen snapshots;
+- dedicated Enums performance gate;
+- generics, guards, wildcard/or/nested arbitrary patterns, Option/Result sugar.
 
 Enums v0 remains a **ZERO** cost-class target: ordinary static Rust enums/matches, no hidden allocation, boxing, clone, dispatch or runtime metadata.
 
 ## Current stable baseline
 
-Until PR #53 merges:
-
-- stable `main` parser baseline: `f6796fa8f9f87530b98de0e13bf636fa95c2254a`;
-- main CI #203 / run `33079432964`: SUCCESS;
-- PR #53 code validation CI #214: SUCCESS.
-
-After PR #53 merge, the actual merge commit and post-merge main CI become authoritative and must replace this temporary merge-candidate evidence in the next durable update.
+- `main`: `c454fcfe5811a9122b8dfeefad7f4eb4c22c8afa`
+- post-merge CI #216 / run `33091396504`: **SUCCESS**
+- parser child #51: completed
+- semantic umbrella #54: active
+- nominal declaration PR #55: code head green in CI #219, final docs-synchronized head pending
 
 ## Durable continuation infrastructure
 

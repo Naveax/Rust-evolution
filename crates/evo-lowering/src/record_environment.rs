@@ -1,17 +1,42 @@
 use crate::LowerError;
 use evo_parser::Program as SyntaxProgram;
+use std::ops::Deref;
+
+mod enums_impl {
+    include!("enum_environment.rs");
+}
 
 mod records_impl {
     include!("record_environment_records.rs");
 }
 
-pub(crate) use records_impl::{ConstructorFieldInput, RecordEnvironment, SemanticType};
+pub(crate) use records_impl::{
+    ConstructorFieldInput, RecordEnvironment as RecordStorage, SemanticType,
+};
+
+#[derive(Debug, Clone)]
+pub(crate) struct TypeEnvironment {
+    records: RecordStorage,
+}
+
+// Transitional compatibility name for Records v0 callers. New nominal-type work
+// should use TypeEnvironment so enum support can share the same semantic boundary.
+pub(crate) type RecordEnvironment = TypeEnvironment;
+
+impl Deref for TypeEnvironment {
+    type Target = RecordStorage;
+
+    fn deref(&self) -> &Self::Target {
+        &self.records
+    }
+}
 
 pub(crate) fn collect_record_environment(
     program: &SyntaxProgram,
 ) -> Result<RecordEnvironment, LowerError> {
     reject_enum_declarations(program)?;
-    records_impl::collect_record_environment(program)
+    let records = records_impl::collect_record_environment(program)?;
+    Ok(TypeEnvironment { records })
 }
 
 pub(crate) fn validate_record_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
@@ -20,10 +45,12 @@ pub(crate) fn validate_record_declarations(program: &SyntaxProgram) -> Result<()
 }
 
 fn reject_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
-    let Some(enum_def) = program.enums.first() else {
+    if program.enums.is_empty() {
         return Ok(());
-    };
+    }
 
+    enums_impl::validate_enum_declarations(program)?;
+    let enum_def = &program.enums[0];
     Err(LowerError {
         message: "enum declarations are parsed, but Enums v0 semantic lowering/codegen is not implemented yet"
             .to_owned(),
@@ -63,5 +90,14 @@ mod tests {
                 .contains("Enums v0 semantic lowering")
         );
         assert_eq!(collection_error.span.line, 1);
+    }
+
+    #[test]
+    fn invalid_enum_declarations_are_diagnosed_before_the_fail_closed_gate() {
+        let program = parse_source("enum Flag\nOn\nOn\nend\n");
+        let error = validate_record_declarations(&program)
+            .expect_err("duplicate variants should fail before unsupported enum execution");
+        assert!(error.message.contains("duplicate variant name"));
+        assert_eq!(error.span.line, 3);
     }
 }
