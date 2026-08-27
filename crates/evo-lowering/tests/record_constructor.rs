@@ -28,6 +28,14 @@ fn environment(source: &str) -> record_environment::RecordEnvironment {
 #[test]
 fn constructor_fields_are_normalized_to_declaration_order() {
     let records = environment("record Point\nx int\ny bool\nend\n");
+    assert_eq!(
+        records
+            .schema("Point")
+            .expect("Point schema should exist")
+            .span
+            .line,
+        1
+    );
     let lowered = lower_constructor_fields(
         &records,
         "Point",
