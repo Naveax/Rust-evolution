@@ -11,7 +11,13 @@ fn temp_dir(label: &str) -> std::path::PathBuf {
     env::temp_dir().join(format!("evo-{label}-{}-{nanos}", process::id()))
 }
 
-fn assert_check_fails_before_rustc(label: &str, filename: &str, source_text: &str, message: &str, line: usize) {
+fn assert_check_fails_before_rustc(
+    label: &str,
+    filename: &str,
+    source_text: &str,
+    message: &str,
+    line: usize,
+) {
     let dir = temp_dir(label);
     fs::create_dir_all(&dir).expect("temporary directory should be created");
     let source = dir.join(filename);
