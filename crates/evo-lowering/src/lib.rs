@@ -533,7 +533,10 @@ impl<'a> Analyzer<'a> {
             SyntaxExprKind::Bool(value) => (ExprKind::Bool(*value), ValueType::Bool),
             SyntaxExprKind::Identifier(name) => {
                 let value_type = self.move_tracker.consume_value(name, expr.span)?;
-                (ExprKind::Local(name.clone()), lowered_value_type(&value_type))
+                (
+                    ExprKind::Local(name.clone()),
+                    lowered_value_type(&value_type),
+                )
             }
             SyntaxExprKind::Call { name, arguments } => {
                 match resolve_call_name(self.record_environment, name, arguments.len(), expr.span)?
@@ -546,13 +549,12 @@ impl<'a> Analyzer<'a> {
                         ValueType::Record(name.clone()),
                     ),
                     CallNameResolution::Function => {
-                        let signature = self
-                            .function_signatures
-                            .get(name)
-                            .cloned()
-                            .ok_or_else(|| LowerError {
-                                message: format!("unknown function {name:?}"),
-                                span: expr.span,
+                        let signature =
+                            self.function_signatures.get(name).cloned().ok_or_else(|| {
+                                LowerError {
+                                    message: format!("unknown function {name:?}"),
+                                    span: expr.span,
+                                }
                             })?;
                         if arguments.len() != signature.parameter_types.len() {
                             return Err(LowerError {
@@ -680,7 +682,8 @@ impl<'a> Analyzer<'a> {
                     BinaryOp::Equal | BinaryOp::NotEqual => {
                         if matches!(&right_type, ValueType::Record(_)) {
                             return Err(LowerError {
-                                message: "record equality is not supported in Records v0".to_owned(),
+                                message: "record equality is not supported in Records v0"
+                                    .to_owned(),
                                 span: expr.span,
                             });
                         }
@@ -743,12 +746,9 @@ impl<'a> Analyzer<'a> {
         span: Span,
     ) -> Result<(ExprKind, ValueType), LowerError> {
         if let SyntaxExprKind::Identifier(name) = &base.kind {
-            let field_type = self.move_tracker.access_field(
-                self.record_environment,
-                name,
-                field,
-                span,
-            )?;
+            let field_type =
+                self.move_tracker
+                    .access_field(self.record_environment, name, field, span)?;
             return Ok((
                 ExprKind::FieldAccess {
                     base: Box::new(Expr {
@@ -762,11 +762,9 @@ impl<'a> Analyzer<'a> {
         }
 
         let (base, base_type) = self.lower_field_base(base)?;
-        let field_type = self.record_environment.field_type(
-            &semantic_type(&base_type),
-            field,
-            span,
-        )?;
+        let field_type =
+            self.record_environment
+                .field_type(&semantic_type(&base_type), field, span)?;
         if !field_type.is_trivially_reusable_v0() {
             return Err(LowerError {
                 message: "moving a record-valued field out of a record is not supported in Records v0; no implicit clone is inserted"

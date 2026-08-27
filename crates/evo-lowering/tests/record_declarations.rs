@@ -28,7 +28,10 @@ fn record_environment_builds_for_valid_nominal_schema() {
 #[test]
 fn move_tracker_forgets_lexical_child_binding() {
     let mut tracker = record_ownership::MoveTracker::default();
-    tracker.define("temporary".to_owned(), record_environment::SemanticType::Integer);
+    tracker.define(
+        "temporary".to_owned(),
+        record_environment::SemanticType::Integer,
+    );
     tracker.forget("temporary");
 
     let error = tracker
