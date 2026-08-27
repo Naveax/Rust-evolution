@@ -11,7 +11,7 @@ struct MoveBinding {
     available: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct MoveTracker {
     bindings: HashMap<String, MoveBinding>,
 }
@@ -67,6 +67,51 @@ impl MoveTracker {
             });
         }
         binding.available = true;
+        Ok(())
+    }
+
+    pub(crate) fn merge_if(&mut self, then_exit: &Self, else_exit: &Self) {
+        for (name, binding) in &mut self.bindings {
+            let then_binding = then_exit
+                .bindings
+                .get(name)
+                .expect("branch trackers are forked from the same visible bindings");
+            let else_binding = else_exit
+                .bindings
+                .get(name)
+                .expect("branch trackers are forked from the same visible bindings");
+            debug_assert_eq!(binding.value_type, then_binding.value_type);
+            debug_assert_eq!(binding.value_type, else_binding.value_type);
+            binding.available = then_binding.available && else_binding.available;
+        }
+    }
+
+    pub(crate) fn merge_repeat(
+        &mut self,
+        body_exit: &Self,
+        span: Span,
+    ) -> Result<(), LowerError> {
+        for (name, binding) in &mut self.bindings {
+            let body_binding = body_exit
+                .bindings
+                .get(name)
+                .expect("repeat tracker is forked from the same visible bindings");
+            debug_assert_eq!(binding.value_type, body_binding.value_type);
+
+            if binding.available
+                && !body_binding.available
+                && !binding.value_type.is_trivially_reusable_v0()
+            {
+                return Err(LowerError {
+                    message: format!(
+                        "record local {name:?} is moved by repeat body and would be unavailable on a later iteration"
+                    ),
+                    span,
+                });
+            }
+
+            binding.available = binding.available && body_binding.available;
+        }
         Ok(())
     }
 
@@ -151,6 +196,122 @@ mod tests {
         tracker
             .consume_value("point", span(3))
             .expect("move after reinitialization");
+    }
+
+    #[test]
+    fn if_merge_requires_record_to_be_available_on_both_paths() {
+        let mut entry = MoveTracker::default();
+        entry.define("point".to_owned(), SemanticType::Record("Point".to_owned()));
+
+        let mut then_exit = entry.clone();
+        then_exit
+            .consume_value("point", span(2))
+            .expect("then branch may move point");
+        let else_exit = entry.clone();
+
+        entry.merge_if(&then_exit, &else_exit);
+        let error = entry
+            .consume_value("point", span(3))
+            .expect_err("move on either branch must make merged value unavailable");
+        assert!(error.message.contains("moved record local"));
+    }
+
+    #[test]
+    fn if_merge_accepts_definite_reinitialization_on_both_paths() {
+        let point = SemanticType::Record("Point".to_owned());
+        let mut entry = MoveTracker::default();
+        entry.define("point".to_owned(), point.clone());
+        entry
+            .consume_value("point", span(1))
+            .expect("point starts moved before branch");
+
+        let mut then_exit = entry.clone();
+        then_exit
+            .reinitialize("point", point.clone(), span(2))
+            .expect("then branch reinitializes point");
+        let mut else_exit = entry.clone();
+        else_exit
+            .reinitialize("point", point, span(3))
+            .expect("else branch reinitializes point");
+
+        entry.merge_if(&then_exit, &else_exit);
+        entry
+            .consume_value("point", span(4))
+            .expect("both branches definitely restore point");
+    }
+
+    #[test]
+    fn branch_local_bindings_do_not_leak_through_merge() {
+        let mut entry = MoveTracker::default();
+        entry.define("point".to_owned(), SemanticType::Record("Point".to_owned()));
+
+        let mut then_exit = entry.clone();
+        then_exit.define("temporary".to_owned(), SemanticType::Integer);
+        let else_exit = entry.clone();
+        entry.merge_if(&then_exit, &else_exit);
+
+        let error = entry
+            .consume_value("temporary", span(5))
+            .expect_err("branch-local binding must not escape merge");
+        assert!(error.message.contains("outside its scope"));
+    }
+
+    #[test]
+    fn repeat_rejects_record_move_that_breaks_later_iterations() {
+        let mut entry = MoveTracker::default();
+        entry.define("point".to_owned(), SemanticType::Record("Point".to_owned()));
+        let mut body_exit = entry.clone();
+        body_exit
+            .consume_value("point", span(2))
+            .expect("first iteration move is locally valid");
+
+        let error = entry
+            .merge_repeat(&body_exit, span(1))
+            .expect_err("later repeat iteration would observe moved record");
+        assert!(error.message.contains("later iteration"));
+    }
+
+    #[test]
+    fn repeat_allows_move_when_body_reinitializes_before_next_iteration() {
+        let point = SemanticType::Record("Point".to_owned());
+        let mut entry = MoveTracker::default();
+        entry.define("point".to_owned(), point.clone());
+        let mut body_exit = entry.clone();
+        body_exit
+            .consume_value("point", span(2))
+            .expect("body moves point");
+        body_exit
+            .reinitialize("point", point, span(3))
+            .expect("body restores point before next iteration");
+
+        entry
+            .merge_repeat(&body_exit, span(1))
+            .expect("repeat body is safe for another iteration");
+        entry
+            .consume_value("point", span(4))
+            .expect("point remains available after repeat");
+    }
+
+    #[test]
+    fn repeat_reinitialization_cannot_restore_previously_moved_value_when_loop_may_skip() {
+        let point = SemanticType::Record("Point".to_owned());
+        let mut entry = MoveTracker::default();
+        entry.define("point".to_owned(), point.clone());
+        entry
+            .consume_value("point", span(1))
+            .expect("point is moved before repeat");
+        let mut body_exit = entry.clone();
+        body_exit
+            .reinitialize("point", point, span(2))
+            .expect("body may restore point when repeat executes");
+
+        entry
+            .merge_repeat(&body_exit, span(2))
+            .expect("merge itself is valid");
+        let error = entry
+            .consume_value("point", span(3))
+            .expect_err("zero-iteration path keeps point moved");
+        assert!(error.message.contains("moved record local"));
     }
 
     #[test]
