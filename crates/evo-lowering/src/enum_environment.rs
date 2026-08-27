@@ -6,9 +6,54 @@ use evo_parser::{
 };
 use std::collections::{HashMap, HashSet};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ResolvedPayloadType {
+    Integer,
+    Bool,
+    String,
+    Record(String),
+    Enum(String),
+}
+
+impl ResolvedPayloadType {
+    fn nominal_name(&self) -> Option<&str> {
+        match self {
+            Self::Record(name) | Self::Enum(name) => Some(name),
+            Self::Integer | Self::Bool | Self::String => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedVariant {
+    pub(crate) name: String,
+    pub(crate) payload_type: Option<ResolvedPayloadType>,
+    pub(crate) span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EnumSchema {
+    pub(crate) name: String,
+    pub(crate) variants: Vec<ResolvedVariant>,
+    pub(crate) span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EnumEnvironment {
+    schemas: Vec<EnumSchema>,
+    indices: HashMap<String, usize>,
+}
+
+impl EnumEnvironment {
+    pub(crate) fn schema(&self, name: &str) -> Option<&EnumSchema> {
+        self.indices.get(name).map(|index| &self.schemas[*index])
+    }
+}
+
 #[derive(Debug, Clone)]
 struct NominalEdge {
     target: String,
+    member: String,
     span: Span,
 }
 
@@ -19,14 +64,26 @@ struct NominalNode {
 }
 
 pub(crate) fn validate_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
+    collect_enum_environment(program).map(|_| ())
+}
+
+pub(crate) fn collect_enum_environment(
+    program: &SyntaxProgram,
+) -> Result<EnumEnvironment, LowerError> {
     let record_names = collect_record_names(program)?;
     let enum_names = collect_enum_names(program)?;
     reject_nominal_collisions(program, &record_names)?;
     reject_function_collisions(program, &record_names, &enum_names)?;
-    reject_duplicate_variants(program)?;
-    validate_named_types(program, &record_names, &enum_names)?;
-    reject_recursive_by_value_layouts(program, &record_names, &enum_names)?;
-    Ok(())
+    validate_record_named_types(program, &record_names, &enum_names)?;
+    let schemas = collect_enum_schemas(program, &record_names, &enum_names)?;
+    let indices = schemas
+        .iter()
+        .enumerate()
+        .map(|(index, schema)| (schema.name.clone(), index))
+        .collect();
+    let environment = EnumEnvironment { schemas, indices };
+    reject_recursive_by_value_layouts(program, &record_names, &enum_names, &environment)?;
+    Ok(environment)
 }
 
 fn collect_record_names(program: &SyntaxProgram) -> Result<HashMap<String, Span>, LowerError> {
@@ -101,25 +158,7 @@ fn reject_function_collisions(
     Ok(())
 }
 
-fn reject_duplicate_variants(program: &SyntaxProgram) -> Result<(), LowerError> {
-    for enum_def in &program.enums {
-        let mut seen = HashSet::new();
-        for variant in &enum_def.variants {
-            if !seen.insert(variant.name.as_str()) {
-                return Err(LowerError {
-                    message: format!(
-                        "duplicate variant name {:?} in enum {:?}",
-                        variant.name, enum_def.name
-                    ),
-                    span: variant.span,
-                });
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_named_types(
+fn validate_record_named_types(
     program: &SyntaxProgram,
     record_names: &HashMap<String, Span>,
     enum_names: &HashMap<String, Span>,
@@ -142,29 +181,93 @@ fn validate_named_types(
         }
     }
 
+    Ok(())
+}
+
+fn collect_enum_schemas(
+    program: &SyntaxProgram,
+    record_names: &HashMap<String, Span>,
+    enum_names: &HashMap<String, Span>,
+) -> Result<Vec<EnumSchema>, LowerError> {
+    let mut schemas = Vec::with_capacity(program.enums.len());
+
     for enum_def in &program.enums {
+        let mut seen = HashSet::new();
+        let mut variants = Vec::with_capacity(enum_def.variants.len());
         for variant in &enum_def.variants {
-            if let Some(SyntaxTypeName::Named(name)) = &variant.payload_type
-                && !known(name)
-            {
+            if !seen.insert(variant.name.as_str()) {
                 return Err(LowerError {
                     message: format!(
-                        "unknown payload type {name:?} for variant {:?} in enum {:?}",
+                        "duplicate variant name {:?} in enum {:?}",
                         variant.name, enum_def.name
                     ),
                     span: variant.span,
                 });
             }
+
+            let payload_type = variant
+                .payload_type
+                .as_ref()
+                .map(|type_name| {
+                    resolve_payload_type(
+                        type_name,
+                        record_names,
+                        enum_names,
+                        &enum_def.name,
+                        &variant.name,
+                        variant.span,
+                    )
+                })
+                .transpose()?;
+            variants.push(ResolvedVariant {
+                name: variant.name.clone(),
+                payload_type,
+                span: variant.span,
+            });
         }
+
+        schemas.push(EnumSchema {
+            name: enum_def.name.clone(),
+            variants,
+            span: enum_def.span,
+        });
     }
 
-    Ok(())
+    Ok(schemas)
+}
+
+fn resolve_payload_type(
+    type_name: &SyntaxTypeName,
+    record_names: &HashMap<String, Span>,
+    enum_names: &HashMap<String, Span>,
+    enum_name: &str,
+    variant_name: &str,
+    span: Span,
+) -> Result<ResolvedPayloadType, LowerError> {
+    match type_name {
+        SyntaxTypeName::Int => Ok(ResolvedPayloadType::Integer),
+        SyntaxTypeName::Bool => Ok(ResolvedPayloadType::Bool),
+        SyntaxTypeName::String => Ok(ResolvedPayloadType::String),
+        SyntaxTypeName::Named(name) if record_names.contains_key(name) => {
+            Ok(ResolvedPayloadType::Record(name.clone()))
+        }
+        SyntaxTypeName::Named(name) if enum_names.contains_key(name) => {
+            Ok(ResolvedPayloadType::Enum(name.clone()))
+        }
+        SyntaxTypeName::Named(name) => Err(LowerError {
+            message: format!(
+                "unknown payload type {name:?} for variant {variant_name:?} in enum {enum_name:?}"
+            ),
+            span,
+        }),
+    }
 }
 
 fn reject_recursive_by_value_layouts(
     program: &SyntaxProgram,
     record_names: &HashMap<String, Span>,
     enum_names: &HashMap<String, Span>,
+    environment: &EnumEnvironment,
 ) -> Result<(), LowerError> {
     let known = |name: &str| record_names.contains_key(name) || enum_names.contains_key(name);
     let mut nodes = Vec::with_capacity(program.records.len() + program.enums.len());
@@ -176,6 +279,7 @@ fn reject_recursive_by_value_layouts(
             .filter_map(|field| match &field.type_name {
                 SyntaxRecordFieldType::Named(name) if known(name) => Some(NominalEdge {
                     target: name.clone(),
+                    member: field.name.clone(),
                     span: field.span,
                 }),
                 _ => None,
@@ -188,19 +292,25 @@ fn reject_recursive_by_value_layouts(
     }
 
     for enum_def in &program.enums {
-        let edges = enum_def
+        let schema = environment
+            .schema(&enum_def.name)
+            .expect("validated enum names resolve to a schema");
+        debug_assert_eq!(schema.span, enum_def.span);
+        let edges = schema
             .variants
             .iter()
-            .filter_map(|variant| match &variant.payload_type {
-                Some(SyntaxTypeName::Named(name)) if known(name) => Some(NominalEdge {
-                    target: name.clone(),
-                    span: variant.span,
-                }),
-                _ => None,
+            .filter_map(|variant| {
+                variant.payload_type.as_ref().and_then(|payload_type| {
+                    payload_type.nominal_name().map(|name| NominalEdge {
+                        target: name.to_owned(),
+                        member: variant.name.clone(),
+                        span: variant.span,
+                    })
+                })
             })
             .collect();
         nodes.push(NominalNode {
-            name: enum_def.name.clone(),
+            name: schema.name.clone(),
             edges,
         });
     }
@@ -248,7 +358,8 @@ fn visit_nominal(
             cycle_names.push(nodes[target].name.as_str());
             return Err(LowerError {
                 message: format!(
-                    "illegal recursive by-value nominal layout: {}",
+                    "member {:?} creates illegal recursive by-value nominal layout: {}",
+                    edge.member,
                     cycle_names.join(" -> ")
                 ),
                 span: edge.span,
@@ -268,20 +379,47 @@ fn visit_nominal(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_enum_declarations;
+    use super::{ResolvedPayloadType, collect_enum_environment, validate_enum_declarations};
     use evo_lexer::lex;
     use evo_parser::parse;
 
-    fn validate(source: &str) -> Result<(), crate::LowerError> {
+    fn parse_source(source: &str) -> evo_parser::Program {
         let tokens = lex(source).expect("enum semantic validation source should lex");
-        let program = parse(&tokens).expect("enum semantic validation source should parse");
-        validate_enum_declarations(&program)
+        parse(&tokens).expect("enum semantic validation source should parse")
+    }
+
+    fn validate(source: &str) -> Result<(), crate::LowerError> {
+        validate_enum_declarations(&parse_source(source))
     }
 
     #[test]
     fn accepts_distinct_enum_and_variant_names() {
         validate("enum MaybeInt\nNone\nSome int\nend\nenum Flag\nOff\nOn\nend\n")
             .expect("distinct enum declarations should pass local semantic validation");
+    }
+
+    #[test]
+    fn resolves_builtin_record_and_enum_variant_payloads() {
+        let program = parse_source(
+            "record Point\nx int\nend\nenum MaybePoint\nNone\nSome Point\nend\nenum Wrapped\nEmpty\nValue MaybePoint\nend\n",
+        );
+        let environment =
+            collect_enum_environment(&program).expect("resolved enum environment should build");
+        let maybe_point = environment
+            .schema("MaybePoint")
+            .expect("MaybePoint schema should resolve");
+        assert_eq!(maybe_point.variants[0].payload_type, None);
+        assert_eq!(
+            maybe_point.variants[1].payload_type,
+            Some(ResolvedPayloadType::Record("Point".to_owned()))
+        );
+        let wrapped = environment
+            .schema("Wrapped")
+            .expect("Wrapped schema should resolve");
+        assert_eq!(
+            wrapped.variants[1].payload_type,
+            Some(ResolvedPayloadType::Enum("MaybePoint".to_owned()))
+        );
     }
 
     #[test]
