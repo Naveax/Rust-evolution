@@ -3,12 +3,12 @@ mod records;
 
 use evo_lexer::Span;
 pub use evo_parser::BinaryOp;
-pub use record_ir::{RecordFieldIr, RecordIr, RecordType};
 use evo_parser::{
     Expr as SyntaxExpr, ExprKind as SyntaxExprKind, FunctionDef as SyntaxFunction,
     Program as SyntaxProgram, Stmt as SyntaxStmt, StmtKind as SyntaxStmtKind,
     TypeName as SyntaxTypeName,
 };
+pub use record_ir::{RecordFieldIr, RecordIr, RecordType};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
