@@ -16,11 +16,8 @@ fn check_keeps_parsed_enum_declarations_fail_closed_before_codegen() {
     let dir = temp_dir("enums-check-gate");
     fs::create_dir_all(&dir).expect("temporary directory should be created");
     let source = dir.join("maybe-int.evo");
-    fs::write(
-        &source,
-        "enum MaybeInt\nNone\nSome int\nend\nprint 1\n",
-    )
-    .expect("enum source should be written");
+    fs::write(&source, "enum MaybeInt\nNone\nSome int\nend\nprint 1\n")
+        .expect("enum source should be written");
 
     let output = Command::new(env!("CARGO_BIN_EXE_evo"))
         .arg("check")

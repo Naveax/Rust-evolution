@@ -253,9 +253,8 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 TokenKind::Enum => {
-                    return Err(self.error_here(
-                        "enum declarations must appear before executable statements",
-                    ));
+                    return Err(self
+                        .error_here("enum declarations must appear before executable statements"));
                 }
                 TokenKind::Fn => {
                     functions.push(self.parse_function()?);

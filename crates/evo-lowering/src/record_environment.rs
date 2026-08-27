@@ -48,12 +48,20 @@ mod tests {
 
         let validation_error = validate_record_declarations(&program)
             .expect_err("enum declaration should remain fail-closed");
-        assert!(validation_error.message.contains("Enums v0 semantic lowering"));
+        assert!(
+            validation_error
+                .message
+                .contains("Enums v0 semantic lowering")
+        );
         assert_eq!(validation_error.span.line, 1);
 
         let collection_error = collect_record_environment(&program)
             .expect_err("enum declaration should not disappear during environment collection");
-        assert!(collection_error.message.contains("Enums v0 semantic lowering"));
+        assert!(
+            collection_error
+                .message
+                .contains("Enums v0 semantic lowering")
+        );
         assert_eq!(collection_error.span.line, 1);
     }
 }
