@@ -17,6 +17,7 @@ fn assert_check_fails_before_rustc(
     source_text: &str,
     message: &str,
     line: usize,
+    column: usize,
 ) {
     let dir = temp_dir(label);
     fs::create_dir_all(&dir).expect("temporary directory should be created");
@@ -30,7 +31,7 @@ fn assert_check_fails_before_rustc(
         .expect("evo check should run");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let location = format!(" --> {}:{line}:1", source.display());
+    let location = format!(" --> {}:{line}:{column}", source.display());
     let _ = fs::remove_dir_all(&dir);
 
     assert!(!output.status.success());
@@ -48,6 +49,7 @@ fn check_keeps_parsed_enum_declarations_fail_closed_before_codegen() {
         "enum MaybeInt\nNone\nSome int\nend\nprint 1\n",
         "Enums v0 semantic lowering",
         1,
+        1,
     );
 }
 
@@ -59,6 +61,7 @@ fn check_keeps_qualified_enum_constructors_fail_closed_before_codegen() {
         "value = MaybeInt.Some(41)\n",
         "enum variant constructors are parsed",
         1,
+        9,
     );
 }
 
@@ -70,5 +73,6 @@ fn check_keeps_match_statements_fail_closed_before_codegen() {
         "value = 1\nmatch value\ncase MaybeInt.None\nprint 0\nend\n",
         "match statements are parsed",
         2,
+        1,
     );
 }
