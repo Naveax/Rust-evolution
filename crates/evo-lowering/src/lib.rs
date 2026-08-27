@@ -914,7 +914,11 @@ mod tests {
     fn parsed_enum_variant_constructors_fail_closed_before_semantic_support() {
         let error = lower_source("value = MaybeInt.Some(41)\n")
             .expect_err("parsed enum constructors must not silently lower as another expression");
-        assert!(error.message.contains("enum variant constructors are parsed"));
+        assert!(
+            error
+                .message
+                .contains("enum variant constructors are parsed")
+        );
         assert!(error.message.contains("semantic lowering/codegen"));
         assert_eq!(error.span.line, 1);
     }
