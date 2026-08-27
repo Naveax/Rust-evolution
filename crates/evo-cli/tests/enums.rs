@@ -90,6 +90,30 @@ fn check_rejects_wrong_enum_payload_type_before_codegen() {
 }
 
 #[test]
+fn check_rejects_non_exhaustive_enum_match_before_codegen() {
+    assert_check_fails_before_rustc(
+        "enum-match-exhaustive",
+        "non-exhaustive-match.evo",
+        "enum Flag\nOff\nOn\nend\nvalue = Flag.On()\nmatch value\ncase Flag.On\nprint 1\nend\n",
+        "missing variant(s): Off",
+        6,
+        1,
+    );
+}
+
+#[test]
+fn check_rejects_invalid_match_payload_binding_before_codegen() {
+    assert_check_fails_before_rustc(
+        "enum-match-binding",
+        "invalid-match-binding.evo",
+        "enum Flag\nOff\nOn\nend\nvalue = Flag.On()\nmatch value\ncase Flag.On(value)\nprint value\ncase Flag.Off\nprint 0\nend\n",
+        "cannot bind a payload",
+        7,
+        6,
+    );
+}
+
+#[test]
 fn check_keeps_match_statements_fail_closed_before_codegen() {
     assert_check_fails_before_rustc(
         "enum-match-check-gate",
