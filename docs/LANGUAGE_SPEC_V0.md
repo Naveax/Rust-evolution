@@ -2,7 +2,7 @@
 
 Status: **experimental, deliberately small, not stable**.
 
-This document describes frontend behavior intended on `main` after accepted PRs merge. Future ideas belong in `docs/LANGUAGE_DESIGN.md` and tracking issues until code, tests, diagnostics, and performance evidence exist for them.
+This document describes frontend behavior that has implementation, tests, diagnostics, codegen evidence, and where applicable performance evidence. Future ideas belong in `docs/LANGUAGE_DESIGN.md` and tracking issues until those requirements are met.
 
 The implementation pipeline is:
 
@@ -12,33 +12,25 @@ There is no VM and no mandatory standalone runtime.
 
 ## Design direction
 
-The surface borrows Lua-style low ceremony, Python-style readability, and Rust-style strict semantics/native compilation. It does not copy the three grammars mechanically.
+The surface borrows Lua-style low ceremony, Python-style readability, and Rust-style strict semantics/native compilation. It does not mechanically copy any of those grammars.
 
-A current program can look like:
+A current program can use functions, lexical block locals, strict booleans, and nominal records:
 
 ```text
-fn step(x int) int
-    if x > 1 and not (x == 7)
-        local = x / 2
-        return local
-    else
-        local = x + 3
-        return local
-    end
+record Point
+    x int
+    y int
 end
 
-n = input_int
-x = input_int
-sum = 0
-repeat n
-    temp = step(x)
-    x = temp
-    sum = sum + temp
+fn sum(point Point) int
+    return point.x + point.y
 end
-print sum
+
+point = Point(y = 2, x = 40)
+print sum(point)
 ```
 
-The frontend lowers this to ordinary static Rust constructs and native code.
+The frontend lowers accepted source to ordinary static Rust constructs and native code.
 
 ## Lexical rules
 
@@ -52,9 +44,10 @@ The frontend lowers this to ordinary static Rust constructs and native code.
 - Arithmetic/assignment/grouping operators are `+`, `-`, `*`, `/`, `=`, `(`, and `)`.
 - Comparison operators are `==`, `!=`, `<`, `<=`, `>`, and `>=`.
 - Logical operators are keyword operators `and`, `or`, and `not`.
-- `,` separates function parameters and call arguments.
-- Current keywords are `print`, `repeat`, `if`, `else`, `end`, `true`, `false`, `input_int`, `and`, `or`, `not`, `fn`, `return`, `int`, `bool`, and `string`.
-- Keyword matching respects identifier boundaries. Names such as `android`, `origin`, `notice`, `functionality`, and `integer_value` remain identifiers when they do not exactly match a keyword.
+- `.` is postfix field access.
+- `,` separates function parameters, call arguments, and named constructor fields.
+- Current keywords are `print`, `repeat`, `if`, `else`, `end`, `true`, `false`, `input_int`, `and`, `or`, `not`, `fn`, `return`, `record`, `int`, `bool`, and `string`.
+- Keyword matching respects identifier boundaries.
 - A lone `!` is not a logical-not operator. `not` is the user-facing logical negation keyword.
 
 ### Lexical diagnostics
@@ -64,26 +57,34 @@ Two lexer APIs exist:
 - `lex()` is the fail-fast compatibility API.
 - `lex_recovering()` is the user-facing recovery path used by the CLI and benchmark frontend.
 
-On valid source both APIs produce the same token stream. On malformed source recovery reports source-ordered errors with a deterministic maximum of 8 diagnostics.
-
-Malformed lexical input is not passed to the parser.
+On valid source both APIs produce the same token stream. On malformed source recovery reports source-ordered errors with a deterministic maximum of 8 diagnostics. Malformed lexical input is not passed to the parser.
 
 ## Grammar v0
 
+The following sketch describes accepted surface shape. Declaration-placement details are specified immediately below because the parser intentionally preserves compatibility that is awkward to express as one compact production.
+
 ```text
-program             := NEWLINE* function_definition* top_level_statement_list EOF
+program             := NEWLINE* top_level_item* EOF
+
+top_level_item      := record_definition
+                     | function_definition
+                     | statement
+
+record_definition   := "record" IDENTIFIER NEWLINE+
+                       record_field_list "end"
+record_field_list   := (NEWLINE* record_field NEWLINE+)* NEWLINE*
+record_field        := IDENTIFIER record_field_type
+record_field_type   := "int" | "bool" | "string" | IDENTIFIER
 
 function_definition := "fn" IDENTIFIER "(" parameters? ")" type_name NEWLINE+
                        function_block "end"
 parameters          := parameter ("," parameter)*
 parameter           := IDENTIFIER type_name
-type_name           := "int" | "bool" | "string"
+type_name           := "int" | "bool" | "string" | IDENTIFIER
 
 function_block      := (NEWLINE* function_statement (NEWLINE+ | EOF))* NEWLINE*
-top_level_statement_list
-                    := (NEWLINE* statement (NEWLINE+ | EOF))* NEWLINE*
-
 function_statement  := statement | return_statement
+
 statement           := binding
                      | print_statement
                      | repeat_statement
@@ -106,36 +107,35 @@ comparison          := additive (comparison_operator additive)?
 comparison_operator := "==" | "!=" | "<" | "<=" | ">" | ">="
 additive            := multiplicative (("+" | "-") multiplicative)*
 multiplicative      := unary (("*" | "/") unary)*
-unary               := "-" unary | primary
+unary               := "-" unary | postfix
+postfix             := primary ("." IDENTIFIER)*
 primary             := INTEGER
                      | STRING
                      | "true"
                      | "false"
                      | IDENTIFIER
-                     | call_expression
+                     | call_or_constructor
                      | "input_int"
                      | "(" expression ")"
-call_expression     := IDENTIFIER "(" arguments? ")"
+call_or_constructor := IDENTIFIER "(" call_or_named_fields? ")"
+call_or_named_fields
+                    := arguments | named_fields
 arguments           := expression ("," expression)*
+named_fields        := named_field ("," named_field)*
+named_field         := IDENTIFIER "=" expression
 ```
 
-### Declaration order
+The parser keeps a zero-argument `Name()` as a call-shaped AST node. Semantic lowering resolves it as a zero-field record constructor when `Name` is a declared record; otherwise normal function-call resolution applies.
 
-Function declarations are top-level declarations, not executable statements. In v0 all function declarations must appear before the first executable top-level statement.
+### Top-level declaration placement
 
-This is valid:
+Records are top-level type declarations. The record declaration region remains open until the first executable top-level statement. Records and functions may be interleaved while that region is open.
 
-```text
-fn add(a int, b int) int
-    return a + b
-end
+After the first executable statement, a later `record` declaration is rejected with a source-native parser error.
 
-print add(2, 3)
-```
+For compatibility, top-level `fn` declarations remain accepted by the current parser even after executable statements. Nested function declarations are rejected. This is implementation behavior, not a recommendation to scatter declarations through a file.
 
-A later `fn` after an executable top-level statement is rejected. Nested function declarations are also rejected.
-
-`return` is valid only while parsing a function body. Top-level `return` is an error.
+`return` is valid only inside a function body. Top-level `return` is an error.
 
 `repeat` and `if` blocks may nest in either direction inside top-level code or function bodies. `if` may omit `else`. Top-level unmatched `end`/`else` and missing required `end` are errors.
 
@@ -150,42 +150,18 @@ From lowest to highest:
 5. `+` / `-`
 6. `*` / `/`
 7. unary numeric `-`
-8. primary, calls, and grouping
+8. postfix field access
+9. primary/call/constructor/grouping
 
-Therefore:
+`not` is recursive. Comparison precedence remains below arithmetic. Chained comparisons such as `1 < 2 < 3` are explicitly rejected rather than given Python-style semantics.
 
-```text
-not value > 0
-```
-
-means:
-
-```text
-not (value > 0)
-```
-
-and:
-
-```text
-a > 0 and b > 0 or c > 0
-```
-
-means:
-
-```text
-((a > 0) and (b > 0)) or (c > 0)
-```
-
-`not` is recursive, so `not not true` is valid.
-
-Comparison precedence remains below arithmetic. Chained comparisons such as `1 < 2 < 3` are explicitly rejected rather than given Python-style semantics.
-
-Calls are primary expressions, so they can be nested and composed with existing arithmetic, comparison, and logical expressions:
+Calls, constructors, and field access compose with arithmetic, comparison, and logical expressions:
 
 ```text
 print add(step(4), 2)
-if positive(step(input_int)) and not false
-    print 1
+print wrapper.point.x + 1
+if point.x > 0 and not false
+    print point.x
 end
 ```
 
@@ -196,7 +172,7 @@ end
 - Recovery reports independent syntax errors in source order, capped at 8.
 - Main synchronization boundaries are newline, `else`, `end`, and EOF.
 - Nested `repeat`/`if` boundaries are preserved to avoid fake cascade errors.
-- Function parameter lists, function-body `end`, and function declaration placement produce source-native parser diagnostics.
+- Function parameter lists, record fields/constructors, declaration placement, and required `end` tokens produce source-native parser diagnostics.
 - An error-bearing partial AST is never sent to lowering.
 
 ## Semantic lowering
@@ -219,7 +195,7 @@ __evo_x = (__evo_x + 1);
 
 The user does not write `mut` in v0. Mutability is inferred only for locals or function parameters that are actually reassigned.
 
-Current semantic rules:
+Current scalar/local rules:
 
 - use before first definition is rejected;
 - type-changing reassignment is rejected;
@@ -247,42 +223,7 @@ end
 
 `doubled` is created in the `if` child scope. It is valid in nested child blocks while that scope is active and is rejected after the matching `end`.
 
-Sibling branches have independent local scopes:
-
-```text
-if flag
-    temp = 1
-    print temp
-else
-    temp = 2
-    print temp
-end
-```
-
-The two `temp` declarations are independent. Neither exists after `end`, and no implicit branch result, phi value, promotion, or merge is created.
-
-A visible outer name is reassigned rather than shadowed:
-
-```text
-x = 1
-if true
-    x = 2
-end
-```
-
-Conceptually this lowers to an outer mutable Rust binding plus a normal assignment in the child block.
-
-`repeat` locals use ordinary Rust loop-body scope semantics:
-
-```text
-repeat n
-    temp = x + 1
-    temp = temp + 1
-    x = temp
-end
-```
-
-`temp` is recreated per loop iteration, can become `mut` if reassigned in the body, and is unavailable after the loop. `x` remains an outer reassignment.
+Sibling branches have independent local scopes. A visible outer name is reassigned rather than shadowed. `repeat` locals are recreated per iteration and disappear when the loop body closes.
 
 Block-local lowering is compile-time semantic scope tracking only. Generated Rust contains ordinary lexical `let`/assignment statements; no runtime scope object, `HashMap` lookup, boxing, reference counting, or dynamic dispatch is introduced for scoping.
 
@@ -291,32 +232,179 @@ Block-local lowering is compile-time semantic scope tracking only. Generated Rus
 The semantic layer recognizes:
 
 - integer (`i64`);
-- string;
-- boolean.
+- static/literal string;
+- boolean;
+- nominal record types by declared name.
 
-Rules:
+Scalar rules:
 
 - unary `-` requires integer;
 - arithmetic `+ - * /` requires integer operands;
 - repeat counts require integer;
 - `if` conditions require boolean;
-- `==` / `!=` require operands of the same current value type;
+- `==` / `!=` require operands of the same supported scalar value type;
 - ordering `< <= > >=` is integer-only;
 - comparisons produce boolean;
 - `and` / `or` require boolean operands and produce boolean;
 - `not` requires one boolean operand and produces boolean;
-- there is no truthiness;
-- there is no implicit integer/string-to-boolean conversion;
-- there is no dynamic type layer hidden behind logical or function syntax.
+- there is no truthiness or implicit scalar-to-boolean conversion;
+- there is no hidden dynamic type layer.
 
-Examples rejected by lowering:
+Whole-record equality is explicitly unsupported in Records v0 even when both operands have the same nominal record type.
+
+## Records v0
+
+Records v0 is the first user-defined product-data model. It is nominal, statically typed, by-value, and designed as a ZERO-cost frontend feature.
+
+### Declaration and nominal identity
 
 ```text
-print 1 and true
-print true or 1
-print not 1
-print "text" and false
+record Point
+    x int
+    y int
+end
 ```
+
+Each record declaration creates one nominal type. Two records with identical fields remain different types.
+
+Supported field types are:
+
+- `int` -> Rust `i64`;
+- `bool` -> Rust `bool`;
+- `string` -> Rust `&'static str` under the current static-string model;
+- another declared record type.
+
+Forward acyclic record references are accepted. Unknown named field types are rejected. Direct or indirect recursive by-value record layouts are rejected rather than silently boxed.
+
+Record and function names share the Records v0 declaration namespace; collisions are rejected.
+
+Record definitions retain declared field order, field types, and source spans in lowered IR.
+
+### Construction
+
+Named construction is the accepted non-empty form:
+
+```text
+point = Point(y = 2, x = 40)
+```
+
+Constructor source order does not define layout order. Lowering validates named fields and emits fields in deterministic declaration/schema order.
+
+Construction requires exactly the declared field set:
+
+- missing fields are rejected;
+- unknown fields are rejected;
+- duplicate constructor fields are rejected;
+- each field expression must match the declared field type.
+
+Positional construction of a declared record is rejected.
+
+A declared zero-field record uses `Name()`:
+
+```text
+record Marker
+end
+
+marker = Marker()
+```
+
+`Name()` for a record with required fields is rejected as missing-field construction.
+
+### Field access
+
+Field access is postfix and may chain:
+
+```text
+print point.x
+print wrapper.point.x
+```
+
+Accessing a scalar field does not move the containing record. Chained traversal through record-valued fields is supported when the final value is a reusable scalar.
+
+Field access on a non-record and access to an unknown field are rejected source-natively.
+
+Moving a record-valued field out of a containing record is explicitly unsupported in v0. The compiler does not insert a clone to make that operation appear to work.
+
+### Record move semantics
+
+Records use ordinary by-value move semantics rather than implicit copy/clone semantics.
+
+Reading a record local by value consumes it. Passing a record argument by value and returning a record value use the same rule.
+
+Example rejected by lowering:
+
+```text
+record Marker
+end
+
+fn bad(value Marker) Marker
+    other = value
+    return value
+end
+```
+
+The second use reports a moved-record diagnostic at the Evolution source span before Rust codegen/rustc.
+
+A moved record local may be explicitly reinitialized by assigning a new value of the same nominal type:
+
+```text
+point = Point(x = 1)
+first = take(point)
+point = Point(x = 41)
+print first + take(point)
+```
+
+There is no implicit `.clone()`, copy insertion, borrow inference, or reference inference.
+
+### Ownership through control flow
+
+`if` branches are analyzed from the same pre-branch ownership state and merged conservatively. A record is available after the `if` only when it is definitely available on every continuing branch.
+
+`repeat` preserves the zero-iteration path and rejects loop-carried record moves that would make a later iteration reuse a moved value unless the value is definitely reinitialized before the next iteration.
+
+Lexical child-scope rules remain the same for record and scalar bindings.
+
+### Explicit Records v0 non-operations
+
+The following are deliberately rejected in v0:
+
+- `print` of a whole record;
+- equality/inequality of whole records;
+- partial move of a record-valued field;
+- recursive by-value record layouts requiring hidden indirection.
+
+These are fail-closed boundaries, not invitations for codegen to insert runtime machinery.
+
+### Static Rust lowering
+
+Records emit ordinary deterministic Rust structs before functions/main:
+
+```rust
+struct __EvoRecord_Point {
+    __evo_field_x: i64,
+    __evo_field_y: i64,
+}
+```
+
+Named construction emits an ordinary struct literal in schema order:
+
+```rust
+let __evo_point = __EvoRecord_Point {
+    __evo_field_x: 40,
+    __evo_field_y: 2,
+};
+```
+
+Field access emits direct Rust field access. Record parameters and returns use the generated nominal Rust struct type by value.
+
+Records v0 adds no hidden:
+
+- heap allocation solely for records;
+- `Box`, `Rc`, `Arc`, GC, or managed runtime;
+- `.clone()` insertion;
+- dynamic dispatch or trait-object object model;
+- runtime field map / `HashMap` object representation;
+- reflection or runtime record metadata.
 
 ## Functions v0
 
@@ -330,36 +418,17 @@ fn add(a int, b int) int
 end
 ```
 
-The v0 signature is deliberately explicit but compact. It avoids Rust-style `:` and `->` punctuation while keeping parameter and return types declaration-local and deterministic.
+The signature is explicit but compact. Supported signature types are `int`, `bool`, `string`, and declared nominal record types.
 
-Supported signature types are:
+The current `string` ABI is `&'static str`. Runtime-produced or owned strings are not silently introduced through cloning or allocation.
 
-- `int` -> Rust `i64`;
-- `bool` -> Rust `bool`;
-- `string` -> Rust `&'static str` in functions v0.
+### Calls and signature collection
 
-The `string` ABI is intentionally narrow. The current language creates strings only from source literals, so `&'static str` preserves existing zero-allocation behavior. Runtime-produced or owned strings are not silently introduced through cloning or allocation; their ownership model is a later language slice.
+Calls are expressions. Functions have fixed arity. Call validation rejects unknown function names, wrong argument count, and argument type mismatches.
 
-### Calls
+Lowering collects top-level function signatures before lowering function bodies and executable statements. This allows forward calls and direct recursion under an explicit signature.
 
-Calls are expressions:
-
-```text
-print add(2, 3)
-result = add(step(10), 4)
-```
-
-Functions have fixed arity. Call validation rejects:
-
-- unknown function names;
-- wrong argument count;
-- argument type mismatches.
-
-### Signature pre-pass, forward calls, and recursion
-
-Lowering collects all top-level function signatures before lowering any function body or executable top-level statement. This allows calls between functions independent of declaration order within the declaration section and allows direct recursion under an explicit signature.
-
-The signature pre-pass does not create dynamic dispatch. It is compile-time semantic metadata only.
+The signature pre-pass is compile-time semantic metadata only; it does not create dynamic dispatch.
 
 ### Function-local scope
 
@@ -367,12 +436,13 @@ Each function body gets an independent root binding scope.
 
 - parameters enter the function root scope before body lowering;
 - function-local first assignments create local bindings;
-- nested `if`/`else`/`repeat` bodies use the same lexical child-scope model described above;
+- nested `if`/`else`/`repeat` bodies use lexical child scopes;
 - reassignment uses the existing same-type/inferred-mutability policy;
 - mutable parameters are marked `mut` only when reassigned;
 - top-level locals are not captured by functions;
-- duplicate parameter names are rejected;
-- duplicate function names are rejected.
+- duplicate parameter names and duplicate function names are rejected.
+
+Record parameters additionally participate in the Records v0 move analysis described above.
 
 ### Return rules
 
@@ -380,89 +450,15 @@ Functions v0 always declare a non-unit return type. `return expression` must mat
 
 Every reachable terminal path must return. A terminal `if/else` satisfies this only when both branches return. Loops are not treated as guaranteed-return constructs in v0.
 
-Examples:
-
-```text
-fn choose(flag bool) int
-    if flag
-        result = 1
-        return result
-    else
-        result = 2
-        return result
-    end
-end
-```
-
-is valid, while a function that can fall through without `return` is rejected.
-
-### Rust lowering
-
-Named functions become ordinary static Rust functions with deterministic generated names:
-
-```text
-fn add(a int, b int) int
-    return a + b
-end
-
-print add(2, 3)
-```
-
-lowers to the equivalent shape:
-
-```rust
-fn __evo_fn_add(__evo_a: i64, __evo_b: i64) -> i64 {
-    return (__evo_a + __evo_b);
-}
-
-fn main() {
-    println!("{}", __evo_fn_add(2, 3));
-}
-```
-
-There is no function registry, interpreter, VM, vtable, boxing, or dynamic dispatch solely to support named functions.
+Named functions lower to ordinary static Rust functions with deterministic names prefixed by `__evo_fn_`. There is no function registry, interpreter, VM, vtable, boxing, or dynamic dispatch solely to support named functions.
 
 ## Logical operators
 
-### `and`
+`and` and `or` use strict boolean short-circuit semantics and lower directly to Rust `&&` / `||`. `not` negates one boolean value and lowers directly to Rust `!`.
 
-```text
-left and right
-```
+There is no runtime helper for logical operators. Accepted lowering must not add allocations, clones, boxing, dynamic dispatch, reference counting, or eager RHS evaluation.
 
-uses strict boolean short-circuit semantics. If `left` is false, `right` is not evaluated.
-
-Direct Rust target:
-
-```rust
-left && right
-```
-
-### `or`
-
-```text
-left or right
-```
-
-uses strict boolean short-circuit semantics. If `left` is true, `right` is not evaluated.
-
-Direct Rust target:
-
-```rust
-left || right
-```
-
-### `not`
-
-```text
-not value
-```
-
-negates one boolean value and lowers directly to Rust `!`.
-
-There is no runtime helper for `and`, `or`, or `not`. Accepted lowering must not add allocations, clones, boxing, dynamic dispatch, reference counting, or eager RHS evaluation.
-
-The process-level short-circuit corpus uses `input_int` as an observable side effect: expressions such as `false and input_int > 0` and `true or input_int > 0` must not consume stdin, while `true and ...` and `false or ...` must evaluate the RHS.
+The process-level short-circuit corpus uses `input_int` as an observable side effect: skipped RHS expressions must not consume stdin.
 
 ## `input_int`
 
@@ -483,48 +479,21 @@ fn __evo_input_int() -> i64 {
 }
 ```
 
-The helper is emitted only when needed, including when only a function body needs it. Invalid input fails through the explicit parse contract; subprocess tests cover valid and invalid cases.
+The helper is emitted only when needed, including when only a function body needs it. Invalid input fails through the explicit parse contract.
 
 ## `repeat`
 
-`repeat count ... end` lowers directly to a Rust range loop:
+`repeat count ... end` lowers directly to a Rust range loop. Zero and negative counts execute zero iterations under current Rust range semantics. A binding first created in the repeat body exists only for that iteration and is unavailable after `end`.
 
-```text
-repeat n
-    temp = x + 1
-    x = temp
-end
-```
-
-becomes the equivalent shape:
-
-```rust
-for _ in 0..__evo_n {
-    let __evo_temp = (__evo_x + 1);
-    __evo_x = __evo_temp;
-}
-```
-
-Zero and negative counts execute zero iterations under current Rust range semantics. A binding first created in the repeat body exists only for that iteration and is unavailable after `end`. Nested repeats and repeat/if composition are supported. Repeat lowering adds no helper runtime or allocation.
+Nested repeats and repeat/if composition are supported. Repeat lowering adds no helper runtime or allocation.
 
 ## `if` / `else`
 
 `if condition ... else ... end` is strict boolean control flow. No truthiness is accepted.
 
-Example:
-
-```text
-value = input_int
-if value > 0 and not (value == 7)
-    shown = value
-    print shown
-else
-    shown = -value
-    print shown
-end
-```
-
 Each branch is an independent lexical child scope. A first assignment to a name that is not already visible creates a branch-local binding. Same-name branch locals do not merge or become visible after `end`. Assignments to existing visible outer locals remain reassignment and participate in inferred mutability.
+
+Record ownership availability is merged conservatively as described in Records v0.
 
 ## Print semantics
 
@@ -538,11 +507,16 @@ lowers to Rust display output with one newline:
 println!("{}", expression);
 ```
 
-Integers, strings, and booleans are currently printable.
+Integers, strings, and booleans are printable. Whole records are not printable in v0.
 
 ## Identifier lowering
 
-Evolution locals are prefixed with `__evo_` in generated Rust. Named functions are prefixed with `__evo_fn_`. These deterministic prefixes avoid direct collisions with Rust keywords and support stable source/codegen inspection.
+- Evolution locals are prefixed with `__evo_`.
+- Named functions are prefixed with `__evo_fn_`.
+- Record Rust types are prefixed with `__EvoRecord_`.
+- Record fields are prefixed with `__evo_field_`.
+
+These deterministic prefixes avoid direct collisions with Rust keywords and support stable source/codegen inspection.
 
 ## Formatter
 
@@ -553,36 +527,15 @@ evo fmt file.evo
 evo fmt file.evo --check
 ```
 
-Canonical formatting currently normalizes:
+Canonical formatting normalizes existing scalar/function/control-flow/block-local syntax and Records v0 syntax, including:
 
-- assignment/arithmetic/comparison spacing;
-- `and` / `or` spacing;
-- `not` keyword spacing;
-- `repeat` and `if`/`else` indentation, including block-local bindings;
-- nested block-local indentation;
-- function signature spacing;
-- function parameter and call-argument comma spacing;
-- function body indentation;
-- `return` spacing;
-- unary-minus spacing;
-- comments and raw string spelling;
-- final newline behavior.
-
-Function/block-local example:
-
-```text
-fn add(a int, b int) int
-    if a > 0
-        result = a + b
-        return result
-    else
-        result = b
-        return result
-    end
-end
-
-print add(1, 2)
-```
+- record declaration indentation;
+- field-name/type spacing;
+- named constructor comma/assignment spacing;
+- nested constructor expressions;
+- field access with no whitespace around `.`;
+- named record types in function signatures;
+- comments and final newline behavior.
 
 Formatting is idempotent. `--check` does not rewrite and fails when source is not canonical.
 
@@ -590,57 +543,62 @@ Formatting is idempotent. `--check` does not rewrite and fails when source is no
 
 Lexer, parser, and semantic-lowering diagnostics render against the original `.evo` source with message, path, line/column, source line, and caret/range underline.
 
-The renderer is deterministic and ANSI-free. Recovered lexer/parser errors are displayed in source order. Parser errors prevent lowering/rustc.
+Recovered lexer/parser errors are displayed in source order. Parser errors prevent lowering/rustc.
 
-Function-specific semantic errors such as duplicate names, unknown calls, arity/type mismatches, illegal capture, and missing return paths are reported against Evolution source spans.
-
-Block-scope semantic errors such as reading a local after its defining block closes are also reported against the original Evolution source. Type-changing reassignment to a visible outer or block-local binding remains a semantic error under the same source-native diagnostic path.
+Record-specific source-native diagnostics cover declaration/type errors, exact constructor validation, invalid field access, recursive by-value layouts, and moved-record reuse. Unsupported Records v0 operations fail during lowering rather than being delegated to generated Rust.
 
 ## Generated Rust source mapping
 
 Codegen returns optional sidecar generated-line to Evolution `Span` metadata.
 
+Current policy:
+
+- record struct opening/closing lines map to the owning record declaration span;
+- generated record field lines map to their field declaration spans;
 - `let`, reassignment, `print`, and `return` lines map to their statement spans;
-- block-local declarations and reassignments keep their own source statement spans;
+- a constructor or field access rendered inside one of those statements therefore maps to the owning statement line under the current line-level policy;
 - repeat/if structural generated lines map to the owning statement span;
 - sibling block-local declarations map independently even when they use the same source identifier;
 - function signature and closing lines map to the owning function span;
 - nested function-body statements retain their own spans;
-- function call expressions stay on the owning generated statement line;
-- helper/wrapper lines remain intentionally unmapped;
-- logical expressions remain on the owning statement line and therefore do not create synthetic source-map lines.
+- helper/wrapper lines remain intentionally unmapped.
 
-Source-map metadata does not alter generated Rust bytes.
+Source-map metadata does not alter generated Rust bytes. Column-level generated-subexpression mapping is not implemented.
 
 ## rustc diagnostic remapping
 
-`evo build` and `evo run` map rustc errors from generated lines back to Evolution statement/function spans when mapping exists. Unmapped helper/wrapper/internal failures preserve raw rustc stderr rather than dropping detail.
+`evo build` and `evo run` map rustc errors from generated lines back to Evolution statement/function/record spans when mapping exists. Unmapped helper/wrapper/internal failures preserve raw rustc stderr rather than dropping detail.
 
-Column-level generated-subexpression mapping is not implemented yet.
+The frontend catches known Records v0 ownership/type errors before codegen, so moved-record reuse and invalid constructors/fields remain Evolution-native diagnostics.
 
 ## Native compilation and performance contract
 
 Accepted programs compile through rustc to native binaries.
 
-The hard rule remains:
+The hard timing rule remains:
 
 ```text
 T_evolution <= T_reference_rust
 ```
 
-Correctness must match first. See `docs/PERFORMANCE_CONTRACT.md`, `docs/BENCHMARKING.md`, issue #4, and issue #5.
+Correctness must match first. Exact byte-identical executable equality after correctness PASS is stronger deterministic runtime parity evidence; raw timing is still retained and reported rather than hidden.
+
+See `docs/PERFORMANCE_CONTRACT.md`, `docs/BENCHMARKING.md`, issue #4, and issue #5.
 
 Runtime-dependent Ubuntu CI gates include:
 
 - `runtime-repeat-v0` for input/repeat/reassignment;
 - `control-flow-branch-v0` for comparisons/branches/mutability;
-- `logical-operators-v0` for `and`/`or`/`not` inside runtime-dependent control flow;
-- `function-call-v0` for typed named functions and direct static calls inside a runtime-dependent loop;
-- `block-locals-v0` for sibling branch-local declarations, block-local reads, and outer reassignment inside a runtime-dependent loop.
+- `logical-operators-v0` for strict logical operators;
+- `function-call-v0` for typed named static calls;
+- `block-locals-v0` for lexical child scopes;
+- `records-v0` for named record construction and direct scalar field access in a hot runtime-dependent loop.
 
-The harness compares correctness, raw timing, normalized LLVM IR, binary size, and exact executable bytes. Exact byte-identical binaries after correctness PASS are deterministic runtime parity evidence. Non-identical binaries remain subject to the strict stable timing gate `T_evolution / T_reference <= 1.00`; unstable timing is INCONCLUSIVE.
+The harness compares correctness, raw timing, normalized LLVM IR, binary size, and exact executable bytes.
 
-For `function-call-v0`, the Rust reference is locked by regression test to the frontend's ordinary generated static Rust source shape, modulo platform newline normalization. Both sides are then independently compiled with the same rustc/target/optimization settings. The accepted evidence showed:
+### Accepted function-call parity evidence
+
+For `function-call-v0`:
 
 - differential correctness: PASS;
 - normalized LLVM IR equality: true;
@@ -650,10 +608,11 @@ For `function-call-v0`, the Rust reference is locked by regression test to the f
 - final verdict: PASS;
 - verdict basis: `byte-identical-binary-parity`.
 
-For `block-locals-v0`, the Rust reference is likewise locked to ordinary generated Rust. The accepted Ubuntu evidence showed:
+### Accepted block-locals parity evidence
+
+For `block-locals-v0`:
 
 - differential correctness: PASS;
-- stable measurement: true;
 - normalized LLVM IR equality: true;
 - exact executable equality: true;
 - binary size: 2,267,072 bytes on both sides;
@@ -662,11 +621,26 @@ For `block-locals-v0`, the Rust reference is likewise locked to ordinary generat
 - final verdict: PASS;
 - verdict basis: `byte-identical-binary-parity`.
 
-The timing-only value remains visible even when identical binaries make runtime parity deterministic; scheduler noise is not promoted into a fictitious codegen regression.
+### Accepted Records v0 parity evidence
+
+For `records-v0`, the reference Rust mirrors the static Evolution record layout/algorithm and both sides are independently compiled with the same release path. CI #190 / run `33071967025` produced:
+
+- differential correctness: PASS;
+- normalized LLVM IR equality: true;
+- exact executable equality: true;
+- binary size: 2,267,104 bytes on both sides;
+- observed median reference time: 18,806,589 ns;
+- observed median Evolution time: 18,810,846 ns;
+- observed median ratio: 1.000226357;
+- timing-only verdict: FAIL;
+- final verdict: PASS;
+- verdict basis: `byte-identical-binary-parity`.
+
+The timing-only value remains visible even when identical executables make runtime parity deterministic; scheduler noise is not promoted into a fictitious codegen regression.
 
 ## Current explicit non-features
 
-Not implemented yet:
+Not implemented:
 
 - closures/lambdas and first-class function values;
 - inferred function parameter or return types;
@@ -677,11 +651,15 @@ Not implemented yet:
 - chained-comparison semantics;
 - general explicit local type annotations;
 - runtime-produced/owned string semantics beyond the current literal/static string model;
-- user-defined records/structs;
+- whole-record display/equality semantics;
+- partial move of record-valued fields;
+- implicit clone/copy/borrow/reference inference for records;
+- methods / impl blocks;
+- recursive heap/self-referential records requiring indirection;
 - enums/sum types;
 - pattern matching;
 - generics/traits;
-- ownership/borrow syntax;
+- user-facing ownership/borrow syntax;
 - references/lifetimes;
 - collections and collection literals;
 - general ranges/iteration syntax outside `repeat`;
@@ -694,7 +672,7 @@ Not implemented yet:
 - definite-initialization/phi semantics for conditionally created outer values;
 - a stable language specification.
 
-These omissions are deliberate. A small language with measured semantics beats a large syntax brochure whose costs exist mostly in imagination.
+These omissions are deliberate. Unsupported behavior must fail closed rather than silently acquiring a runtime cost model.
 
 ## Acceptance rule for future syntax
 

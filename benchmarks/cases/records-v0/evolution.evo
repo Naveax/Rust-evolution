@@ -1,0 +1,18 @@
+record Pair
+left int
+right int
+end
+
+n = input_int
+x = input_int
+sum = 0
+repeat n
+pair = Pair(right = 7, left = x)
+sum = sum + pair.left + pair.right
+if pair.left > pair.right
+x = pair.left / 2
+else
+x = pair.left + pair.right
+end
+end
+print sum
