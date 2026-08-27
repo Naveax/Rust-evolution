@@ -2,6 +2,10 @@ use crate::LowerError;
 use evo_lexer::Span;
 use evo_parser::{Program as SyntaxProgram, TypeName as SyntaxTypeName};
 
+mod enums_impl {
+    include!("enum_environment.rs");
+}
+
 mod records_impl {
     include!("record_environment_records.rs");
 }
@@ -64,10 +68,12 @@ pub(crate) fn validate_record_declarations(program: &SyntaxProgram) -> Result<()
 }
 
 fn reject_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
-    let Some(enum_def) = program.enums.first() else {
+    if program.enums.is_empty() {
         return Ok(());
-    };
+    }
 
+    enums_impl::validate_enum_declarations(program)?;
+    let enum_def = &program.enums[0];
     Err(LowerError {
         message: "enum declarations are parsed, but Enums v0 semantic lowering/codegen is not implemented yet"
             .to_owned(),
@@ -107,5 +113,14 @@ mod tests {
                 .contains("Enums v0 semantic lowering")
         );
         assert_eq!(collection_error.span.line, 1);
+    }
+
+    #[test]
+    fn invalid_enum_declarations_are_diagnosed_before_the_fail_closed_gate() {
+        let program = parse_source("enum Flag\nOn\nOn\nend\n");
+        let error = validate_record_declarations(&program)
+            .expect_err("duplicate variants should fail before unsupported enum execution");
+        assert!(error.message.contains("duplicate variant name"));
+        assert_eq!(error.span.line, 3);
     }
 }
