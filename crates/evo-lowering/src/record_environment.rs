@@ -16,6 +16,16 @@ mod enums_impl {
             include!("enum_ownership.rs");
         }
 
+        pub(super) use ownership::{OwnershipUseMode, ResolvedOwnershipUse};
+
+        pub(super) fn collect_enum_ownership(
+            program: &SyntaxProgram,
+            enums: &EnumEnvironment,
+            matches: &super::match_validation::MatchEnvironment,
+        ) -> Result<Vec<ResolvedOwnershipUse>, LowerError> {
+            ownership::collect_enum_ownership(program, enums, matches)
+        }
+
         pub(super) fn validate_enum_ownership(
             program: &SyntaxProgram,
             enums: &EnumEnvironment,
@@ -45,7 +55,17 @@ mod enums_impl {
         let matches = match_validation::collect_match_environment(program, &environment)?;
         constructor_typing::validate_enum_type_semantics(program, &environment)?;
         match_sidecar::validate_match_sidecar(program, &matches)?;
-        constructor_typing::validate_enum_ownership(program, &environment, &matches)?;
+        let ownership =
+            constructor_typing::collect_enum_ownership(program, &environment, &matches)?;
+        debug_assert!(
+            constructor_typing::validate_enum_ownership(program, &environment, &matches).is_ok()
+        );
+        debug_assert!(
+            ownership.iter().all(|usage| {
+                let _ = (&usage.value_type, usage.mode);
+                !usage.name.is_empty() && usage.span.start < usage.span.end
+            })
+        );
 
         let schemas = ir::lower_enum_schemas(&environment);
         debug_assert_eq!(schemas.len(), program.enums.len());
