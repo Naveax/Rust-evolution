@@ -444,7 +444,7 @@ mod tests {
         )
         .expect_err("record payload binding should move on first by-value read");
         assert!(error.message.contains("moved record local \"x\""));
-        assert_eq!(error.span.line, 13);
+        assert_eq!(error.span.line, 14);
     }
 
     #[test]
@@ -462,7 +462,7 @@ mod tests {
         )
         .expect_err("move on one continuing branch should poison the join");
         assert!(error.message.contains("moved enum local \"value\""));
-        assert_eq!(error.span.line, 10);
+        assert_eq!(error.span.line, 11);
     }
 
     #[test]
