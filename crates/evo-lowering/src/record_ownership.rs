@@ -18,13 +18,38 @@ pub(crate) struct MoveTracker {
 
 impl MoveTracker {
     pub(crate) fn define(&mut self, name: String, value_type: SemanticType) {
-        self.bindings.insert(
+        let previous = self.bindings.insert(
             name,
             MoveBinding {
                 value_type,
                 available: true,
             },
         );
+        debug_assert!(previous.is_none());
+    }
+
+    pub(crate) fn forget(&mut self, name: &str) {
+        let removed = self.bindings.remove(name);
+        debug_assert!(removed.is_some());
+    }
+
+    pub(crate) fn inspect_value(
+        &self,
+        name: &str,
+        span: Span,
+    ) -> Result<SemanticType, LowerError> {
+        let binding = self.bindings.get(name).ok_or_else(|| LowerError {
+            message: format!("use of local {name:?} before definition or outside its scope"),
+            span,
+        })?;
+
+        if !binding.available {
+            return Err(LowerError {
+                message: format!("use of moved record local {name:?}"),
+                span,
+            });
+        }
+        Ok(binding.value_type.clone())
     }
 
     pub(crate) fn consume_value(
@@ -159,7 +184,7 @@ impl MoveTracker {
         if !field_type.is_trivially_reusable_v0() {
             return Err(LowerError {
                 message: format!(
-                    "moving non-reusable record field {field_name:?} out of local {base_name:?} is not supported in Records v0; no implicit clone is inserted"
+                    "moving record-valued field {field_name:?} out of local {base_name:?} is not supported in Records v0; no implicit clone is inserted"
                 ),
                 span,
             });
@@ -204,6 +229,25 @@ mod tests {
             .expect_err("record reuse after move must fail");
         assert!(error.message.contains("moved record local"));
         assert_eq!(error.span.line, 4);
+    }
+
+    #[test]
+    fn inspection_checks_availability_without_consuming() {
+        let mut tracker = MoveTracker::default();
+        tracker.define("point".to_owned(), SemanticType::Record("Point".to_owned()));
+        assert_eq!(
+            tracker
+                .inspect_value("point", span(1))
+                .expect("inspection should see available record"),
+            SemanticType::Record("Point".to_owned())
+        );
+        tracker
+            .consume_value("point", span(2))
+            .expect("inspection must not consume record");
+        let error = tracker
+            .inspect_value("point", span(3))
+            .expect_err("inspection after a move must fail");
+        assert!(error.message.contains("moved record local"));
     }
 
     #[test]
@@ -411,6 +455,7 @@ mod tests {
         let error = tracker
             .access_field(&records, "outer", "inner", span(2))
             .expect_err("partial move is explicitly unsupported in v0");
+        assert!(error.message.contains("record-valued field"));
         assert!(error.message.contains("no implicit clone"));
     }
 }
