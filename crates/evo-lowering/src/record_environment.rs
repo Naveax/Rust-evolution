@@ -58,6 +58,11 @@ mod enums_impl {
         let records = ir::lower_record_schemas(program, &environment);
         debug_assert_eq!(records.len(), program.records.len());
 
+        let lowered_matches = ir::lower_matches(program, &matches);
+        debug_assert!(lowered_matches
+            .iter()
+            .all(|resolved| matches.match_at(resolved.span.start).is_some()));
+
         Ok(environment)
     }
 

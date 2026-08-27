@@ -1,5 +1,8 @@
 use evo_lexer::Span;
-use evo_parser::{Program as SyntaxProgram, RecordFieldType as SyntaxRecordFieldType};
+use evo_parser::{
+    Program as SyntaxProgram, RecordFieldType as SyntaxRecordFieldType, Stmt as SyntaxStmt,
+    StmtKind as SyntaxStmtKind,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SchemaType {
@@ -36,6 +39,29 @@ pub(crate) struct RecordSchemaIr {
     pub(crate) name: String,
     pub(crate) fields: Vec<RecordSchemaFieldIr>,
     pub(crate) span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MatchBindingIr {
+    pub(crate) name: String,
+    pub(crate) value_type: SchemaType,
+    pub(crate) span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MatchArmIr {
+    pub(crate) enum_name: String,
+    pub(crate) variant_name: String,
+    pub(crate) binding: Option<MatchBindingIr>,
+    pub(crate) span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MatchIr {
+    pub(crate) enum_name: String,
+    pub(crate) arms: Vec<MatchArmIr>,
+    pub(crate) span: Span,
+    pub(crate) all_arms_return: bool,
 }
 
 pub(super) fn lower_enum_schemas(environment: &super::EnumEnvironment) -> Vec<EnumIr> {
@@ -81,6 +107,68 @@ pub(super) fn lower_record_schemas(
         .collect()
 }
 
+pub(super) fn lower_matches(
+    program: &SyntaxProgram,
+    matches: &super::match_validation::MatchEnvironment,
+) -> Vec<MatchIr> {
+    let mut lowered = Vec::new();
+    for function in &program.functions {
+        collect_matches(&function.body, matches, &mut lowered);
+    }
+    collect_matches(&program.statements, matches, &mut lowered);
+    lowered
+}
+
+fn collect_matches(
+    statements: &[SyntaxStmt],
+    matches: &super::match_validation::MatchEnvironment,
+    lowered: &mut Vec<MatchIr>,
+) {
+    for statement in statements {
+        match &statement.kind {
+            SyntaxStmtKind::Match { arms, .. } => {
+                let resolved = matches
+                    .match_at(statement.span.start)
+                    .expect("match IR promotion runs after resolved exhaustive match validation");
+                lowered.push(MatchIr {
+                    enum_name: resolved.enum_name.clone(),
+                    arms: resolved
+                        .arms
+                        .iter()
+                        .map(|arm| MatchArmIr {
+                            enum_name: arm.enum_name.clone(),
+                            variant_name: arm.variant_name.clone(),
+                            binding: arm.binding.as_ref().map(|binding| MatchBindingIr {
+                                name: binding.name.clone(),
+                                value_type: lower_payload_type(&binding.value_type),
+                                span: binding.span,
+                            }),
+                            span: arm.span,
+                        })
+                        .collect(),
+                    span: resolved.span,
+                    all_arms_return: resolved.all_arms_return,
+                });
+                for arm in arms {
+                    collect_matches(&arm.body, matches, lowered);
+                }
+            }
+            SyntaxStmtKind::Repeat { body, .. } => collect_matches(body, matches, lowered),
+            SyntaxStmtKind::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_matches(then_body, matches, lowered);
+                collect_matches(else_body, matches, lowered);
+            }
+            SyntaxStmtKind::Bind { .. }
+            | SyntaxStmtKind::Print(_)
+            | SyntaxStmtKind::Return(_) => {}
+        }
+    }
+}
+
 fn lower_payload_type(value_type: &super::ResolvedPayloadType) -> SchemaType {
     match value_type {
         super::ResolvedPayloadType::Integer => SchemaType::Integer,
@@ -108,7 +196,7 @@ fn lower_record_field_type(
 
 #[cfg(test)]
 mod tests {
-    use super::{SchemaType, lower_enum_schemas, lower_record_schemas};
+    use super::{SchemaType, lower_enum_schemas, lower_matches, lower_record_schemas};
     use evo_lexer::lex;
     use evo_parser::parse;
 
@@ -163,5 +251,47 @@ mod tests {
             holder.fields[1].value_type,
             SchemaType::Enum("Inner".to_owned())
         );
+    }
+
+    #[test]
+    fn resolved_match_ir_preserves_identity_binding_types_and_return_summary() {
+        let source = "enum Inner\nA\nend\nenum Wrapped\nNone\nSome Inner\nend\nfn use(value Wrapped) int\nmatch value\ncase Wrapped.None\nreturn 0\ncase Wrapped.Some(x)\nmatch x\ncase Inner.A\nreturn 1\nend\nend\nend\n";
+        let tokens = lex(source).expect("match IR source should lex");
+        let program = parse(&tokens).expect("match IR source should parse");
+        let environment = super::super::collect_validated_enum_environment(&program)
+            .expect("match IR source should pass semantic and ownership validation");
+        let matches = super::super::match_validation::collect_match_environment(
+            &program,
+            &environment,
+        )
+        .expect("match IR source should have resolved exhaustive matches");
+
+        let lowered = lower_matches(&program, &matches);
+        assert_eq!(lowered.len(), 2);
+
+        let outer = &lowered[0];
+        assert_eq!(outer.enum_name, "Wrapped");
+        assert_eq!(outer.span.line, 9);
+        assert!(outer.all_arms_return);
+        assert_eq!(outer.arms.len(), 2);
+        assert_eq!(outer.arms[0].enum_name, "Wrapped");
+        assert_eq!(outer.arms[0].variant_name, "None");
+        assert_eq!(outer.arms[0].binding, None);
+        assert_eq!(outer.arms[0].span.line, 10);
+        assert_eq!(outer.arms[1].variant_name, "Some");
+        let binding = outer.arms[1]
+            .binding
+            .as_ref()
+            .expect("payload arm should retain its typed binding");
+        assert_eq!(binding.name, "x");
+        assert_eq!(binding.value_type, SchemaType::Enum("Inner".to_owned()));
+        assert_eq!(binding.span.line, 12);
+
+        let inner = &lowered[1];
+        assert_eq!(inner.enum_name, "Inner");
+        assert_eq!(inner.span.line, 13);
+        assert!(inner.all_arms_return);
+        assert_eq!(inner.arms[0].variant_name, "A");
+        assert_eq!(inner.arms[0].span.line, 14);
     }
 }
