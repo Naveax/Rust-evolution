@@ -186,6 +186,30 @@ fn check_rejects_record_payload_binding_reuse_before_codegen() {
 }
 
 #[test]
+fn check_rejects_enum_return_after_move_before_codegen() {
+    assert_check_fails_before_rustc(
+        "enum-ownership-return",
+        "return-after-move.evo",
+        "enum Flag\nOff\nOn\nend\nfn consume(value Flag) Flag\nfirst = value\nreturn value\nend\n",
+        "moved enum local \"value\"",
+        7,
+        8,
+    );
+}
+
+#[test]
+fn check_rejects_nonreusable_nominal_field_move_before_codegen() {
+    assert_check_fails_before_rustc(
+        "enum-ownership-field-move",
+        "nominal-field-move.evo",
+        "enum Flag\nOff\nOn\nend\nrecord Holder\nvalue Flag\nend\nholder = Holder(value = Flag.On())\nextracted = holder.value\n",
+        "moving nominal field \"value\" out of an expression is not supported in Enums v0 ownership; no implicit clone is inserted",
+        9,
+        13,
+    );
+}
+
+#[test]
 fn check_keeps_match_statements_fail_closed_before_codegen() {
     assert_check_fails_before_rustc(
         "enum-match-check-gate",
