@@ -1149,9 +1149,7 @@ impl<'a> Parser<'a> {
                         }
                         self.advance();
                         if matches!(self.current().kind, TokenKind::RParen) {
-                            return Err(
-                                self.error_here("expected enum variant argument after ','")
-                            );
+                            return Err(self.error_here("expected enum variant argument after ','"));
                         }
                     }
                 }
