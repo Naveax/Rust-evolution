@@ -1,5 +1,7 @@
 use evo_lexer::Span;
-use evo_lowering::{BinaryOp, Expr, ExprKind, Function, Program, Stmt, StmtKind, ValueType};
+use evo_lowering::{
+    BinaryOp, Expr, ExprKind, Function, Program, RecordIr, RecordType, Stmt, StmtKind, ValueType,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourceMapping {
@@ -53,6 +55,11 @@ impl Generator {
     }
 
     fn generate(mut self, program: &Program) -> GeneratedRust {
+        for record in &program.records {
+            self.write_record(record);
+            self.push_unmapped("\n");
+        }
+
         if program_uses_input_int(program) {
             self.push_unmapped(concat!(
                 "fn __evo_input_int() -> i64 {\n",
@@ -85,6 +92,24 @@ impl Generator {
         }
     }
 
+    fn write_record(&mut self, record: &RecordIr) {
+        self.push_mapped_line(
+            format!("struct {} {{\n", generated_record_name(&record.name)),
+            record.span,
+        );
+        for field in &record.fields {
+            self.push_mapped_line(
+                format!(
+                    "    {}: {},\n",
+                    generated_record_field_name(&field.name),
+                    rust_record_type(&field.value_type)
+                ),
+                field.span,
+            );
+        }
+        self.push_mapped_line("}\n".to_owned(), record.span);
+    }
+
     fn write_function(&mut self, function: &Function) {
         let mut signature = format!("fn {}(", generated_function_name(&function.name));
         for (index, parameter) in function.parameters.iter().enumerate() {
@@ -96,10 +121,10 @@ impl Generator {
             }
             signature.push_str(&generated_identifier(&parameter.name));
             signature.push_str(": ");
-            signature.push_str(rust_type(parameter.value_type));
+            signature.push_str(&rust_type(&parameter.value_type));
         }
         signature.push_str(") -> ");
-        signature.push_str(rust_type(function.return_type));
+        signature.push_str(&rust_type(&function.return_type));
         signature.push_str(" {\n");
         self.push_mapped_line(signature, function.span);
         for statement in &function.body {
@@ -202,11 +227,21 @@ impl Generator {
     }
 }
 
-fn rust_type(value_type: ValueType) -> &'static str {
+fn rust_type(value_type: &ValueType) -> String {
     match value_type {
-        ValueType::Integer => "i64",
-        ValueType::Bool => "bool",
-        ValueType::String => "&'static str",
+        ValueType::Integer => "i64".to_owned(),
+        ValueType::Bool => "bool".to_owned(),
+        ValueType::String => "&'static str".to_owned(),
+        ValueType::Record(name) => generated_record_name(name),
+    }
+}
+
+fn rust_record_type(value_type: &RecordType) -> String {
+    match value_type {
+        RecordType::Integer => "i64".to_owned(),
+        RecordType::Bool => "bool".to_owned(),
+        RecordType::String => "&'static str".to_owned(),
+        RecordType::Named(name) => generated_record_name(name),
     }
 }
 
@@ -224,6 +259,29 @@ fn render_expr(expr: &Expr) -> String {
                 .join(", ");
             format!("{}({arguments})", generated_function_name(name))
         }
+        ExprKind::Construct { name, fields } => {
+            if fields.is_empty() {
+                format!("{} {{}}", generated_record_name(name))
+            } else {
+                let fields = fields
+                    .iter()
+                    .map(|field| {
+                        format!(
+                            "{}: {}",
+                            generated_record_field_name(&field.name),
+                            render_expr(&field.value)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{} {{ {fields} }}", generated_record_name(name))
+            }
+        }
+        ExprKind::FieldAccess { base, field } => format!(
+            "({}).{}",
+            render_expr(base),
+            generated_record_field_name(field)
+        ),
         ExprKind::InputInt => "__evo_input_int()".to_owned(),
         ExprKind::LogicalNot(inner) => format!("(!{})", render_expr(inner)),
         ExprKind::UnaryMinus(inner) => format!("(-{})", render_expr(inner)),
@@ -261,6 +319,14 @@ fn generated_function_name(source_name: &str) -> String {
     format!("__evo_fn_{source_name}")
 }
 
+fn generated_record_name(source_name: &str) -> String {
+    format!("__EvoRecord_{source_name}")
+}
+
+fn generated_record_field_name(source_name: &str) -> String {
+    format!("__evo_field_{source_name}")
+}
+
 fn program_uses_input_int(program: &Program) -> bool {
     program.statements.iter().any(statement_uses_input_int)
         || program
@@ -295,6 +361,10 @@ fn expr_uses_input_int(expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::InputInt => true,
         ExprKind::Call { arguments, .. } => arguments.iter().any(expr_uses_input_int),
+        ExprKind::Construct { fields, .. } => {
+            fields.iter().any(|field| expr_uses_input_int(&field.value))
+        }
+        ExprKind::FieldAccess { base, .. } => expr_uses_input_int(base),
         ExprKind::LogicalNot(inner) | ExprKind::UnaryMinus(inner) => expr_uses_input_int(inner),
         ExprKind::Binary { left, right, .. } => {
             expr_uses_input_int(left) || expr_uses_input_int(right)
@@ -369,6 +439,52 @@ mod tests {
         );
         assert!(generated.contains("__evo_flag: bool) -> bool"));
         assert!(generated.contains("__evo_s: &'static str) -> &'static str"));
+    }
+
+    #[test]
+    fn record_codegen_uses_static_structs_and_nominal_types() {
+        let generated = compile_source(
+            "record Point\nx int\nend\nrecord Wrapper\npoint Point\nend\nfn wrap(point Point) Wrapper\nreturn Wrapper(point = point)\nend\nfn get_x(wrapper Wrapper) int\nreturn wrapper.point.x\nend\n",
+        );
+        assert!(generated.contains("struct __EvoRecord_Point {"));
+        assert!(generated.contains("__evo_field_x: i64,"));
+        assert!(generated.contains("struct __EvoRecord_Wrapper {"));
+        assert!(generated.contains("__evo_field_point: __EvoRecord_Point,"));
+        assert!(generated.contains("__evo_point: __EvoRecord_Point) -> __EvoRecord_Wrapper"));
+        assert!(
+            generated.contains("return __EvoRecord_Wrapper { __evo_field_point: __evo_point };")
+        );
+        assert!(generated.contains("return ((__evo_wrapper).__evo_field_point).__evo_field_x;"));
+    }
+
+    #[test]
+    fn zero_field_record_codegen_uses_empty_struct_literal() {
+        let generated =
+            compile_source("record Marker\nend\nfn make() Marker\nreturn Marker()\nend\n");
+        assert!(generated.contains("struct __EvoRecord_Marker {\n}\n"));
+        assert!(generated.contains("return __EvoRecord_Marker {};"));
+    }
+
+    #[test]
+    fn record_codegen_adds_no_hidden_runtime_or_clone_scaffolding() {
+        let generated =
+            compile_source("record Point\nx int\nend\nfn make() Point\nreturn Point(x = 1)\nend\n");
+        assert!(!generated.contains(".clone()"));
+        assert!(!generated.contains("Box<"));
+        assert!(!generated.contains("dyn "));
+        assert!(!generated.contains("HashMap"));
+        assert!(!generated.contains("derive(Clone"));
+        assert!(!generated.contains("derive(Copy"));
+    }
+
+    #[test]
+    fn record_source_map_covers_struct_and_fields() {
+        let program = lower_source("record Point\nx int\nend\n");
+        let generated = generate_lowered_rust_with_map(&program);
+        assert_eq!(mapped_source_line(&generated, 1), Some(1));
+        assert_eq!(mapped_source_line(&generated, 2), Some(2));
+        assert_eq!(mapped_source_line(&generated, 3), Some(1));
+        assert_eq!(generated.source_span_for_line(4), None);
     }
 
     #[test]

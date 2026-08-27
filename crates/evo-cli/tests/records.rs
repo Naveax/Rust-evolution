@@ -15,8 +15,12 @@ fn record_source() -> &'static str {
     "record Point\nx int\ny int\nend\nprint 1\n"
 }
 
+fn runtime_record_source() -> &'static str {
+    "record Point\nx int\ny int\nend\nfn sum(point Point) int\nreturn point.x + point.y\nend\npoint = Point(y = 2, x = 40)\nprint sum(point)\n"
+}
+
 #[test]
-fn check_rejects_records_at_evolution_source_until_semantic_lowering_lands() {
+fn check_accepts_valid_records_after_production_lowering_lands() {
     let dir = temp_dir("records-check");
     fs::create_dir_all(&dir).expect("temporary directory should be created");
     let source = dir.join("point.evo");
@@ -28,19 +32,80 @@ fn check_rejects_records_at_evolution_source_until_semantic_lowering_lands() {
         .output()
         .expect("evo check should run");
 
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let location = format!(" --> {}:1:1", source.display());
     let _ = fs::remove_dir_all(&dir);
 
-    assert!(!output.status.success());
-    assert!(stderr.contains("Records v0 semantic lowering"), "{stderr}");
-    assert!(stderr.contains(&location), "{stderr}");
-    assert!(stderr.contains("1 | record Point"), "{stderr}");
-    assert!(!stderr.contains("main.rs"), "{stderr}");
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(stdout, "ok\n");
+    assert!(stderr.is_empty(), "{stderr}");
 }
 
 #[test]
-fn check_reports_record_schema_error_before_feature_gate() {
+fn emit_rust_uses_static_record_structs_without_runtime_scaffolding() {
+    let dir = temp_dir("records-emit-rust");
+    fs::create_dir_all(&dir).expect("temporary directory should be created");
+    let source = dir.join("point.evo");
+    fs::write(&source, runtime_record_source()).expect("record source should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_evo"))
+        .arg("emit-rust")
+        .arg(&source)
+        .output()
+        .expect("evo emit-rust should run");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(output.status.success(), "{stderr}");
+    assert!(stdout.contains("struct __EvoRecord_Point {"), "{stdout}");
+    assert!(stdout.contains("__evo_field_x: i64,"), "{stdout}");
+    assert!(stdout.contains("__evo_field_y: i64,"), "{stdout}");
+    assert!(
+        stdout.contains("__EvoRecord_Point { __evo_field_x: 40, __evo_field_y: 2 }"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains(".clone()"), "{stdout}");
+    assert!(!stdout.contains("Box<"), "{stdout}");
+    assert!(!stdout.contains("HashMap"), "{stdout}");
+}
+
+#[test]
+fn build_compiles_static_record_program_and_binary_runs() {
+    let dir = temp_dir("records-build");
+    fs::create_dir_all(&dir).expect("temporary directory should be created");
+    let source = dir.join("point.evo");
+    let binary = dir.join(format!("point{}", env::consts::EXE_SUFFIX));
+    fs::write(&source, runtime_record_source()).expect("record source should be written");
+
+    let build = Command::new(env!("CARGO_BIN_EXE_evo"))
+        .arg("build")
+        .arg(&source)
+        .arg(&binary)
+        .output()
+        .expect("evo build should run");
+
+    let build_stderr = String::from_utf8_lossy(&build.stderr);
+    assert!(build.status.success(), "{build_stderr}");
+    assert!(
+        binary.exists(),
+        "record program should compile to a native binary"
+    );
+
+    let run = Command::new(&binary)
+        .output()
+        .expect("compiled record binary should run");
+    let run_stdout = String::from_utf8_lossy(&run.stdout);
+    let run_stderr = String::from_utf8_lossy(&run.stderr);
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(run.status.success(), "{run_stderr}");
+    assert_eq!(run_stdout, "42\n");
+}
+
+#[test]
+fn check_reports_record_schema_error_before_codegen() {
     let dir = temp_dir("records-schema");
     fs::create_dir_all(&dir).expect("temporary directory should be created");
     let source = dir.join("invalid-record.evo");
@@ -94,29 +159,28 @@ fn check_reports_recursive_record_layout_at_field_span() {
 }
 
 #[test]
-fn build_stops_before_rustc_for_parsed_records() {
-    let dir = temp_dir("records-build");
+fn moved_record_diagnostic_stays_at_evolution_source_before_rustc() {
+    let dir = temp_dir("records-move-error");
     fs::create_dir_all(&dir).expect("temporary directory should be created");
-    let source = dir.join("point.evo");
-    let binary = dir.join(format!("point{}", env::consts::EXE_SUFFIX));
-    fs::write(&source, record_source()).expect("record source should be written");
+    let source = dir.join("moved-record.evo");
+    fs::write(
+        &source,
+        "record Marker\nend\nfn bad(value Marker) Marker\nother = value\nreturn value\nend\n",
+    )
+    .expect("move-error source should be written");
 
     let output = Command::new(env!("CARGO_BIN_EXE_evo"))
-        .arg("build")
+        .arg("check")
         .arg(&source)
-        .arg(&binary)
         .output()
-        .expect("evo build should run");
+        .expect("evo check should run");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let binary_exists = binary.exists();
     let _ = fs::remove_dir_all(&dir);
 
     assert!(!output.status.success());
-    assert!(stderr.contains("Records v0 semantic lowering"), "{stderr}");
+    assert!(stderr.contains("use of moved record local"), "{stderr}");
+    assert!(stderr.contains("5 | return value"), "{stderr}");
     assert!(!stderr.contains("rustc failed"), "{stderr}");
-    assert!(
-        !binary_exists,
-        "record source must not reach native compilation"
-    );
+    assert!(!stderr.contains("main.rs"), "{stderr}");
 }
