@@ -1,7 +1,8 @@
 use crate::LowerError;
 use evo_lexer::Span;
 use evo_parser::{
-    Program as SyntaxProgram, RecordFieldType as SyntaxRecordFieldType,
+    Expr as SyntaxExpr, ExprKind as SyntaxExprKind, Program as SyntaxProgram,
+    RecordFieldType as SyntaxRecordFieldType, Stmt as SyntaxStmt, StmtKind as SyntaxStmtKind,
     TypeName as SyntaxTypeName,
 };
 use std::collections::{HashMap, HashSet};
@@ -48,6 +49,42 @@ impl EnumEnvironment {
     pub(crate) fn schema(&self, name: &str) -> Option<&EnumSchema> {
         self.indices.get(name).map(|index| &self.schemas[*index])
     }
+
+    fn validate_constructor_shape(
+        &self,
+        enum_name: &str,
+        variant_name: &str,
+        argument_count: usize,
+        span: Span,
+    ) -> Result<(), LowerError> {
+        let schema = self.schema(enum_name).ok_or_else(|| LowerError {
+            message: format!("unknown enum constructor {enum_name:?}"),
+            span,
+        })?;
+        let variant = schema
+            .variants
+            .iter()
+            .find(|candidate| candidate.name == variant_name)
+            .ok_or_else(|| LowerError {
+                message: format!("unknown variant {variant_name:?} for enum {enum_name:?}"),
+                span,
+            })?;
+        let expected = usize::from(variant.payload_type.is_some());
+        if argument_count != expected {
+            let payload_label = if expected == 0 {
+                "unit variant"
+            } else {
+                "payload variant"
+            };
+            return Err(LowerError {
+                message: format!(
+                    "{payload_label} {enum_name:?}.{variant_name:?} expects {expected} argument(s), found {argument_count}"
+                ),
+                span,
+            });
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -64,7 +101,8 @@ struct NominalNode {
 }
 
 pub(crate) fn validate_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
-    collect_enum_environment(program).map(|_| ())
+    let environment = collect_enum_environment(program)?;
+    validate_constructor_shapes(program, &environment)
 }
 
 pub(crate) fn collect_enum_environment(
@@ -263,6 +301,97 @@ fn resolve_payload_type(
     }
 }
 
+fn validate_constructor_shapes(
+    program: &SyntaxProgram,
+    environment: &EnumEnvironment,
+) -> Result<(), LowerError> {
+    for function in &program.functions {
+        validate_statement_constructor_shapes(&function.body, environment)?;
+    }
+    validate_statement_constructor_shapes(&program.statements, environment)
+}
+
+fn validate_statement_constructor_shapes(
+    statements: &[SyntaxStmt],
+    environment: &EnumEnvironment,
+) -> Result<(), LowerError> {
+    for statement in statements {
+        match &statement.kind {
+            SyntaxStmtKind::Bind { expr, .. }
+            | SyntaxStmtKind::Print(expr)
+            | SyntaxStmtKind::Return(expr) => validate_expr_constructor_shapes(expr, environment)?,
+            SyntaxStmtKind::Repeat { count, body } => {
+                validate_expr_constructor_shapes(count, environment)?;
+                validate_statement_constructor_shapes(body, environment)?;
+            }
+            SyntaxStmtKind::If {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                validate_expr_constructor_shapes(condition, environment)?;
+                validate_statement_constructor_shapes(then_body, environment)?;
+                validate_statement_constructor_shapes(else_body, environment)?;
+            }
+            SyntaxStmtKind::Match { value, arms } => {
+                validate_expr_constructor_shapes(value, environment)?;
+                for arm in arms {
+                    validate_statement_constructor_shapes(&arm.body, environment)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_expr_constructor_shapes(
+    expr: &SyntaxExpr,
+    environment: &EnumEnvironment,
+) -> Result<(), LowerError> {
+    match &expr.kind {
+        SyntaxExprKind::Integer(_)
+        | SyntaxExprKind::String(_)
+        | SyntaxExprKind::Bool(_)
+        | SyntaxExprKind::Identifier(_)
+        | SyntaxExprKind::InputInt => Ok(()),
+        SyntaxExprKind::Call { arguments, .. } => {
+            for argument in arguments {
+                validate_expr_constructor_shapes(argument, environment)?;
+            }
+            Ok(())
+        }
+        SyntaxExprKind::Construct { fields, .. } => {
+            for field in fields {
+                validate_expr_constructor_shapes(&field.value, environment)?;
+            }
+            Ok(())
+        }
+        SyntaxExprKind::EnumConstruct {
+            enum_name,
+            variant_name,
+            arguments,
+        } => {
+            environment.validate_constructor_shape(
+                enum_name,
+                variant_name,
+                arguments.len(),
+                expr.span,
+            )?;
+            for argument in arguments {
+                validate_expr_constructor_shapes(argument, environment)?;
+            }
+            Ok(())
+        }
+        SyntaxExprKind::FieldAccess { base, .. }
+        | SyntaxExprKind::LogicalNot(base)
+        | SyntaxExprKind::UnaryMinus(base) => validate_expr_constructor_shapes(base, environment),
+        SyntaxExprKind::Binary { left, right, .. } => {
+            validate_expr_constructor_shapes(left, environment)?;
+            validate_expr_constructor_shapes(right, environment)
+        }
+    }
+}
+
 fn reject_recursive_by_value_layouts(
     program: &SyntaxProgram,
     record_names: &HashMap<String, Span>,
@@ -420,6 +549,38 @@ mod tests {
             wrapped.variants[1].payload_type,
             Some(ResolvedPayloadType::Enum("MaybePoint".to_owned()))
         );
+    }
+
+    #[test]
+    fn rejects_unknown_constructor_enum_before_fail_closed_gate() {
+        let error = validate("enum Flag\nOn\nend\nvalue = Missing.On()\n")
+            .expect_err("unknown enum constructors should be diagnosed semantically");
+        assert!(error.message.contains("unknown enum constructor"));
+        assert_eq!(error.span.line, 4);
+    }
+
+    #[test]
+    fn rejects_unknown_constructor_variant_before_fail_closed_gate() {
+        let error = validate("enum Flag\nOn\nend\nvalue = Flag.Missing()\n")
+            .expect_err("unknown enum variants should be diagnosed semantically");
+        assert!(error.message.contains("unknown variant"));
+        assert_eq!(error.span.line, 4);
+    }
+
+    #[test]
+    fn rejects_payload_on_unit_variant_before_fail_closed_gate() {
+        let error = validate("enum Flag\nOn\nend\nvalue = Flag.On(1)\n")
+            .expect_err("unit variant payloads should be rejected semantically");
+        assert!(error.message.contains("expects 0 argument"));
+        assert_eq!(error.span.line, 4);
+    }
+
+    #[test]
+    fn rejects_missing_payload_argument_before_fail_closed_gate() {
+        let error = validate("enum MaybeInt\nNone\nSome int\nend\nvalue = MaybeInt.Some()\n")
+            .expect_err("payload variants should require one argument");
+        assert!(error.message.contains("expects 1 argument"));
+        assert_eq!(error.span.line, 5);
     }
 
     #[test]
