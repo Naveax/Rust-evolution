@@ -65,6 +65,13 @@ mod enums_impl {
                 .all(|resolved| matches.match_at(resolved.span.start).is_some())
         );
 
+        let lowered_constructors = ir::lower_constructors(program, &environment);
+        debug_assert!(
+            lowered_constructors
+                .iter()
+                .all(|constructor| environment.schema(&constructor.enum_name).is_some())
+        );
+
         Ok(environment)
     }
 

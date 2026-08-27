@@ -1,7 +1,7 @@
 use evo_lexer::Span;
 use evo_parser::{
-    Program as SyntaxProgram, RecordFieldType as SyntaxRecordFieldType, Stmt as SyntaxStmt,
-    StmtKind as SyntaxStmtKind,
+    Expr as SyntaxExpr, ExprKind as SyntaxExprKind, Program as SyntaxProgram,
+    RecordFieldType as SyntaxRecordFieldType, Stmt as SyntaxStmt, StmtKind as SyntaxStmtKind,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +64,15 @@ pub(crate) struct MatchIr {
     pub(crate) all_arms_return: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EnumConstructorIr {
+    pub(crate) enum_name: String,
+    pub(crate) variant_name: String,
+    pub(crate) payload_type: Option<SchemaType>,
+    pub(crate) span: Span,
+    pub(crate) payload_span: Option<Span>,
+}
+
 pub(super) fn lower_enum_schemas(environment: &super::EnumEnvironment) -> Vec<EnumIr> {
     environment
         .schemas
@@ -119,6 +128,18 @@ pub(super) fn lower_matches(
     lowered
 }
 
+pub(super) fn lower_constructors(
+    program: &SyntaxProgram,
+    environment: &super::EnumEnvironment,
+) -> Vec<EnumConstructorIr> {
+    let mut lowered = Vec::new();
+    for function in &program.functions {
+        collect_constructor_statements(&function.body, environment, &mut lowered);
+    }
+    collect_constructor_statements(&program.statements, environment, &mut lowered);
+    lowered
+}
+
 fn collect_matches(
     statements: &[SyntaxStmt],
     matches: &super::match_validation::MatchEnvironment,
@@ -169,6 +190,89 @@ fn collect_matches(
     }
 }
 
+fn collect_constructor_statements(
+    statements: &[SyntaxStmt],
+    environment: &super::EnumEnvironment,
+    lowered: &mut Vec<EnumConstructorIr>,
+) {
+    for statement in statements {
+        match &statement.kind {
+            SyntaxStmtKind::Bind { expr, .. }
+            | SyntaxStmtKind::Print(expr)
+            | SyntaxStmtKind::Return(expr) => collect_constructor_expr(expr, environment, lowered),
+            SyntaxStmtKind::Repeat { count, body } => {
+                collect_constructor_expr(count, environment, lowered);
+                collect_constructor_statements(body, environment, lowered);
+            }
+            SyntaxStmtKind::If {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                collect_constructor_expr(condition, environment, lowered);
+                collect_constructor_statements(then_body, environment, lowered);
+                collect_constructor_statements(else_body, environment, lowered);
+            }
+            SyntaxStmtKind::Match { value, arms } => {
+                collect_constructor_expr(value, environment, lowered);
+                for arm in arms {
+                    collect_constructor_statements(&arm.body, environment, lowered);
+                }
+            }
+        }
+    }
+}
+
+fn collect_constructor_expr(
+    expr: &SyntaxExpr,
+    environment: &super::EnumEnvironment,
+    lowered: &mut Vec<EnumConstructorIr>,
+) {
+    match &expr.kind {
+        SyntaxExprKind::EnumConstruct {
+            enum_name,
+            variant_name,
+            arguments,
+        } => {
+            let variant = environment
+                .resolve_constructor_variant(enum_name, variant_name, arguments.len(), expr.span)
+                .expect("constructor IR promotion runs after enum constructor validation");
+            lowered.push(EnumConstructorIr {
+                enum_name: enum_name.clone(),
+                variant_name: variant.name.clone(),
+                payload_type: variant.payload_type.as_ref().map(lower_payload_type),
+                span: expr.span,
+                payload_span: arguments.first().map(|argument| argument.span),
+            });
+            for argument in arguments {
+                collect_constructor_expr(argument, environment, lowered);
+            }
+        }
+        SyntaxExprKind::Call { arguments, .. } => {
+            for argument in arguments {
+                collect_constructor_expr(argument, environment, lowered);
+            }
+        }
+        SyntaxExprKind::Construct { fields, .. } => {
+            for field in fields {
+                collect_constructor_expr(&field.value, environment, lowered);
+            }
+        }
+        SyntaxExprKind::FieldAccess { base, .. }
+        | SyntaxExprKind::LogicalNot(base)
+        | SyntaxExprKind::UnaryMinus(base) => collect_constructor_expr(base, environment, lowered),
+        SyntaxExprKind::Binary { left, right, .. } => {
+            collect_constructor_expr(left, environment, lowered);
+            collect_constructor_expr(right, environment, lowered);
+        }
+        SyntaxExprKind::Integer(_)
+        | SyntaxExprKind::String(_)
+        | SyntaxExprKind::Bool(_)
+        | SyntaxExprKind::Identifier(_)
+        | SyntaxExprKind::InputInt => {}
+    }
+}
+
 fn lower_payload_type(value_type: &super::ResolvedPayloadType) -> SchemaType {
     match value_type {
         super::ResolvedPayloadType::Integer => SchemaType::Integer,
@@ -196,7 +300,9 @@ fn lower_record_field_type(
 
 #[cfg(test)]
 mod tests {
-    use super::{SchemaType, lower_enum_schemas, lower_matches, lower_record_schemas};
+    use super::{
+        SchemaType, lower_constructors, lower_enum_schemas, lower_matches, lower_record_schemas,
+    };
     use evo_lexer::lex;
     use evo_parser::parse;
 
@@ -293,5 +399,34 @@ mod tests {
         assert!(inner.all_arms_return);
         assert_eq!(inner.arms[0].variant_name, "A");
         assert_eq!(inner.arms[0].span.line, 14);
+    }
+
+    #[test]
+    fn resolved_constructor_ir_preserves_nested_identity_payload_type_and_spans() {
+        let source = "enum Inner\nA int\nend\nenum Wrapped\nNone\nSome Inner\nend\nvalue = Wrapped.Some(Inner.A(1))\n";
+        let tokens = lex(source).expect("constructor IR source should lex");
+        let program = parse(&tokens).expect("constructor IR source should parse");
+        let environment = super::super::collect_validated_enum_environment(&program)
+            .expect("constructor IR source should pass semantic and ownership validation");
+
+        let lowered = lower_constructors(&program, &environment);
+        assert_eq!(lowered.len(), 2);
+
+        let outer = &lowered[0];
+        assert_eq!(outer.enum_name, "Wrapped");
+        assert_eq!(outer.variant_name, "Some");
+        assert_eq!(
+            outer.payload_type,
+            Some(SchemaType::Enum("Inner".to_owned()))
+        );
+        assert_eq!(outer.span.line, 8);
+        assert_eq!(outer.payload_span.map(|span| span.line), Some(8));
+
+        let inner = &lowered[1];
+        assert_eq!(inner.enum_name, "Inner");
+        assert_eq!(inner.variant_name, "A");
+        assert_eq!(inner.payload_type, Some(SchemaType::Integer));
+        assert_eq!(inner.span.line, 8);
+        assert_eq!(inner.payload_span.map(|span| span.line), Some(8));
     }
 }
