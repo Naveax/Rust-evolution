@@ -2,9 +2,7 @@ use evo_lexer::lex;
 use evo_lowering::lower;
 use evo_parser::parse;
 
-fn lower_record_source(
-    source: &str,
-) -> Result<evo_lowering::Program, evo_lowering::LowerError> {
+fn lower_record_source(source: &str) -> Result<evo_lowering::Program, evo_lowering::LowerError> {
     let tokens = lex(source).expect("record gate source should lex");
     let program = parse(&tokens).expect("record gate source should parse");
     lower(&program)
