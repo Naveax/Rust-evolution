@@ -10,76 +10,96 @@ Parent milestone: **#50 — Enums v0: nominal sum types + exhaustive static matc
 
 Semantic umbrella: **#54 — Enums semantics: nominal typing, constructors and exhaustive match**
 
-Completed first semantic slice:
+Completed semantic slices on `main`:
 
-- **PR #55 — validate Enums v0 nominal declarations**
-- squash merge: `ca9641d6c7c57ab603cda8b6a4a091f50cfd625d`
-- final PR CI #220 / run `33097848047`: **SUCCESS**
-- post-merge main CI #221 / run `33098011627`: **SUCCESS**
+- **PR #55 — nominal declaration validation**
+  - squash merge `ca9641d6c7c57ab603cda8b6a4a091f50cfd625d`
+  - post-merge main CI #221 / run `33098011627`: **SUCCESS**
+- **#56 / PR #58 — resolved variants and constructor typing**
+  - squash merge `875b4d8fc255d6699b4f89b5e5c769d8dd34383b`
+  - final PR CI #229 / run `33103924169`: **SUCCESS**
+  - post-merge main CI #230 / run `33104226016`: **SUCCESS**
 
 Active child / PR:
 
-- **#56 — resolved variants and constructor typing**
-- **PR #58 — type-check Enums v0 variant constructors**
-- branch `feature/enums-constructor-typing-v0`
-- staging branch `work/enums-constructor-typing-v0`
-
-Following child:
-
 - **#57 — exhaustive match typing and arm scopes**
+- **PR #59 — type-check Enums v0 exhaustive matches**
+- PR branch: `feature/enums-match-typing-v0`
+- staging branch: `work/enums-match-typing-v0`
+- verified code head: `a5270d2a86b1103a431382325c5d77752ccebcf1`
+- CI #234 / run `33113246845`: **SUCCESS**
+
+Following children already created:
+
+1. **#60 — Enums v0 ownership + match payload extraction**
+2. **#61 — static Rust enum/match codegen + source maps**
+3. **#62 — differential performance parity + final language spec sync**
 
 ## Verified stable baseline
 
-Stable `main` baseline for #56:
+Current `main` baseline for #57:
 
-`ca9641d6c7c57ab603cda8b6a4a091f50cfd625d`
+`875b4d8fc255d6699b4f89b5e5c769d8dd34383b`
 
-Post-merge main CI #221 is authoritative for the #55 nominal-declaration slice. Ubuntu passed every existing runtime/performance gate including Records v0; Windows/macOS passed the quality/test/release matrix.
+Post-merge main CI #230 is authoritative for #56. Ubuntu preserved every existing runtime/performance gate including Records v0; Windows/macOS preserved the quality/test/release matrix.
 
-## Active #56 implementation
+## Active #57 implementation
 
-Resolved constructor semantics under PR #58 include:
+PR #59 now provides the complete semantic match slice while execution remains fail-closed:
 
-- resolved enum schemas retaining enum name, variant name, optional payload type and source spans;
-- payload types distinguished nominally as scalar / record / enum for semantic validation;
-- exact `Enum.Variant(...)` enum + variant lookup;
-- unit variant requires zero arguments;
-- payload variant requires exactly one argument;
-- source-native unknown enum / unknown variant / wrong arity diagnostics;
-- literal, operator and nested-enum payload type checks;
-- ownership-free constructor type propagation through local bindings, function parameters/returns, named record constructors and record field access;
-- real CLI regressions for unknown variant and wrong payload type before rustc;
-- match payload bindings deliberately remain outside #56 and belong to #57;
-- valid enum execution remains fail-closed before ownership/Rust codegen.
+- match scrutinee must have a statically known nominal enum type;
+- arm enum qualifiers must match the scrutinee enum;
+- every arm variant resolves source-natively;
+- duplicate variant arms are rejected;
+- every declared variant is required exactly once;
+- missing variants are reported deterministically in declaration order;
+- unit variants reject payload bindings;
+- payload variants require one binding under the frozen v0 parser surface;
+- payload bindings receive the declared payload type;
+- each binding exists only inside its arm body;
+- sibling arm scopes are independent;
+- bindings cannot leak after the match;
+- current no-shadowing policy rejects a payload binding that conflicts with an already-visible local;
+- nested `if` / `repeat` / `match` semantic scopes remain deterministic;
+- invalid match programs fail at Evolution source spans before rustc.
 
-## CI evidence for PR #58
+## Retained match semantic sidecar
 
-- `1791baac...` resolved-schema head: CI #222 / run `33098431733` — **SUCCESS**
-- `9335fdc0...` identity/arity head: CI #223 / run `33098652712` — **SUCCESS**
-- `702fa089...` first payload-typing head: CI #224 / run `33099006049` — failed only because one new test expected line 12 while the correct Evolution payload span was line 13; fmt/Clippy passed
-- `6c0342ec...` corrected payload-span head: CI #225 / run `33099288196` — **SUCCESS**
-- `4c4f1d2f...` first full payload-propagation head: CI #226 / run `33099643034` — Clippy exposed an unused validation wrapper and `&mut Vec`/slice API issue; both were fixed on a new SHA, never rerun
-- `e8f84fb2...` corrected full payload-propagation head: CI #227 / run `33099872021` — format, Clippy, CLI regressions and 89/90 lowering tests passed; failure was one incorrect test expectation (`record_field_type_flows_into_enum_payload_check` expected line 8 while the correct payload span is line 9); the failed SHA was not rerun
-- corrected docs-synchronized head `2a6e7dbbe47e52c0c02499da5de5d1a7a40610cb`: CI #228 / run `33103658784` — **SUCCESS**
-- Ubuntu #228 passed format, Clippy, workspace tests, benchmark smoke, runtime repeat, control-flow, logical operators, Functions v0, Block Locals v0, Records v0 and release build
-- Windows/macOS #228 passed format, Clippy, workspace tests, benchmark smoke and release build
+The current #57 boundary retains validated match information without enabling runtime lowering:
 
-The current staging head is newer only because it records #228 in durable docs. That docs-only head requires one final CI after a single fast-forward to PR #58.
+- structured enum and variant identity;
+- match/arm source spans;
+- typed payload-binding metadata;
+- source-statement indexing without concatenated magic names;
+- `all_arms_return`, computed only after structural exhaustiveness succeeds;
+- parser ↔ resolved-sidecar invariant checking in the pre-codegen semantic path.
+
+This sidecar is preparation for #60/#61. It is **not** Rust enum/match codegen and does not invent ownership joins.
+
+## CI evidence for PR #59
+
+- structural head `661786a4...`: CI #231 / run `33104721456` — **SUCCESS**
+- first typed-match head `a5a8fb8e...`: CI #232 / run `33105128042` — failed only because one new test expected line 9 while the correct payload-binding pattern span was line 10; fmt/Clippy and the remaining new tests were green; the failed SHA was not rerun
+- corrected typed-match head `d7d6818937c1d1f353b271938ca14b643b2ac01c`: CI #233 / run `33105515592` — **SUCCESS**
+- resolved-sidecar head `a5270d2a86b1103a431382325c5d77752ccebcf1`: CI #234 / run `33113246845` — **SUCCESS**
+- Ubuntu #234 passed format, Clippy, workspace tests, benchmark smoke, runtime repeat, control-flow, logical operators, Functions v0, Block Locals v0, Records v0 and release build
+- Windows/macOS #234 passed format, Clippy, workspace tests, benchmark smoke and release build
 
 ## Resume here
 
-1. Inspect `work/enums-constructor-typing-v0` and PR #58. The staging head should be ahead only by docs recording CI #228.
-2. Confirm no active Action exists for the staging target SHA, then fast-forward `feature/enums-constructor-typing-v0` exactly once.
-3. Follow the single final docs-synchronized CI. Do not rerun #227/#228 and do not create duplicate Actions.
-4. Require green format, Clippy, workspace tests, CLI constructor regressions, existing runtime/performance gates and release build.
-5. Mark PR #58 ready and merge only with expected-head protection after that final CI succeeds.
-6. Verify the post-merge `main` CI before closing/updating #56.
-7. Update #56 checklist only from merged-main evidence, then close it completed if all acceptance items remain satisfied.
-8. Start #57 from the actual #58 squash-merge commit, not from pre-merge staging ancestry.
-9. First #57 slice should reuse resolved enum schemas to validate structured match arm enum/variant membership and deterministic exhaustiveness while keeping execution fail-closed.
-10. Then add enum-typed scrutinee propagation and arm-local typed payload bindings with sibling-scope isolation.
-11. Keep enum ownership/move policy, payload extraction partial moves, Rust enum/match codegen and Enums performance work outside #57 unless a minimal dependency is proven.
-12. Preserve every Records v0 and earlier quality/runtime/performance gate.
+1. Inspect `work/enums-match-typing-v0` and PR #59.
+2. The staging branch is allowed to be ahead of verified code head `a5270d2a...` only by handoff/documentation synchronization.
+3. Confirm the final staging target SHA has no active Action, then fast-forward `feature/enums-match-typing-v0` exactly once.
+4. Follow the single docs-synchronized final CI. Do not rerun #232/#233/#234 and do not create duplicate Actions.
+5. Require green format, Clippy, workspace tests, match CLI regressions, all existing Ubuntu runtime/performance gates and release build.
+6. Mark PR #59 ready only after the exact final head is green.
+7. Squash merge with expected-head protection.
+8. Verify the post-merge `main` CI before closing #57 or #54.
+9. Update #57 and #54 checklists only from merged-main evidence, then close them completed if their semantic acceptance remains satisfied.
+10. Start **#60** from the actual #59 squash-merge SHA, not from staging ancestry.
+11. #60 owns enum move/reinitialization and payload extraction ownership. Keep Rust enum/match codegen in #61.
+12. #61 owns executable lowered IR, static Rust enum/match emission, source maps and native correctness.
+13. #62 owns the dedicated differential performance gate and `LANGUAGE_SPEC_V0.md` synchronization after performance/correctness proof.
 
 ## Engineering constraints
 
@@ -87,11 +107,11 @@ Enum and variant identity must remain structured. Do not encode `Enum.Variant` a
 
 Do not infer arbitrary method-call semantics from `object.member(...)`.
 
-Do not modify `SemanticType` / `MoveTracker` merely to make constructor typing convenient. #56 deliberately uses an ownership-free semantic view so ownership remains a later explicit decision.
+Do not add hidden `.clone()`, boxing, GC/RC, runtime variant maps, reflection metadata or dynamic dispatch.
 
-Match pattern bindings are not constructor-typing locals. Their semantic type/scope belongs to #57.
+Do not modify Records ownership behavior merely to make enum work convenient. #60 must integrate ownership deliberately and preserve Records v0 regression evidence.
 
-Enums v0 remains cost class **ZERO**: no implicit cloning, hidden boxing, GC/RC, runtime variant maps, reflection metadata, dynamic dispatch or managed-runtime machinery.
+`LANGUAGE_SPEC_V0.md` remains intentionally unsynchronized with Enums executable behavior until #62, because Enums runtime ownership/codegen/performance are not proven yet.
 
 ## CI rule
 
