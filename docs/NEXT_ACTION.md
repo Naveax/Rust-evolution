@@ -68,15 +68,16 @@ Resolved constructor semantics now under PR #58 include:
 - `702fa089...` first payload-typing head: CI #224 / run `33099006049` — failed only because one new test expected line 12 while the correct Evolution payload span was line 13; fmt/Clippy passed
 - `6c0342ec...` corrected payload-span head: CI #225 / run `33099288196` — **SUCCESS**
 - `4c4f1d2f...` first full payload-propagation head: CI #226 / run `33099643034` — Clippy exposed an unused validation wrapper and `&mut Vec`/slice API issue; both were fixed on a new SHA, never rerun
-- current PR head before this docs-only staging work: `e8f84fb2c2c193f4d30c8b513653edf53bdee604`
-- CI #227 / run `33099872021` is the active validation for that code head. Do not duplicate it.
+- `e8f84fb2...` corrected full payload-propagation head: CI #227 / run `33099872021` — format, Clippy, CLI regressions and 89/90 lowering tests passed; failure was one incorrect test expectation (`record_field_type_flows_into_enum_payload_check` expected line 8 while the correct payload span is line 9)
+- the failed #227 SHA was not rerun
+- staging fix commit `5ea176f84b38bf4bca70f60e0e6a75924b18f58b` changes only that span expectation from 8 to 9; docs commits may make the final staging head newer than this code commit
 
 ## Resume here
 
-1. Inspect CI #227 / run `33099872021`. Never rerun it while active and never create another Action for `e8f84fb2...` / CI.
-2. If #227 fails, fix the actual root cause on `work/enums-constructor-typing-v0`, then fast-forward PR #58 to the new SHA. Do not rerun the failed SHA.
-3. If #227 succeeds, review the current staging head because it may contain handoff/docs commits newer than the PR branch. Fast-forward only after the previous run completes.
-4. Require a green CI for the final docs-synchronized PR #58 head before merge.
+1. Inspect PR #58 and `work/enums-constructor-typing-v0`; the PR branch may still point at `e8f84fb2...` while staging is newer.
+2. Fast-forward PR #58 only to the current staging head after confirming no active Action already exists for that target SHA.
+3. Follow the single new CI for that final docs-synchronized head. Do not rerun #227 and do not create duplicate Actions.
+4. Require green format, Clippy, workspace tests, CLI constructor regressions, existing runtime/performance gates and release build before merge.
 5. Before merging #58, verify #56 acceptance: exact constructor identity, arity, payload typing through locals/functions/records, source-native CLI failures, no rustc reach-through, and no ownership/codegen behavior added.
 6. Merge #58 only with expected-head protection, then verify post-merge `main` CI.
 7. Close/update #56 only after merged-main evidence exists.
