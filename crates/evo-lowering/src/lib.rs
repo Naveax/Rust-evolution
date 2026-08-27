@@ -470,6 +470,13 @@ impl<'a> Analyzer<'a> {
                 self.move_tracker = merged;
                 StmtKind::Repeat { count, body }
             }
+            SyntaxStmtKind::Match { .. } => {
+                return Err(LowerError {
+                    message: "match statements are parsed, but Enums v0 semantic lowering/codegen is not implemented yet"
+                        .to_owned(),
+                    span: statement.span,
+                });
+            }
             SyntaxStmtKind::If {
                 condition,
                 then_body,
