@@ -241,8 +241,7 @@ fn rust_record_type(value_type: &RecordType) -> String {
         RecordType::Integer => "i64".to_owned(),
         RecordType::Bool => "bool".to_owned(),
         RecordType::String => "&'static str".to_owned(),
-        RecordType::Record(name) => generated_record_name(name),
-        RecordType::Enum(name) => generated_enum_name(name),
+        RecordType::Named(name) => generated_record_name(name),
     }
 }
 
@@ -322,10 +321,6 @@ fn generated_function_name(source_name: &str) -> String {
 
 fn generated_record_name(source_name: &str) -> String {
     format!("__EvoRecord_{source_name}")
-}
-
-fn generated_enum_name(source_name: &str) -> String {
-    format!("__EvoEnum_{source_name}")
 }
 
 fn generated_record_field_name(source_name: &str) -> String {
