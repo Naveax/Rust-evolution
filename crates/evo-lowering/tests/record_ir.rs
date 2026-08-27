@@ -12,9 +12,8 @@ fn parse_source(source: &str) -> evo_parser::Program {
 
 #[test]
 fn lowers_record_declarations_in_source_order_with_spans() {
-    let program = parse_source(
-        "record Point\nx int\ny bool\nend\nrecord Label\ntext string\nend\n",
-    );
+    let program =
+        parse_source("record Point\nx int\ny bool\nend\nrecord Label\ntext string\nend\n");
     let records = lower_record_schemas(&program);
 
     assert_eq!(records.len(), 2);
@@ -31,9 +30,7 @@ fn lowers_record_declarations_in_source_order_with_spans() {
 
 #[test]
 fn preserves_nominal_named_field_identity_for_forward_reference() {
-    let program = parse_source(
-        "record Wrapper\npoint Point\nend\nrecord Point\nx int\nend\n",
-    );
+    let program = parse_source("record Wrapper\npoint Point\nend\nrecord Point\nx int\nend\n");
     let records = lower_record_schemas(&program);
 
     assert_eq!(
