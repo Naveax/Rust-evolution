@@ -16,7 +16,7 @@ mod enums_impl {
             include!("enum_ownership.rs");
         }
 
-        pub(super) use ownership::ResolvedOwnershipUse;
+        pub(super) use ownership::{OwnershipUseMode, ResolvedOwnershipUse};
 
         pub(super) fn collect_enum_ownership(
             program: &SyntaxProgram,
@@ -47,6 +47,10 @@ mod enums_impl {
         include!("enum_ir.rs");
     }
 
+    mod ownership_ir {
+        include!("enum_ownership_ir.rs");
+    }
+
     pub(crate) fn collect_validated_enum_environment(
         program: &SyntaxProgram,
     ) -> Result<EnumEnvironment, LowerError> {
@@ -61,6 +65,13 @@ mod enums_impl {
             constructor_typing::validate_enum_ownership(program, &environment, &matches).is_ok()
         );
         debug_assert!(ownership.iter().all(|usage| {
+            let _ = (&usage.value_type, usage.mode);
+            !usage.name.is_empty() && usage.span.start < usage.span.end
+        }));
+
+        let lowered_ownership = ownership_ir::lower_ownership_uses(&ownership);
+        debug_assert_eq!(lowered_ownership.len(), ownership.len());
+        debug_assert!(lowered_ownership.iter().all(|usage| {
             let _ = (&usage.value_type, usage.mode);
             !usage.name.is_empty() && usage.span.start < usage.span.end
         }));
