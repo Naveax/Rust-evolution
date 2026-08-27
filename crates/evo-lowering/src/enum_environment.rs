@@ -1,7 +1,7 @@
 use crate::LowerError;
 use evo_lexer::Span;
 use evo_parser::{
-    Expr as SyntaxExpr, ExprKind as SyntaxExprKind, Program as SyntaxProgram,
+    BinaryOp, Expr as SyntaxExpr, ExprKind as SyntaxExprKind, Program as SyntaxProgram,
     RecordFieldType as SyntaxRecordFieldType, Stmt as SyntaxStmt, StmtKind as SyntaxStmtKind,
     TypeName as SyntaxTypeName,
 };
@@ -21,6 +21,15 @@ impl ResolvedPayloadType {
         match self {
             Self::Record(name) | Self::Enum(name) => Some(name),
             Self::Integer | Self::Bool | Self::String => None,
+        }
+    }
+
+    fn label(&self) -> &str {
+        match self {
+            Self::Integer => "int",
+            Self::Bool => "bool",
+            Self::String => "string",
+            Self::Record(name) | Self::Enum(name) => name,
         }
     }
 }
@@ -50,13 +59,13 @@ impl EnumEnvironment {
         self.indices.get(name).map(|index| &self.schemas[*index])
     }
 
-    fn validate_constructor_shape(
-        &self,
+    fn resolve_constructor_variant<'a>(
+        &'a self,
         enum_name: &str,
         variant_name: &str,
         argument_count: usize,
         span: Span,
-    ) -> Result<(), LowerError> {
+    ) -> Result<&'a ResolvedVariant, LowerError> {
         let schema = self.schema(enum_name).ok_or_else(|| LowerError {
             message: format!("unknown enum constructor {enum_name:?}"),
             span,
@@ -83,7 +92,7 @@ impl EnumEnvironment {
                 span,
             });
         }
-        Ok(())
+        Ok(variant)
     }
 }
 
@@ -371,7 +380,7 @@ fn validate_expr_constructor_shapes(
             variant_name,
             arguments,
         } => {
-            environment.validate_constructor_shape(
+            let variant = environment.resolve_constructor_variant(
                 enum_name,
                 variant_name,
                 arguments.len(),
@@ -379,6 +388,19 @@ fn validate_expr_constructor_shapes(
             )?;
             for argument in arguments {
                 validate_expr_constructor_shapes(argument, environment)?;
+            }
+            if let (Some(expected), [argument]) = (&variant.payload_type, arguments.as_slice())
+                && let Some(actual) = obvious_expr_type(argument)
+                && &actual != expected
+            {
+                return Err(LowerError {
+                    message: format!(
+                        "payload for enum variant {enum_name:?}.{variant_name:?} expects {}, found {}",
+                        expected.label(),
+                        actual.label()
+                    ),
+                    span: argument.span,
+                });
             }
             Ok(())
         }
@@ -389,6 +411,36 @@ fn validate_expr_constructor_shapes(
             validate_expr_constructor_shapes(left, environment)?;
             validate_expr_constructor_shapes(right, environment)
         }
+    }
+}
+
+fn obvious_expr_type(expr: &SyntaxExpr) -> Option<ResolvedPayloadType> {
+    match &expr.kind {
+        SyntaxExprKind::Integer(_) | SyntaxExprKind::InputInt | SyntaxExprKind::UnaryMinus(_) => {
+            Some(ResolvedPayloadType::Integer)
+        }
+        SyntaxExprKind::String(_) => Some(ResolvedPayloadType::String),
+        SyntaxExprKind::Bool(_) | SyntaxExprKind::LogicalNot(_) => Some(ResolvedPayloadType::Bool),
+        SyntaxExprKind::EnumConstruct { enum_name, .. } => {
+            Some(ResolvedPayloadType::Enum(enum_name.clone()))
+        }
+        SyntaxExprKind::Binary { op, .. } => Some(match op {
+            BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+                ResolvedPayloadType::Integer
+            }
+            BinaryOp::Equal
+            | BinaryOp::NotEqual
+            | BinaryOp::Less
+            | BinaryOp::LessEqual
+            | BinaryOp::Greater
+            | BinaryOp::GreaterEqual
+            | BinaryOp::And
+            | BinaryOp::Or => ResolvedPayloadType::Bool,
+        }),
+        SyntaxExprKind::Identifier(_)
+        | SyntaxExprKind::Call { .. }
+        | SyntaxExprKind::Construct { .. }
+        | SyntaxExprKind::FieldAccess { .. } => None,
     }
 }
 
@@ -581,6 +633,32 @@ mod tests {
             .expect_err("payload variants should require one argument");
         assert!(error.message.contains("expects 1 argument"));
         assert_eq!(error.span.line, 5);
+    }
+
+    #[test]
+    fn rejects_statically_known_wrong_payload_type() {
+        let error = validate("enum MaybeInt\nNone\nSome int\nend\nvalue = MaybeInt.Some(true)\n")
+            .expect_err("statically known wrong payload types should fail");
+        assert!(error.message.contains("expects int, found bool"));
+        assert_eq!(error.span.line, 5);
+    }
+
+    #[test]
+    fn accepts_nested_enum_payload_with_matching_nominal_type() {
+        validate(
+            "enum MaybeInt\nNone\nSome int\nend\nenum Wrapped\nEmpty\nValue MaybeInt\nend\nvalue = Wrapped.Value(MaybeInt.None())\n",
+        )
+        .expect("nested constructor nominal type should match the declared payload type");
+    }
+
+    #[test]
+    fn rejects_nested_enum_payload_with_wrong_nominal_type() {
+        let error = validate(
+            "enum MaybeInt\nNone\nSome int\nend\nenum Flag\nOff\nOn\nend\nenum Wrapped\nEmpty\nValue MaybeInt\nend\nvalue = Wrapped.Value(Flag.On())\n",
+        )
+        .expect_err("wrong nested enum nominal payload should fail");
+        assert!(error.message.contains("expects MaybeInt, found Flag"));
+        assert_eq!(error.span.line, 12);
     }
 
     #[test]
