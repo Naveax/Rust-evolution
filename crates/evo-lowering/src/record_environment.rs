@@ -55,6 +55,11 @@ mod enums_impl {
             })
         }));
 
+        let records = crate::record_ir::lower_record_schemas_with_enum_classifier(program, |name| {
+            environment.schema(name).is_some()
+        });
+        debug_assert_eq!(records.len(), program.records.len());
+
         Ok(environment)
     }
 

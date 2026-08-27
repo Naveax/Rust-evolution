@@ -2,12 +2,15 @@ use evo_lexer::Span;
 use evo_parser::{Program as SyntaxProgram, RecordFieldType as SyntaxFieldType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RecordType {
+pub enum SchemaType {
     Integer,
     Bool,
     String,
-    Named(String),
+    Record(String),
+    Enum(String),
 }
+
+pub type RecordType = SchemaType;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordFieldIr {
@@ -25,6 +28,14 @@ pub struct RecordIr {
 
 #[must_use]
 pub(crate) fn lower_record_schemas(program: &SyntaxProgram) -> Vec<RecordIr> {
+    lower_record_schemas_with_enum_classifier(program, |_| false)
+}
+
+#[must_use]
+pub(crate) fn lower_record_schemas_with_enum_classifier(
+    program: &SyntaxProgram,
+    is_enum: impl Fn(&str) -> bool,
+) -> Vec<RecordIr> {
     program
         .records
         .iter()
@@ -35,7 +46,7 @@ pub(crate) fn lower_record_schemas(program: &SyntaxProgram) -> Vec<RecordIr> {
                 .iter()
                 .map(|field| RecordFieldIr {
                     name: field.name.clone(),
-                    value_type: lower_field_type(&field.type_name),
+                    value_type: lower_field_type(&field.type_name, &is_enum),
                     span: field.span,
                 })
                 .collect(),
@@ -44,11 +55,15 @@ pub(crate) fn lower_record_schemas(program: &SyntaxProgram) -> Vec<RecordIr> {
         .collect()
 }
 
-fn lower_field_type(field_type: &SyntaxFieldType) -> RecordType {
+fn lower_field_type(
+    field_type: &SyntaxFieldType,
+    is_enum: &impl Fn(&str) -> bool,
+) -> RecordType {
     match field_type {
-        SyntaxFieldType::Int => RecordType::Integer,
-        SyntaxFieldType::Bool => RecordType::Bool,
-        SyntaxFieldType::String => RecordType::String,
-        SyntaxFieldType::Named(name) => RecordType::Named(name.clone()),
+        SyntaxFieldType::Int => SchemaType::Integer,
+        SyntaxFieldType::Bool => SchemaType::Bool,
+        SyntaxFieldType::String => SchemaType::String,
+        SyntaxFieldType::Named(name) if is_enum(name) => SchemaType::Enum(name.clone()),
+        SyntaxFieldType::Named(name) => SchemaType::Record(name.clone()),
     }
 }
