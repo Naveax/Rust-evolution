@@ -54,25 +54,29 @@ Dedicated parity evidence from CI #190 / run `33071967025`, artifact `9646205940
 The next Core data-model milestone is:
 
 - Parent issue **#50 — Enums v0: nominal sum types + exhaustive static matching**
-- First implementation slice **#51 — Enums parser: declarations, qualified variants and case-match surface**
+- Active parser child **#51 — Enums parser: declarations, qualified variants and case-match surface**
+- Declaration slice **PR #52** merged as `f6796fa8f9f87530b98de0e13bf636fa95c2254a`.
+- PR #52 validation: **CI #202 / run `33079158369` — SUCCESS** on Ubuntu, Windows and macOS.
+- Merge validation: **main CI #203 / run `33079432964` — SUCCESS**.
+- Current working branch: **`feature/enums-constructor-match-v0`**.
 
-Why this follows Records:
+The landed declaration slice includes:
 
-- Records established nominal user types, typed aggregate layout, source-spanned declarations and move analysis.
-- Enums add closed alternatives and exhaustive control flow without requiring collections, generics or managed runtime machinery.
-- This foundation is required before useful `Option` / `Result` ergonomics and richer error handling.
+- exact-boundary lexer keywords `enum`, `match`, `case` with prefix identifier regressions;
+- source-spanned `Program.enums`, enum declarations and unit/single-payload variants;
+- shared record/enum top-level type declaration region;
+- declaration recovery, late/nested declaration diagnostics;
+- canonical/idempotent declaration formatting;
+- explicit fail-closed lowering and real CLI source-span regression before enum semantics/codegen.
 
-## Enums v0 current syntax experiment
+## Current Enums v0 implementation target
 
-The first parser slice deliberately keeps the surface small:
+Continue #51 with the remaining parser/formatter surface:
 
 ```text
-enum MaybeInt
-    None
-    Some int
-end
-
+value = MaybeInt.None()
 value = MaybeInt.Some(41)
+
 match value
 case MaybeInt.Some(x)
     print x
@@ -81,19 +85,31 @@ case MaybeInt.None
 end
 ```
 
-Parser-v0 decisions for #51:
+Current parser-v0 decisions:
 
-- `enum`, `match`, `case` are explicit keywords;
-- variants are unit or one typed payload only;
 - construction is fully qualified as `Enum.Variant(...)`;
+- plain `Enum.Variant` outside `case` remains ordinary field-access-shaped syntax;
+- existing record constructors and chained field access must remain unchanged;
 - `match` is statement-only;
 - arms begin with explicit `case` for deterministic recovery;
 - patterns are fully enum-qualified;
 - unit patterns and one-payload binding patterns only;
 - no wildcard, guards, nested arbitrary patterns, generics or Option/Result sugar yet;
-- semantic lowering remains fail-closed until nominal enum semantics/exhaustiveness/ownership land.
+- parser AST retains enum name, variant name, argument/binding and precise source spans;
+- semantic lowering remains fail-closed for constructor/match surfaces until nominal enum typing, exhaustiveness and ownership land.
 
-Enums v0 is also a **ZERO** cost-class target: ordinary Rust enums/matches, no hidden allocation/boxing/clone/dispatch/runtime metadata.
+Enums v0 remains a **ZERO** cost-class target: ordinary static Rust enums/matches, no hidden allocation/boxing/clone/dispatch/runtime metadata.
+
+## Current validation baseline
+
+Before the active branch:
+
+- `main` head: `f6796fa8f9f87530b98de0e13bf636fa95c2254a`;
+- main CI #203 / run `33079432964`: SUCCESS;
+- Ubuntu #203 passed format, Clippy, workspace tests, benchmark smoke, every previous runtime/performance gate including Records v0, and release build;
+- Windows/macOS #203 quality/test/release jobs passed.
+
+Every active-branch push must preserve the same baseline. One CI run per pushed SHA; do not rerun an already-running or failed SHA merely to obtain a different sample.
 
 ## Durable continuation infrastructure
 
