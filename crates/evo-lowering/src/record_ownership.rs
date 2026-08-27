@@ -81,10 +81,10 @@ impl MoveTracker {
     }
 
     pub(crate) fn merge_repeat(&mut self, body_exit: &Self, span: Span) -> Result<(), LowerError> {
-        match self.state.merge_repeat(
-            &body_exit.state,
-            SemanticType::is_trivially_reusable_v0,
-        ) {
+        match self
+            .state
+            .merge_repeat(&body_exit.state, SemanticType::is_trivially_reusable_v0)
+        {
             Ok(()) => Ok(()),
             Err(MoveStateError::RepeatWouldConsume) => Err(LowerError {
                 message: repeat_move_message(self, body_exit),
