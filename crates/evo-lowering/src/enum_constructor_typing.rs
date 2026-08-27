@@ -193,7 +193,7 @@ pub(super) fn validate_constructor_payload_types(
 fn validate_statements(
     statements: &[SyntaxStmt],
     environment: &ConstructorTypeEnvironment<'_>,
-    scopes: &mut Vec<HashMap<String, ResolvedPayloadType>>,
+    scopes: &mut [HashMap<String, ResolvedPayloadType>],
 ) -> Result<(), LowerError> {
     for statement in statements {
         match &statement.kind {
