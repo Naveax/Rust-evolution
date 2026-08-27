@@ -51,9 +51,15 @@ mod enums_impl {
         include!("enum_ownership_ir.rs");
     }
 
-    pub(crate) fn collect_validated_enum_environment(
+    mod program_ir {
+        include!("enum_program_ir.rs");
+    }
+
+    pub(crate) use program_ir::EnumProgramIr;
+
+    fn collect_validated_enum_state(
         program: &SyntaxProgram,
-    ) -> Result<EnumEnvironment, LowerError> {
+    ) -> Result<(EnumEnvironment, EnumProgramIr), LowerError> {
         validate_enum_declarations(program)?;
         let environment = collect_enum_environment(program)?;
         let matches = match_validation::collect_match_environment(program, &environment)?;
@@ -69,16 +75,16 @@ mod enums_impl {
             !usage.name.is_empty() && usage.span.start < usage.span.end
         }));
 
-        let lowered_ownership = ownership_ir::lower_ownership_uses(&ownership);
-        debug_assert_eq!(lowered_ownership.len(), ownership.len());
-        debug_assert!(lowered_ownership.iter().all(|usage| {
+        let ownership_uses = ownership_ir::lower_ownership_uses(&ownership);
+        debug_assert_eq!(ownership_uses.len(), ownership.len());
+        debug_assert!(ownership_uses.iter().all(|usage| {
             let _ = (&usage.value_type, usage.mode);
             !usage.name.is_empty() && usage.span.start < usage.span.end
         }));
 
-        let schemas = ir::lower_enum_schemas(&environment);
-        debug_assert_eq!(schemas.len(), program.enums.len());
-        debug_assert!(schemas.iter().all(|schema| {
+        let enums = ir::lower_enum_schemas(&environment);
+        debug_assert_eq!(enums.len(), program.enums.len());
+        debug_assert!(enums.iter().all(|schema| {
             environment.schema(&schema.name).is_some_and(|resolved| {
                 resolved.span == schema.span && resolved.variants.len() == schema.variants.len()
             })
@@ -94,22 +100,40 @@ mod enums_impl {
                 .all(|resolved| matches.match_at(resolved.span.start).is_some())
         );
 
-        let lowered_constructors = ir::lower_constructors(program, &environment);
+        let constructors = ir::lower_constructors(program, &environment);
         debug_assert!(
-            lowered_constructors
+            constructors
                 .iter()
                 .all(|constructor| environment.schema(&constructor.enum_name).is_some())
         );
 
-        Ok(environment)
+        Ok((
+            environment,
+            EnumProgramIr {
+                enums,
+                records,
+                constructors,
+                matches: lowered_matches,
+                ownership_uses,
+            },
+        ))
     }
 
-    pub(crate) fn validate_enum_pre_codegen_semantics(
+    #[cfg(test)]
+    pub(crate) fn collect_validated_enum_environment(
         program: &SyntaxProgram,
-    ) -> Result<(), LowerError> {
-        collect_validated_enum_environment(program).map(|_| ())
+    ) -> Result<EnumEnvironment, LowerError> {
+        collect_validated_enum_state(program).map(|(environment, _)| environment)
+    }
+
+    pub(crate) fn collect_validated_enum_program_ir(
+        program: &SyntaxProgram,
+    ) -> Result<EnumProgramIr, LowerError> {
+        collect_validated_enum_state(program).map(|(_, lowered)| lowered)
     }
 }
+
+pub(crate) use enums_impl::EnumProgramIr;
 
 mod records_impl {
     include!("record_environment_records.rs");
@@ -136,6 +160,12 @@ impl Deref for TypeEnvironment {
     }
 }
 
+pub(crate) fn collect_enum_program_ir(
+    program: &SyntaxProgram,
+) -> Result<EnumProgramIr, LowerError> {
+    enums_impl::collect_validated_enum_program_ir(program)
+}
+
 pub(crate) fn collect_record_environment(
     program: &SyntaxProgram,
 ) -> Result<RecordEnvironment, LowerError> {
@@ -154,7 +184,15 @@ fn reject_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
         return Ok(());
     }
 
-    enums_impl::validate_enum_pre_codegen_semantics(program)?;
+    let enum_ir = collect_enum_program_ir(program)?;
+    debug_assert_eq!(enum_ir.enums.len(), program.enums.len());
+    debug_assert_eq!(enum_ir.records.len(), program.records.len());
+    let _ = (
+        enum_ir.constructors.len(),
+        enum_ir.matches.len(),
+        enum_ir.ownership_uses.len(),
+    );
+
     let enum_def = &program.enums[0];
     Err(LowerError {
         message: "enum declarations are parsed, but Enums v0 semantic lowering/codegen is not implemented yet"
