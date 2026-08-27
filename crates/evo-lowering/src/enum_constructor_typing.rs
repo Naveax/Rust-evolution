@@ -544,7 +544,7 @@ mod tests {
         )
         .expect_err("payload binding must not shadow an already-visible local");
         assert!(error.message.contains("conflicts with an already-visible local"));
-        assert_eq!(error.span.line, 9);
+        assert_eq!(error.span.line, 10);
     }
 
     #[test]
