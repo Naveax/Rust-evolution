@@ -8,45 +8,42 @@ Last verified update: **2026-08-27**
 
 **#50 — Enums v0: nominal sum types + exhaustive static matching**
 
-Parser / formatter child:
+Completed parser / formatter child:
 
 **#51 — Enums parser: declarations, qualified variants and case-match surface**
 
-Semantic child prepared next:
+Active semantic child:
 
 **#54 — Enums semantics: nominal typing, constructors and exhaustive match**
 
-Parser merge candidate:
+Current semantic staging branch:
 
-- PR **#53 — feat: add Enums v0 constructor and match parser surface**
-- branch `feature/enums-constructor-match-v0`
-- code head validated as `acb27b1f54c7e695d46c5395a4d84c6d02cb136c`
-- CI **#214 / run `33090709840` — SUCCESS**
-- Ubuntu passed format, Clippy, workspace tests, benchmark smoke, every existing runtime/performance gate including Records v0, and release build
-- Windows/macOS passed format, Clippy, workspace tests, benchmark smoke and release build
+`work/enums-semantics-v0`
 
-Records v0 is complete. Enums declaration parsing is landed on `main`; the remaining #51 constructor/match surface is implemented in PR #53 and remains fail-closed before enum semantics/codegen.
+## Verified stable baseline
 
-## Implemented parser surface in #51
+Parser / formatter PR #53 was squash-merged to `main` as:
 
-### Qualified construction
+`c454fcfe5811a9122b8dfeefad7f4eb4c22c8afa`
+
+Validation:
+
+- PR #53 final CI #215 / run `33091101594`: **SUCCESS**
+- post-merge `main` CI #216 / run `33091396504`: **SUCCESS**
+- Ubuntu #216 passed format, Clippy, workspace tests, benchmark smoke, every existing runtime/performance gate including Records v0, and release build
+- Windows/macOS #216 passed format, Clippy, workspace tests, benchmark smoke and release build
+- issue #51 is closed as completed
+
+Do not reopen the parser merge stack unless new evidence appears.
+
+## Landed Enums parser surface
+
+The stable parser accepts the frozen v0 surface:
 
 ```text
 value = MaybeInt.None()
 value = MaybeInt.Some(41)
-```
 
-Implemented properties:
-
-- structured `EnumConstruct` AST stores enum name, variant name, positional arguments and source span;
-- existing `value.field` and chained field access remain field access;
-- plain `Enum.Variant` without parentheses remains field-access-shaped syntax outside `case`;
-- record constructors remain unchanged;
-- constructor lowering fails closed before enum semantic support.
-
-### Match statement
-
-```text
 match value
 case MaybeInt.Some(x)
     print x
@@ -55,76 +52,71 @@ case MaybeInt.None
 end
 ```
 
-Implemented properties:
+The AST preserves enum/variant identity structurally. Existing record constructors, direct/chained field access and plain `Enum.Variant` field-shaped syntax remain unchanged. Match recovery and formatter behavior are source-native and bounded. Enum declarations, constructors and match statements remain explicitly fail-closed before unsupported runtime semantics/codegen.
 
-- statement-only `match`;
-- explicit `case` arm boundaries;
-- fully qualified unit and one-payload-binding patterns;
-- source-spanned match statements, arms and patterns;
-- sibling `case` terminates the current arm;
-- nested `if` / `repeat` / `match` preserves the correct `end` boundary;
-- stray `case`, missing match expression, missing first case, malformed payload binding and missing final `end` are diagnosed source-natively with bounded recovery;
-- match lowering fails closed before enum semantic support.
+## #54 work in progress
 
-Formatter coverage includes canonical/idempotent qualified constructors, `match` / `case` indentation, payload-binding spacing and comment/arm boundaries.
+Current staging work is based directly on merge commit `c454fcfe5811a9122b8dfeefad7f4eb4c22c8afa`.
 
-CLI regressions prove enum declarations, constructors and match statements stop at Evolution source spans and do not reach rustc.
+Implemented on staging but not yet accepted on `main`:
+
+1. Introduced an internal `TypeEnvironment` boundary while retaining `RecordEnvironment` as a temporary compatibility alias for Records v0 callers.
+2. Kept all existing record type resolution, constructor validation and field access behavior delegated through the same record implementation.
+3. Added source-native enum declaration semantic validation before the existing fail-closed gate:
+   - duplicate enum names;
+   - duplicate variant names within one enum;
+   - record/enum nominal namespace collisions;
+   - enum/function namespace collisions;
+   - same variant name remains legal in different enums.
+4. Valid enum programs still stop at the existing Enums semantic/codegen gate. No runtime behavior has been enabled.
+
+The staging changes require CI validation before they become an accepted semantic baseline.
 
 ## Resume here
 
-1. Inspect PR #53 and its current head before changing anything. If a newer docs-only head exists, follow that run instead of re-running #214.
-2. If PR #53 is not merged, require one green CI for its current head, then merge it. Do not rerun an old failed or already-running SHA.
-3. After merge, verify the post-merge `main` CI before treating #51 as complete on the stable branch.
-4. Close/update #51 only after the merged `main` evidence exists.
-5. Start #54 from the merged `main` head. A pre-merge staging branch must be fast-forwarded/recreated from the actual merge baseline before it becomes authoritative.
-6. Build one shared nominal type environment rather than layering enum special cases on the Records-only environment:
+1. Confirm `main` still contains merge `c454fcfe5811a9122b8dfeefad7f4eb4c22c8afa` and post-merge CI #216 remains SUCCESS.
+2. Inspect issue #54 and the current semantic PR/staging head before pushing. Never duplicate an active SHA/workflow/input run.
+3. Finish the shared nominal type model:
    - builtin scalar types;
    - record nominal types;
    - enum nominal types;
    - deterministic record/enum/function namespace policy.
-7. Add enum schema/variant validation:
-   - duplicate enum names;
-   - duplicate variants;
-   - builtin/record/enum payload type resolution;
-   - unknown payload types;
-   - direct/indirect by-value nominal layout-cycle rejection.
-8. Add constructor semantics:
+4. Resolve enum variant payload types through that shared model:
+   - builtin payloads;
+   - record payloads;
+   - enum payloads;
+   - unknown payload types rejected at Evolution spans.
+5. Extend by-value layout-cycle validation across the nominal graph so record/enum cross-cycles cannot force hidden boxing.
+6. Add constructor semantics:
    - exact enum + variant resolution;
-   - unit variant requires zero arguments;
-   - payload variant requires exactly one argument;
-   - payload type checking;
+   - unit variants require zero arguments;
+   - payload variants require exactly one argument;
+   - payload argument type checked statically;
    - constructor expression has nominal enum type.
-9. Add match semantics:
+7. Add match semantics:
    - scrutinee must be enum-typed;
    - arm variants must belong to that enum;
    - duplicate arms rejected;
    - exhaustiveness checked source-natively;
    - payload bindings receive the declared type and remain arm-local;
    - sibling arm scopes remain independent.
-10. Keep ownership, Rust enum/match codegen and Enums performance work out of #54. Unsupported runtime surfaces must remain explicitly fail-closed at the next boundary.
-11. Preserve every Records v0 and earlier quality/runtime/performance gate.
+8. Lower enum schemas/constructors/matches into structured IR only after validation, but keep Rust codegen explicitly fail-closed in #54.
+9. Keep enum ownership/move semantics, payload extraction ownership, Rust enum/match codegen and Enums performance work out of #54.
+10. Preserve every Records v0 and earlier quality/runtime/performance gate.
 
 ## Engineering constraints
 
-Do not encode qualified enum identity as concatenated strings such as `"MaybeInt::Some"`. Enum and variant identity remain structured through parser, semantic environment and lowered IR.
+Do not encode qualified enum identity as concatenated strings such as `"MaybeInt::Some"`. Enum and variant identity must remain structured through parser, semantic environment and lowered IR.
 
 Do not silently reinterpret arbitrary `object.method(...)` syntax as supported methods.
 
-Do not guess ownership semantics while implementing #54. Enum move/reinitialization and payload-extraction ownership belong to a later child unless a minimal dependency is proven.
+Do not guess enum ownership rules in #54. The parser and type system may know a value is an enum without deciding yet whether every read consumes it.
 
 ## Runtime / cost rule
 
 Enums v0 remains cost class **ZERO** and targets ordinary static Rust `enum` + `match`.
 
-Do not add:
-
-- implicit clone/copy assumptions;
-- boxing;
-- GC/RC;
-- runtime variant maps;
-- reflection metadata;
-- dynamic dispatch;
-- managed runtime machinery.
+Do not add implicit cloning, hidden boxing, GC/RC, runtime variant maps, reflection metadata, dynamic dispatch or managed-runtime machinery.
 
 ## CI rule
 
