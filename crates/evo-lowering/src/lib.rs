@@ -126,6 +126,15 @@ struct FunctionSignature {
 }
 
 pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
+    if let Some(record) = program.records.first() {
+        return Err(LowerError {
+            message: "record declarations are parsed but Records v0 semantic lowering is not implemented yet"
+                .to_owned(),
+            span: record.span,
+        });
+    }
+    reject_unlowered_record_signature_types(program)?;
+
     let signatures = collect_function_signatures(&program.functions)?;
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
@@ -140,6 +149,30 @@ pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
         functions,
         statements,
     })
+}
+
+fn reject_unlowered_record_signature_types(program: &SyntaxProgram) -> Result<(), LowerError> {
+    for function in &program.functions {
+        for parameter in &function.parameters {
+            if let SyntaxTypeName::Named(name) = &parameter.type_name {
+                return Err(LowerError {
+                    message: format!(
+                        "record type {name:?} is parsed but Records v0 semantic lowering is not implemented yet"
+                    ),
+                    span: parameter.span,
+                });
+            }
+        }
+        if let SyntaxTypeName::Named(name) = &function.return_type {
+            return Err(LowerError {
+                message: format!(
+                    "record return type {name:?} is parsed but Records v0 semantic lowering is not implemented yet"
+                ),
+                span: function.span,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn collect_function_signatures(
@@ -163,14 +196,14 @@ fn collect_function_signatures(
                     span: parameter.span,
                 });
             }
-            parameter_types.push(value_type(parameter.type_name));
+            parameter_types.push(value_type(&parameter.type_name));
         }
 
         signatures.insert(
             function.name.clone(),
             FunctionSignature {
                 parameter_types,
-                return_type: value_type(function.return_type),
+                return_type: value_type(&function.return_type),
             },
         );
     }
@@ -181,12 +214,12 @@ fn lower_function(
     function: &SyntaxFunction,
     signatures: &HashMap<String, FunctionSignature>,
 ) -> Result<Function, LowerError> {
-    let return_type = value_type(function.return_type);
+    let return_type = value_type(&function.return_type);
     let mut analyzer = Analyzer::new(signatures, Some(return_type));
     let mut parameters = Vec::with_capacity(function.parameters.len());
 
     for parameter in &function.parameters {
-        let parameter_type = value_type(parameter.type_name);
+        let parameter_type = value_type(&parameter.type_name);
         analyzer.define_binding(parameter.name.clone(), parameter_type, parameter.span.start);
         parameters.push(Parameter {
             name: parameter.name.clone(),
@@ -247,11 +280,14 @@ fn statement_always_returns(statement: &Stmt) -> bool {
     }
 }
 
-fn value_type(type_name: SyntaxTypeName) -> ValueType {
+fn value_type(type_name: &SyntaxTypeName) -> ValueType {
     match type_name {
         SyntaxTypeName::Int => ValueType::Integer,
         SyntaxTypeName::Bool => ValueType::Bool,
         SyntaxTypeName::String => ValueType::String,
+        SyntaxTypeName::Named(name) => {
+            unreachable!("named record type {name:?} must be rejected before scalar lowering")
+        }
     }
 }
 
@@ -464,6 +500,20 @@ impl<'a> Analyzer<'a> {
                     signature.return_type,
                 )
             }
+            SyntaxExprKind::Construct { .. } => {
+                return Err(LowerError {
+                    message: "record construction is parsed but Records v0 semantic lowering is not implemented yet"
+                        .to_owned(),
+                    span: expr.span,
+                });
+            }
+            SyntaxExprKind::FieldAccess { .. } => {
+                return Err(LowerError {
+                    message: "record field access is parsed but Records v0 semantic lowering is not implemented yet"
+                        .to_owned(),
+                    span: expr.span,
+                });
+            }
             SyntaxExprKind::InputInt => (ExprKind::InputInt, ValueType::Integer),
             SyntaxExprKind::LogicalNot(inner) => {
                 let (inner, inner_type) = self.lower_expr(inner)?;
@@ -582,6 +632,32 @@ mod tests {
         let tokens = lex(source).expect("lexing should succeed");
         let syntax = parse(&tokens).expect("parsing should succeed");
         lower(&syntax)
+    }
+
+    #[test]
+    fn rejects_parsed_records_until_semantic_lowering_lands() {
+        let error = lower_source("record Point\nx int\ny int\nend\nprint 1\n")
+            .expect_err("record declarations must not be silently ignored");
+        assert!(error.message.contains("Records v0 semantic lowering"));
+        assert_eq!(error.span.line, 1);
+    }
+
+    #[test]
+    fn rejects_named_record_signature_types_until_semantic_lowering_lands() {
+        let error = lower_source("fn identity(point Point) Point\nreturn point\nend\n")
+            .expect_err("named record signature types must not reach scalar lowering");
+        assert!(error.message.contains("record type"));
+    }
+
+    #[test]
+    fn rejects_record_construction_and_field_access_until_semantic_lowering_lands() {
+        let construct = lower_source("p = Point(x = 1, y = 2)\n")
+            .expect_err("record construction must be rejected before semantic support");
+        assert!(construct.message.contains("record construction"));
+
+        let access = lower_source("x = 1\nprint x.value\n")
+            .expect_err("field access must be rejected before semantic support");
+        assert!(access.message.contains("field access"));
     }
 
     #[test]

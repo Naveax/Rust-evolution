@@ -43,6 +43,7 @@ pub enum TokenKind {
     Not,
     Fn,
     Return,
+    Record,
     TypeInt,
     TypeBool,
     TypeString,
@@ -60,6 +61,7 @@ pub enum TokenKind {
     LParen,
     RParen,
     Comma,
+    Dot,
     Newline,
     Eof,
 }
@@ -149,6 +151,7 @@ impl<'a> Lexer<'a> {
                 '(' => tokens.push(self.single(TokenKind::LParen)),
                 ')' => tokens.push(self.single(TokenKind::RParen)),
                 ',' => tokens.push(self.single(TokenKind::Comma)),
+                '.' => tokens.push(self.single(TokenKind::Dot)),
                 '"' => tokens.push(self.lex_string()?),
                 c if c.is_ascii_digit() => tokens.push(self.lex_number()?),
                 c if is_ident_start(c) => tokens.push(self.lex_identifier()),
@@ -211,6 +214,7 @@ impl<'a> Lexer<'a> {
                 '(' => tokens.push(self.single(TokenKind::LParen)),
                 ')' => tokens.push(self.single(TokenKind::RParen)),
                 ',' => tokens.push(self.single(TokenKind::Comma)),
+                '.' => tokens.push(self.single(TokenKind::Dot)),
                 '"' => match self.lex_string() {
                     Ok(token) => tokens.push(token),
                     Err(error) => {
@@ -420,6 +424,7 @@ impl<'a> Lexer<'a> {
             "not" => TokenKind::Not,
             "fn" => TokenKind::Fn,
             "return" => TokenKind::Return,
+            "record" => TokenKind::Record,
             "int" => TokenKind::TypeInt,
             "bool" => TokenKind::TypeBool,
             "string" => TokenKind::TypeString,

@@ -49,7 +49,11 @@ pub fn format_source(source: &str, tokens: &[Token]) -> String {
         if first_kind.is_some_and(|kind| {
             matches!(
                 kind,
-                TokenKind::Repeat | TokenKind::If | TokenKind::Else | TokenKind::Fn
+                TokenKind::Repeat
+                    | TokenKind::If
+                    | TokenKind::Else
+                    | TokenKind::Fn
+                    | TokenKind::Record
             )
         }) {
             depth += 1;
@@ -120,6 +124,9 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
     let previous_unary_minus = is_unary_minus(tokens, index - 1);
     let current_unary_minus = is_unary_minus(tokens, index);
 
+    if matches!(current, TokenKind::Dot) || matches!(previous, TokenKind::Dot) {
+        return false;
+    }
     if matches!(current, TokenKind::RParen | TokenKind::Comma)
         || matches!(previous, TokenKind::LParen)
     {
@@ -158,7 +165,11 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
         );
     }
 
-    if matches!(previous, TokenKind::Fn) {
+    if matches!(previous, TokenKind::Fn | TokenKind::Record) {
+        return true;
+    }
+
+    if matches!(previous, TokenKind::Identifier(_)) && matches!(current, TokenKind::Identifier(_)) {
         return true;
     }
 
@@ -248,6 +259,34 @@ mod tests {
         let source = "fn yes(flag bool)bool\nif flag and not false\nreturn true\nelse\nreturn false\nend\nend\n";
         let once = format(source);
         assert_eq!(format(&once), once);
+    }
+
+    #[test]
+    fn formats_records_named_types_construction_and_field_access() {
+        let source = concat!(
+            "record Point\n",
+            "x int\n",
+            "y int\n",
+            "end\n",
+            "record Wrapper\n",
+            "point Point\n",
+            "end\n",
+            "p=Point(x=1,y=2)\n",
+            "print p.x\n"
+        );
+        let expected = concat!(
+            "record Point\n",
+            "    x int\n",
+            "    y int\n",
+            "end\n",
+            "record Wrapper\n",
+            "    point Point\n",
+            "end\n",
+            "p = Point(x = 1, y = 2)\n",
+            "print p.x\n"
+        );
+        assert_eq!(format(source), expected);
+        assert_eq!(format(expected), expected);
     }
 
     #[test]
