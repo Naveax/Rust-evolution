@@ -13,13 +13,18 @@ mod enums_impl {
         include!("enum_match_validation.rs");
     }
 
+    mod match_sidecar {
+        include!("enum_match_sidecar.rs");
+    }
+
     pub(crate) fn validate_enum_pre_codegen_semantics(
         program: &SyntaxProgram,
     ) -> Result<(), LowerError> {
         validate_enum_declarations(program)?;
         let environment = collect_enum_environment(program)?;
-        match_validation::validate_match_patterns(program, &environment)?;
-        constructor_typing::validate_enum_type_semantics(program, &environment)
+        let matches = match_validation::collect_match_environment(program, &environment)?;
+        constructor_typing::validate_enum_type_semantics(program, &environment)?;
+        match_sidecar::validate_match_sidecar(program, &matches)
     }
 }
 
