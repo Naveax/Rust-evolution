@@ -114,6 +114,42 @@ fn check_rejects_invalid_match_payload_binding_before_codegen() {
 }
 
 #[test]
+fn check_rejects_non_enum_match_scrutinee_before_codegen() {
+    assert_check_fails_before_rustc(
+        "enum-match-scrutinee",
+        "non-enum-scrutinee.evo",
+        "enum Flag\nOff\nOn\nend\nmatch true\ncase Flag.Off\nprint 0\ncase Flag.On\nprint 1\nend\n",
+        "scrutinee must have an enum type",
+        5,
+        7,
+    );
+}
+
+#[test]
+fn check_rejects_match_arm_from_wrong_enum_before_codegen() {
+    assert_check_fails_before_rustc(
+        "enum-match-wrong-arm",
+        "wrong-enum-arm.evo",
+        "enum Left\nOne\nend\nenum Right\nOther\nend\nvalue = Left.One()\nmatch value\ncase Right.Other\nprint 0\nend\n",
+        "scrutinee has enum type \"Left\"",
+        9,
+        6,
+    );
+}
+
+#[test]
+fn check_rejects_match_payload_binding_scope_escape_before_codegen() {
+    assert_check_fails_before_rustc(
+        "enum-match-scope",
+        "match-binding-scope.evo",
+        "enum MaybeInt\nNone\nSome int\nend\nvalue = MaybeInt.Some(1)\nmatch value\ncase MaybeInt.None\nprint 0\ncase MaybeInt.Some(x)\nprint x\nend\nprint x\n",
+        "outside its scope",
+        12,
+        7,
+    );
+}
+
+#[test]
 fn check_keeps_match_statements_fail_closed_before_codegen() {
     assert_check_fails_before_rustc(
         "enum-match-check-gate",
