@@ -16,6 +16,16 @@ mod enums_impl {
             include!("enum_ownership.rs");
         }
 
+        pub(super) use ownership::{OwnershipUseMode, ResolvedOwnershipUse};
+
+        pub(super) fn collect_enum_ownership(
+            program: &SyntaxProgram,
+            enums: &EnumEnvironment,
+            matches: &super::match_validation::MatchEnvironment,
+        ) -> Result<Vec<ResolvedOwnershipUse>, LowerError> {
+            ownership::collect_enum_ownership(program, enums, matches)
+        }
+
         pub(super) fn validate_enum_ownership(
             program: &SyntaxProgram,
             enums: &EnumEnvironment,
@@ -33,17 +43,122 @@ mod enums_impl {
         include!("enum_match_sidecar.rs");
     }
 
-    pub(crate) fn validate_enum_pre_codegen_semantics(
+    mod ir {
+        include!("enum_ir.rs");
+    }
+
+    mod ownership_ir {
+        include!("enum_ownership_ir.rs");
+    }
+
+    mod program_ir {
+        include!("enum_program_ir.rs");
+    }
+
+    mod executable_ir {
+        include!("enum_executable_ir.rs");
+    }
+
+    pub(crate) use executable_ir::{
+        ExecutableEnumIr, ExecutableEnumProgramIr, ExecutableEnumVariantIr, ExecutableExprIr,
+        ExecutableExprKind, ExecutableFunctionIr, ExecutableMatchArmIr,
+        ExecutableMatchBindingIr, ExecutableOwnershipMode, ExecutableParameterIr,
+        ExecutableRecordFieldIr, ExecutableRecordFieldValueIr, ExecutableRecordIr,
+        ExecutableStmtIr, ExecutableStmtKind, ExecutableValueType,
+    };
+
+    fn collect_validated_enum_state(
         program: &SyntaxProgram,
-    ) -> Result<(), LowerError> {
+    ) -> Result<(EnumEnvironment, program_ir::EnumProgramIr), LowerError> {
         validate_enum_declarations(program)?;
         let environment = collect_enum_environment(program)?;
         let matches = match_validation::collect_match_environment(program, &environment)?;
         constructor_typing::validate_enum_type_semantics(program, &environment)?;
         match_sidecar::validate_match_sidecar(program, &matches)?;
-        constructor_typing::validate_enum_ownership(program, &environment, &matches)
+        let ownership =
+            constructor_typing::collect_enum_ownership(program, &environment, &matches)?;
+        debug_assert!(
+            constructor_typing::validate_enum_ownership(program, &environment, &matches).is_ok()
+        );
+        debug_assert!(ownership.iter().all(|usage| {
+            let _ = (&usage.value_type, usage.mode);
+            !usage.name.is_empty() && usage.span.start < usage.span.end
+        }));
+
+        let ownership_uses = ownership_ir::lower_ownership_uses(&ownership);
+        debug_assert_eq!(ownership_uses.len(), ownership.len());
+        debug_assert!(ownership_uses.iter().all(|usage| {
+            let _ = (&usage.value_type, usage.mode);
+            !usage.name.is_empty() && usage.span.start < usage.span.end
+        }));
+
+        let enums = ir::lower_enum_schemas(&environment);
+        debug_assert_eq!(enums.len(), program.enums.len());
+        debug_assert!(enums.iter().all(|schema| {
+            environment.schema(&schema.name).is_some_and(|resolved| {
+                resolved.span == schema.span && resolved.variants.len() == schema.variants.len()
+            })
+        }));
+
+        let records = ir::lower_record_schemas(program, &environment);
+        debug_assert_eq!(records.len(), program.records.len());
+
+        let lowered_matches = ir::lower_matches(program, &matches);
+        debug_assert!(
+            lowered_matches
+                .iter()
+                .all(|resolved| matches.match_at(resolved.span.start).is_some())
+        );
+
+        let constructors = ir::lower_constructors(program, &environment);
+        debug_assert!(
+            constructors
+                .iter()
+                .all(|constructor| environment.schema(&constructor.enum_name).is_some())
+        );
+
+        Ok((
+            environment,
+            program_ir::EnumProgramIr {
+                enums,
+                records,
+                constructors,
+                matches: lowered_matches,
+                ownership_uses,
+            },
+        ))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn collect_validated_enum_environment(
+        program: &SyntaxProgram,
+    ) -> Result<EnumEnvironment, LowerError> {
+        collect_validated_enum_state(program).map(|(environment, _)| environment)
+    }
+
+    pub(crate) fn collect_validated_enum_program_ir(
+        program: &SyntaxProgram,
+    ) -> Result<program_ir::EnumProgramIr, LowerError> {
+        collect_validated_enum_state(program).map(|(_, lowered)| lowered)
+    }
+
+    pub(crate) fn collect_executable_enum_program_ir(
+        program: &SyntaxProgram,
+    ) -> Result<ExecutableEnumProgramIr, LowerError> {
+        let validated = collect_validated_enum_program_ir(program)?;
+        Ok(executable_ir::lower_executable_enum_program(
+            program, &validated,
+        ))
     }
 }
+
+pub(crate) use enums_impl::{
+    ExecutableEnumIr, ExecutableEnumProgramIr, ExecutableEnumVariantIr, ExecutableExprIr,
+    ExecutableExprKind, ExecutableFunctionIr, ExecutableMatchArmIr, ExecutableMatchBindingIr,
+    ExecutableOwnershipMode, ExecutableParameterIr, ExecutableRecordFieldIr,
+    ExecutableRecordFieldValueIr, ExecutableRecordIr, ExecutableStmtIr, ExecutableStmtKind,
+    ExecutableValueType,
+};
 
 mod records_impl {
     include!("record_environment_records.rs");
@@ -70,6 +185,12 @@ impl Deref for TypeEnvironment {
     }
 }
 
+pub(crate) fn collect_executable_enum_program_ir(
+    program: &SyntaxProgram,
+) -> Result<ExecutableEnumProgramIr, LowerError> {
+    enums_impl::collect_executable_enum_program_ir(program)
+}
+
 pub(crate) fn collect_record_environment(
     program: &SyntaxProgram,
 ) -> Result<RecordEnvironment, LowerError> {
@@ -88,7 +209,12 @@ fn reject_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
         return Ok(());
     }
 
-    enums_impl::validate_enum_pre_codegen_semantics(program)?;
+    let executable = collect_executable_enum_program_ir(program)?;
+    debug_assert_eq!(executable.enums.len(), program.enums.len());
+    debug_assert_eq!(executable.records.len(), program.records.len());
+    debug_assert_eq!(executable.functions.len(), program.functions.len());
+    let _ = executable.statements.len();
+
     let enum_def = &program.enums[0];
     Err(LowerError {
         message: "enum declarations are parsed, but Enums v0 semantic lowering/codegen is not implemented yet"
