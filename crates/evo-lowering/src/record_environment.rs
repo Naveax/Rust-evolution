@@ -59,7 +59,13 @@ mod enums_impl {
         include!("enum_executable_ir.rs");
     }
 
-    pub(crate) use executable_ir::ExecutableEnumProgramIr;
+    pub(crate) use executable_ir::{
+        ExecutableEnumIr, ExecutableEnumProgramIr, ExecutableEnumVariantIr, ExecutableExprIr,
+        ExecutableExprKind, ExecutableFunctionIr, ExecutableMatchArmIr,
+        ExecutableMatchBindingIr, ExecutableOwnershipMode, ExecutableParameterIr,
+        ExecutableRecordFieldIr, ExecutableRecordFieldValueIr, ExecutableRecordIr,
+        ExecutableStmtIr, ExecutableStmtKind, ExecutableValueType,
+    };
 
     fn collect_validated_enum_state(
         program: &SyntaxProgram,
@@ -146,7 +152,13 @@ mod enums_impl {
     }
 }
 
-pub(crate) use enums_impl::ExecutableEnumProgramIr;
+pub(crate) use enums_impl::{
+    ExecutableEnumIr, ExecutableEnumProgramIr, ExecutableEnumVariantIr, ExecutableExprIr,
+    ExecutableExprKind, ExecutableFunctionIr, ExecutableMatchArmIr, ExecutableMatchBindingIr,
+    ExecutableOwnershipMode, ExecutableParameterIr, ExecutableRecordFieldIr,
+    ExecutableRecordFieldValueIr, ExecutableRecordIr, ExecutableStmtIr, ExecutableStmtKind,
+    ExecutableValueType,
+};
 
 mod records_impl {
     include!("record_environment_records.rs");
