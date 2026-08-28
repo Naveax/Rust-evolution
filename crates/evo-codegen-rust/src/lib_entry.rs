@@ -1,4 +1,9 @@
-include!("lib.rs");
+mod legacy {
+    include!("lib.rs");
+}
+
+use evo_lowering::Program;
+pub use legacy::{GeneratedRust, SourceMapping};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodegenError {
@@ -26,14 +31,47 @@ impl std::fmt::Display for CodegenError {
 
 impl std::error::Error for CodegenError {}
 
+#[must_use]
+pub fn generate_lowered_rust(program: &Program) -> String {
+    assert_legacy_program(program);
+    legacy::generate_lowered_rust(program)
+}
+
+#[must_use]
+pub fn generate_lowered_rust_with_map(program: &Program) -> GeneratedRust {
+    assert_legacy_program(program);
+    legacy::generate_lowered_rust_with_map(program)
+}
+
 pub fn try_generate_lowered_rust(program: &Program) -> Result<String, CodegenError> {
-    Ok(generate_lowered_rust(program))
+    reject_unimplemented_enum_codegen(program)?;
+    Ok(legacy::generate_lowered_rust(program))
 }
 
 pub fn try_generate_lowered_rust_with_map(
     program: &Program,
 ) -> Result<GeneratedRust, CodegenError> {
-    Ok(generate_lowered_rust_with_map(program))
+    reject_unimplemented_enum_codegen(program)?;
+    Ok(legacy::generate_lowered_rust_with_map(program))
+}
+
+fn reject_unimplemented_enum_codegen(program: &Program) -> Result<(), CodegenError> {
+    if !program.has_enum_program() {
+        return Ok(());
+    }
+
+    Err(CodegenError {
+        message: "Enums v0 executable lowering is complete, but Rust enum/match codegen is not implemented yet"
+            .to_owned(),
+        span: program.enum_source_span(),
+    })
+}
+
+fn assert_legacy_program(program: &Program) {
+    assert!(
+        !program.has_enum_program(),
+        "enum-enabled Program reached legacy infallible Rust codegen; use try_generate_lowered_rust or try_generate_lowered_rust_with_map"
+    );
 }
 
 #[cfg(test)]
@@ -63,5 +101,25 @@ mod fallible_api_tests {
         let generated = try_generate_lowered_rust_with_map(&program)
             .expect("legacy program should generate with source mappings");
         assert_eq!(generated, generate_lowered_rust_with_map(&program));
+    }
+
+    #[test]
+    fn enum_program_fails_closed_before_legacy_rust_emission() {
+        let program = lower_source(
+            "enum Flag\nOff\nOn\nend\nvalue = Flag.On()\nmatch value\ncase Flag.Off\nprint 0\ncase Flag.On\nprint 1\nend\n",
+        );
+        assert!(program.has_enum_program());
+
+        let error = try_generate_lowered_rust_with_map(&program)
+            .expect_err("enum Rust emission should remain deliberately closed");
+        assert!(error.message().contains("Rust enum/match codegen"));
+        assert_eq!(error.span().map(|span| span.line), Some(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "enum-enabled Program reached legacy infallible Rust codegen")]
+    fn legacy_infallible_codegen_never_silently_drops_enum_ir() {
+        let program = lower_source("enum Flag\nOff\nOn\nend\nprint 1\n");
+        let _ = generate_lowered_rust(&program);
     }
 }

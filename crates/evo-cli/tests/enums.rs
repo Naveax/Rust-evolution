@@ -42,12 +42,12 @@ fn assert_check_fails_before_rustc(
 }
 
 #[test]
-fn check_keeps_parsed_enum_declarations_fail_closed_before_codegen() {
+fn check_promoted_enum_program_fails_closed_at_rust_codegen_boundary() {
     assert_check_fails_before_rustc(
         "enums-check-gate",
         "maybe-int.evo",
         "enum MaybeInt\nNone\nSome int\nend\nprint 1\n",
-        "Enums v0 semantic lowering",
+        "Rust enum/match codegen is not implemented yet",
         1,
         1,
     );

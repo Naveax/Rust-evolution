@@ -59,6 +59,8 @@ mod enums_impl {
         include!("enum_executable_ir.rs");
     }
 
+    pub(crate) use executable_ir::ExecutableEnumProgramIr;
+
     fn collect_validated_enum_state(
         program: &SyntaxProgram,
     ) -> Result<(EnumEnvironment, program_ir::EnumProgramIr), LowerError> {
@@ -136,13 +138,15 @@ mod enums_impl {
 
     pub(crate) fn collect_executable_enum_program_ir(
         program: &SyntaxProgram,
-    ) -> Result<executable_ir::ExecutableEnumProgramIr, LowerError> {
+    ) -> Result<ExecutableEnumProgramIr, LowerError> {
         let validated = collect_validated_enum_program_ir(program)?;
         Ok(executable_ir::lower_executable_enum_program(
             program, &validated,
         ))
     }
 }
+
+pub(crate) use enums_impl::ExecutableEnumProgramIr;
 
 mod records_impl {
     include!("record_environment_records.rs");
@@ -169,6 +173,12 @@ impl Deref for TypeEnvironment {
     }
 }
 
+pub(crate) fn collect_executable_enum_program_ir(
+    program: &SyntaxProgram,
+) -> Result<ExecutableEnumProgramIr, LowerError> {
+    enums_impl::collect_executable_enum_program_ir(program)
+}
+
 pub(crate) fn collect_record_environment(
     program: &SyntaxProgram,
 ) -> Result<RecordEnvironment, LowerError> {
@@ -187,7 +197,7 @@ fn reject_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
         return Ok(());
     }
 
-    let executable = enums_impl::collect_executable_enum_program_ir(program)?;
+    let executable = collect_executable_enum_program_ir(program)?;
     debug_assert_eq!(executable.enums.len(), program.enums.len());
     debug_assert_eq!(executable.records.len(), program.records.len());
     debug_assert_eq!(executable.functions.len(), program.functions.len());
