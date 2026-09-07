@@ -9,122 +9,113 @@ This file is the durable project handoff. Fresh sessions should read `AGENTS.md`
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
 - Rust toolchain: **1.98.0**
-- Current authoritative `main`: `a7b8c08a71283cffa15216c7359078f1c8a34873`
-- Post-merge main CI #274 / run `34106421537`: **SUCCESS**
+- Authoritative `main`: `6c7bc8a4376966775728765444002f0b6774cd31`
+- Post-merge main CI #278 / run `34114143728`: **SUCCESS**
 
-Records v0 remains the accepted ZERO-cost nominal product-type baseline with its differential performance gate preserved.
+## Completed core data-model milestones
 
-## Enums v0 milestone — #50
+### Records v0
 
-Completed and merged before #62:
+Records v0 remains the accepted ZERO-cost nominal product-type baseline with direct static Rust lowering, explicit by-value ownership, source-native diagnostics and its differential performance gate preserved.
 
-- parser/formatter child #51;
-- semantic umbrella #54;
-- ownership child #60 / PR #63;
-- static executable codegen child #61 / PR #64:
-  - final PR CI #273 / run `34106104357`: **SUCCESS**;
-  - squash merge `a7b8c08a71283cffa15216c7359078f1c8a34873`;
-  - post-merge main CI #274 / run `34106421537`: **SUCCESS**.
+### Enums v0 — #50
 
-Merged Enums behavior includes nominal declarations, qualified constructors, exhaustive statement-only matches, typed lexical payload bindings, explicit by-value ownership, static Rust enum/match codegen, source maps and native correctness coverage without hidden clone/allocation/boxing/GC/RC/runtime maps/reflection/dynamic dispatch.
+**COMPLETED** from merged-main evidence.
 
-## Active final child — #62
+Delivered slices:
 
-- Issue: **#62 — P0 enums performance: differential parity gate and language spec sync**
-- PR: **#65 — `perf: add Enums v0 differential parity gate`**
-- Feature branch: `feature/enums-performance-v0`
-- Staging branch: `work/enums-performance-v0`
-- Exact branch base: `a7b8c08a71283cffa15216c7359078f1c8a34873`
+- #51 parser/formatter surface;
+- #54 semantic umbrella;
+- #60 ownership / PR #63;
+- #61 executable static Rust codegen/source maps/native correctness / PR #64;
+- #62 differential performance + final language-spec sync / PR #65.
 
-## Retained first benchmark failure
+Final evidence:
 
-Initial feature head `2c898fa6b845f12f78de99356441cf98afe0e23b` ran as CI #275 / `34107195001` and **FAILED** the first Enums timing gate. It must not be rerun.
+- final PR #65 head `1c946af9d15946163b77a92f5d29c89f73469be2`;
+- final PR CI #277 / run `34112029258`: **SUCCESS** on Ubuntu/macOS/Windows;
+- squash merge `6c7bc8a4376966775728765444002f0b6774cd31`;
+- post-merge main CI #278 / run `34114143728`: **SUCCESS**.
 
-#275 Enums evidence:
+Merged Enums v0 includes:
 
-- correctness: **PASS**
-- normalized LLVM IR equal: `false`
-- exact binary equal: `false`
-- reference median: `16,535,571 ns`
-- Evolution median: `16,547,263 ns`
-- ratio: `1.000707082`
-- stable: `true`
-- final verdict: **FAIL**
-- verdict basis: `timing-median-ratio`
-
-The benchmark reference was not exactly equivalent to emitter output, so deterministic LLVM/binary parity was invalid on #275. The unfavorable result remains retained rather than rerun away.
-
-## Accepted corrected benchmark evidence
-
-Corrected feature head:
-
-- `69bc2d1b15db1bd841b85e8a508c156dc689550d`
-- CI #276 / run `34108814832`: **SUCCESS**
-- Ubuntu/macOS/Windows matrix: **SUCCESS**
-- Enums artifact id: `10014284630`
-
-The corrected benchmark locks `reference.rs` to generated Rust exactly after newline normalization and uploads Enums evidence with `always()`.
-
-Accepted #276 Enums result:
-
-- correctness: **PASS**
-- normalized LLVM IR equal: `true`
-- exact executable equal: `true`
-- binary size: `2,267,072 B` on both sides
-- reference median: `16,506,786 ns`
-- Evolution median: `16,520,050 ns`
-- reference p95: `16,596,414 ns`
-- Evolution p95: `16,619,046 ns`
-- relative MAD: `0.001764426` / `0.002294908`
-- stable: `true`
-- ratio: `1.000803548`
-- timing-only verdict: **FAIL**
-- final verdict: **PASS**
-- verdict basis: `byte-identical-binary-parity`
-
-Correctness PASS plus byte-identical executables is accepted deterministic runtime parity under #4/#5. Raw timing remains preserved as evidence.
-
-All previous Ubuntu runtime gates and release build passed on #276.
-
-## Native correctness completion
-
-The dedicated explicit same-type enum reinitialization process test passed on Ubuntu, Windows and macOS in #275 and remained green in #276. This satisfies the remaining process-level reinitialization evidence for parent #50.
-
-## Language spec sync
-
-Accepted #276 evidence unlocked the final stable-sketch update on staging.
-
-`docs/LANGUAGE_SPEC_V0.md` now includes Enums v0:
-
-- declaration grammar/placement;
-- unit and single-payload variants;
-- exact nominal payload typing;
-- qualified construction;
+- nominal enum declarations;
+- unit and single typed-payload variants;
+- qualified constructors;
 - exhaustive statement-only matching;
-- arm-local payload binding scope/type;
-- by-value ownership and exact-type reinitialization;
-- direct static Rust lowering;
-- source-map/diagnostic rules;
-- accepted #276 parity evidence;
-- explicit Enums non-goals.
+- arm-local typed payload bindings;
+- explicit by-value move semantics and exact-type reinitialization;
+- direct static Rust enum/constructor/match lowering;
+- source maps and source-native diagnostics;
+- native correctness coverage;
+- dedicated differential performance evidence;
+- no hidden clone/allocation/boxing/GC/RC/runtime maps/reflection/dynamic dispatch.
 
-## Remaining #62 completion path
+## Enums v0 performance evidence
 
-Only release-process work remains:
+### Retained first failure
 
-1. synchronize issue/PR/handoff evidence;
-2. fast-forward final staging to feature only after completed #276;
-3. run exactly one CI on that final docs-synchronized head;
-4. mark PR #65 ready only after final CI SUCCESS;
-5. squash-merge with exact expected head SHA;
-6. verify post-merge `main` push CI;
-7. close #62 and parent #50 only from merged-main evidence.
+Initial #62 head `2c898fa6b845f12f78de99356441cf98afe0e23b`, CI #275 / `34107195001`: **FAILURE**, never rerun.
+
+The handwritten generated-style Rust benchmark reference did not exactly mirror actual emitter ordering/shape. Its result remains preserved:
+
+- correctness PASS;
+- normalized LLVM equal `false`;
+- exact executable equal `false`;
+- ratio `1.000707082`;
+- final verdict FAIL;
+- basis `timing-median-ratio`.
+
+### Accepted corrected parity
+
+Corrected head `69bc2d1b15db1bd841b85e8a508c156dc689550d`, CI #276 / `34108814832`: **SUCCESS**.
+
+Accepted evidence:
+
+- exact reference/generated-Rust integration lock PASS;
+- differential correctness PASS;
+- normalized LLVM IR equal `true`;
+- exact executable equal `true`;
+- binary size `2,267,072 B` on both sides;
+- reference median `16,506,786 ns`;
+- Evolution median `16,520,050 ns`;
+- ratio `1.000803548`;
+- timing-only verdict FAIL retained visibly;
+- final verdict PASS;
+- basis `byte-identical-binary-parity`.
+
+Correctness PASS plus byte-identical executables is accepted stronger deterministic runtime parity evidence under #4/#5. No compiler/lowering/codegen semantics were changed merely to obtain a friendlier benchmark result.
+
+Final PR head #277 and merged-main #278 kept all previous Ubuntu runtime/performance gates green.
+
+## Language specification
+
+`docs/LANGUAGE_SPEC_V0.md` is the current implemented-language source. It now includes the completed Enums v0 grammar, semantics, ownership, static Rust lowering, diagnostics/source maps and accepted performance evidence.
+
+Vision-only ergonomics remain outside the current spec until separately implemented and proven.
+
+## Current active roadmap state
+
+There is no selected implementation feature after Enums v0 yet.
+
+Master roadmap #1 says the next Phase-1 step is to atomize one new P0 weakness from #6 under parent #2 and then repeat the project methodology:
+
+1. define the measurable weakness and user scenario;
+2. identify layer/root cause;
+3. define semantics/correctness and safety boundaries;
+4. assign ZERO / EXPLICIT / MANAGED cost expectations where relevant;
+5. define source diagnostics/tooling expectations;
+6. design tests and #4/#5 differential performance evidence where applicable;
+7. create a focused P0 issue;
+8. only then start implementation branches.
+
+Do not treat broad categories such as collections, errors, borrow ergonomics, scripting, methods, generics or async as one ticket.
 
 ## ZERO-cost boundary
 
-Enums v0 is a ZERO-cost-class target: ordinary static Rust enums and matches, with no hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
+Current accepted Core-language slices must not silently introduce hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
 
-Do not add generics, guards, wildcard/or/arbitrary nested patterns, references/borrow inference, methods, derives or runtime reflection as collateral work.
+Future syntax/ergonomics must fail closed until semantics, safety, codegen and performance/cost behavior are explicitly established.
 
 ## Durable continuation infrastructure
 
