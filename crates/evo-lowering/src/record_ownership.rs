@@ -5,6 +5,9 @@ use crate::{
 use evo_diagnostics::{clear_related_location, set_related_location};
 use evo_lexer::Span;
 
+// The shared move-state file also declares enum-specific diagnostic reasons. Records v0 reuses
+// the same state algorithms but intentionally never constructs those enum-only reason variants.
+#[allow(dead_code)]
 mod move_state {
     include!("move_state.rs");
 }
