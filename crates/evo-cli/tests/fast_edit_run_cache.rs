@@ -203,15 +203,11 @@ fn unchanged_run_reuses_verified_binary_and_invalidates_safely() {
     let rustc = real_rustc();
     let wrapper = compile_rustc_wrapper(&dir, &rustc);
 
-    let first = run_evo(
-        &source, &cache_dir, &wrapper, &rustc, &counter, None, false,
-    );
+    let first = run_evo(&source, &cache_dir, &wrapper, &rustc, &counter, None, false);
     assert_success_with_stdout(&first, "2");
     assert_eq!(compile_count(&counter), 1, "cold run must compile once");
 
-    let second = run_evo(
-        &source, &cache_dir, &wrapper, &rustc, &counter, None, false,
-    );
+    let second = run_evo(&source, &cache_dir, &wrapper, &rustc, &counter, None, false);
     assert_success_with_stdout(&second, "2");
     assert_eq!(
         compile_count(&counter),
@@ -222,9 +218,7 @@ fn unchanged_run_reuses_verified_binary_and_invalidates_safely() {
     let entry = first_cache_entry(&cache_dir);
     fs::write(entry.join("compiler.txt"), "corrupt")
         .expect("cache metadata should be corruptible for the regression test");
-    let after_corruption = run_evo(
-        &source, &cache_dir, &wrapper, &rustc, &counter, None, false,
-    );
+    let after_corruption = run_evo(&source, &cache_dir, &wrapper, &rustc, &counter, None, false);
     assert_success_with_stdout(&after_corruption, "2");
     assert_eq!(
         compile_count(&counter),
@@ -233,10 +227,11 @@ fn unchanged_run_reuses_verified_binary_and_invalidates_safely() {
     );
 
     fs::write(&source, "print @\n").expect("invalid source should be written");
-    let invalid = run_evo(
-        &source, &cache_dir, &wrapper, &rustc, &counter, None, false,
+    let invalid = run_evo(&source, &cache_dir, &wrapper, &rustc, &counter, None, false);
+    assert!(
+        !invalid.status.success(),
+        "invalid frontend source must fail"
     );
-    assert!(!invalid.status.success(), "invalid frontend source must fail");
     assert!(
         String::from_utf8_lossy(&invalid.stderr).contains("unexpected character"),
         "{}",
@@ -249,9 +244,7 @@ fn unchanged_run_reuses_verified_binary_and_invalidates_safely() {
     );
 
     fs::write(&source, "print 2\n").expect("original source should be restored");
-    let restored = run_evo(
-        &source, &cache_dir, &wrapper, &rustc, &counter, None, false,
-    );
+    let restored = run_evo(&source, &cache_dir, &wrapper, &rustc, &counter, None, false);
     assert_success_with_stdout(&restored, "2");
     assert_eq!(
         compile_count(&counter),
@@ -260,9 +253,7 @@ fn unchanged_run_reuses_verified_binary_and_invalidates_safely() {
     );
 
     fs::write(&source, "print 3\n").expect("changed source should be written");
-    let source_changed = run_evo(
-        &source, &cache_dir, &wrapper, &rustc, &counter, None, false,
-    );
+    let source_changed = run_evo(&source, &cache_dir, &wrapper, &rustc, &counter, None, false);
     assert_success_with_stdout(&source_changed, "3");
     assert_eq!(
         compile_count(&counter),
