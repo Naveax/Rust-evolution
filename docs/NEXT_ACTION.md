@@ -43,11 +43,11 @@ First feature head:
 - final verdict: **FAIL**
 - verdict basis: `timing-median-ratio`
 
-The failure exposed a benchmark-reference defect rather than a proven codegen regression: the handwritten generated-style Rust reference did not mirror actual emitter ordering/shape. Actual codegen emits `enum -> input helper -> function -> main`; the first reference used `enum -> function -> input helper -> main` and also differed in exact condition/arm formatting. This made LLVM/binary comparison non-identical before timing.
+The failure exposed a benchmark-reference defect rather than accepted parity: the handwritten generated-style Rust reference did not mirror actual emitter ordering/shape. Actual codegen emits `enum -> input helper -> function -> main`; the first reference used `enum -> function -> input helper -> main` and also differed in exact condition/arm formatting. This made LLVM/binary comparison non-identical before timing.
 
-## Current staging fix
+## Current staging correction
 
-Staging head:
+Code/evidence correction head:
 
 - `9da2a360948edf9f474428260bc9bedfed45566c`
 
@@ -57,13 +57,13 @@ Changes since failed #275 head are intentionally limited to:
 2. `benchmarks/cases/enums-v0/reference.rs` now mirrors actual generated Rust ordering/shape.
 3. `crates/evo-bench/tests/enums_reference.rs` requires the Enums benchmark reference to match generated Rust exactly, analogous to the existing function-call reference lock.
 
-No compiler/codegen semantics were changed to obtain a more favorable benchmark result.
+Staging may be ahead of `9da2a360...` only by durable documentation updates recording #275 and this correction. No compiler/codegen semantics were changed to obtain a more favorable benchmark result.
 
 ## Resume sequence
 
 1. Confirm #275 is completed and do not rerun it.
-2. Fast-forward `feature/enums-performance-v0` to staging head `9da2a360...` with `force=false`.
-3. Let the new SHA receive exactly one CI run.
+2. Fast-forward `feature/enums-performance-v0` to the current staging head with `force=false`.
+3. Let that new SHA receive exactly one CI run.
 4. If the exact-reference integration test fails, fix that mismatch on a new SHA; do not reinterpret timing evidence.
 5. If the Enums gate runs, always retain and inspect `evo-bench-enums-ubuntu-latest` artifact:
    - `report.json`
