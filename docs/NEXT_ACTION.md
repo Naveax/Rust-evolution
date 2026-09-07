@@ -4,88 +4,139 @@ This file is intentionally operational. A fresh chat/agent should be able to res
 
 Last verified update: **2026-09-07**
 
-## Stable baseline
+## Verified merged feature baseline
 
-Enums v0 milestone **#50 is completed**. Final child **#62 is completed**.
+Fast edit-run v0 **#67 is completed** and PR **#68 is merged**.
 
-Authoritative `main`:
+Latest verified code-bearing `main` baseline:
 
-- `6c7bc8a4376966775728765444002f0b6774cd31`
-- PR #65 squash merge
-- post-merge CI #278 / run `34114143728`: **SUCCESS**
+- `17206a702b497731bd5174a0e011225711492d3e`
+- PR #68 squash merge
+- post-merge CI **#289** / run `34124829348`: **SUCCESS**
 - Rust toolchain: **1.98.0**
 
-Final PR evidence:
+A later docs-only handoff merge may advance the live `main` SHA. Before starting code, read the live branch head and active Actions rather than assuming this document can predict its own future merge hash.
 
-- final PR head `1c946af9d15946163b77a92f5d29c89f73469be2`
-- CI #277 / run `34112029258`: **SUCCESS** on Ubuntu/macOS/Windows
+## Final fast edit-run evidence
 
-Ubuntu #278 passed fmt, Clippy, workspace tests, benchmark smoke, runtime-repeat, control-flow, logical-operators, function-call, block-locals, Records v0, Enums v0 and release-build gates. macOS and Windows quality/release jobs also passed.
+Final PR head:
 
-## Accepted Enums v0 performance evidence
+- `b26a84819e8a89f27220ebd2eb16d4d91d513094`
 
-Retained first failure:
+Final PR CI:
 
-- head `2c898fa6b845f12f78de99356441cf98afe0e23b`
-- CI #275 / run `34107195001`: **FAILURE**, never rerun
-- correctness PASS
-- normalized LLVM equal `false`
-- exact executable equal `false`
-- ratio `1.000707082`
-- basis `timing-median-ratio`
+- CI **#288** / run `34123896927`: **SUCCESS**
 
-Corrected accepted evidence:
+Controlled Ubuntu turnaround evidence:
 
-- head `69bc2d1b15db1bd841b85e8a508c156dc689550d`
-- CI #276 / run `34108814832`: **SUCCESS**
-- correctness PASS
-- exact reference/generated-Rust lock PASS
-- normalized LLVM equal `true`
-- exact executable equal `true`
-- binary size `2,267,072 B` on both sides
-- reference median `16,506,786 ns`
-- Evolution median `16,520,050 ns`
-- ratio `1.000803548`
-- timing-only verdict FAIL retained visibly
-- final verdict PASS
-- basis `byte-identical-binary-parity`
+- cold median: **69.258 ms** across 5 fresh-cache samples;
+- warm median: **14.972 ms** across 9 measured warm samples after one untimed prime;
+- warm speedup: **4.626x**;
+- cold rustc compile count: **5**;
+- measured warm rustc compile count: **0**;
+- verdict: **PASS**;
+- artifact id `10019395817`;
+- digest `sha256:2cbb68765c69b231bdee08460a1a925ca336af39ac53e1833f1ac57c8920ca34`.
 
-No compiler/lowering/codegen semantics were changed to obtain the corrected benchmark result.
+The cache is developer-tooling state only. Accepted generated Rust bytes and generated-program runtime semantics were not changed.
 
-## Implemented language state
+Retained failed-head evidence remains visible:
 
-`docs/LANGUAGE_SPEC_V0.md` is the current implemented-language source. Enums v0 now includes nominal declarations, unit/single-payload variants, qualified constructors, exhaustive statement-only matching, arm-local typed payload bindings, by-value ownership/reinitialization, direct static Rust lowering, source-native diagnostics/source maps and accepted performance evidence.
+- #285 / `34122517074`: rustfmt-only failure;
+- #286 / `34122829838`: turnaround measurement passed but artifact upload path failed.
 
-Unsupported future ergonomics remain outside the current spec and fail closed.
+Neither failed SHA was rerun.
 
-## Next active task
+## Current implemented language state
 
-Master roadmap #1 now requires:
+`docs/LANGUAGE_SPEC_V0.md` is still the implemented-language source of truth.
 
-> **Atomize one new P0 weakness from #6 under parent #2.**
+Relevant current ownership behavior:
 
-No next feature has been selected yet. Do not jump directly into implementation.
+- Records v0 and Enums v0 are nominal and by-value;
+- move-only nominal locals become unavailable after consuming reads/calls/returns/matches according to existing lowering rules;
+- exact same-type reinitialization restores availability;
+- `if`, `repeat`, and exhaustive `match` use conservative ownership joins;
+- terminal branches are excluded from continuing-state joins;
+- no implicit clone, borrow, reference inference, boxing or managed runtime is inserted.
 
-Selection work must:
+## Next active P0
 
-1. inspect #6 against current implemented capabilities;
-2. choose one bounded, high-impact weakness;
-3. define the measurable problem and user scenario;
-4. classify layer and cost class;
-5. define semantics/correctness and safety boundaries;
-6. define required source-native diagnostics/tooling behavior;
-7. define test and differential benchmark needs under #4/#5;
-8. create one focused P0 issue before implementation branches are opened.
+**#69 — P0 move diagnostics v0: source-native move provenance and recovery guidance**
 
-Prefer a problem that is useful, independently measurable and small enough to preserve the current evidence discipline. Do not smuggle in generics, async, methods, borrowing, collections, error handling and scripting all at once merely because humans enjoy impossible milestones.
+Parent: #2
 
-## Engineering constraints
+Weakness source: #6 ownership learning curve / complex type-system errors / move-refactoring cost.
 
-- No hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch unless a future feature explicitly declares a different cost class.
-- Do not weaken existing runtime/performance gates.
-- Preserve unfavorable/noisy evidence rather than rerunning old SHAs.
-- Every new feature must fail closed outside its declared semantics.
+Roadmap: #1 Phase 3.3 move diagnostics.
+
+### Root cause already verified
+
+Current `crates/evo-lowering/src/move_state.rs` stores each binding as essentially:
+
+```text
+value_type + available: bool
+```
+
+When a move-only binding becomes unavailable, the source move location/reason is discarded.
+
+Current `crates/evo-diagnostics/src/lib.rs` exposes a one-primary-span `render_error` surface. A use-after-move error can point at the invalid use but cannot structurally point back to the Evolution source that consumed the value.
+
+## Start gate
+
+The docs-only post-fast-edit-run handoff must first:
+
+1. receive its own exact-head CI;
+2. remain docs-only;
+3. merge cleanly to `main`;
+4. have its post-merge main state verified.
+
+Only then start #69 implementation.
+
+## #69 implementation sequence
+
+After the handoff gate is green:
+
+1. verify live `main`, working diff, open PRs/issues and active CI;
+2. create `feature/move-diagnostics-v0` from the verified baseline;
+3. keep the first code patch focused on structured move provenance, not renderer cosmetics;
+4. extend move-state entries so unavailable move-only bindings retain a deterministic Evolution-source span and reason;
+5. preserve current availability/merge/reinitialization semantics exactly;
+6. propagate structured provenance through the Records/Enums ownership path;
+7. add a bounded related/secondary-span diagnostic renderer while keeping existing single-span rendering compatible;
+8. wire CLI lowering diagnostics to the related source location without exposing generated Rust;
+9. add focused unit + process-level tests;
+10. prove accepted generated Rust remains byte-for-byte unchanged;
+11. run normal exact-head CI and merge only after all gates pass.
+
+## Required #69 test matrix
+
+At minimum cover:
+
+- direct record move then reuse;
+- direct enum move then reuse;
+- by-value function argument consumption;
+- owned enum `match` consumption;
+- one continuing `if` branch moves the value;
+- terminal branch move does not poison continuation;
+- both continuing branches move the same value with deterministic provenance selection;
+- reinitialization clears old provenance and later moves record the new site;
+- repeat-body move identifies the body source responsible for later-iteration invalidity;
+- child-scope provenance disappears with the child binding;
+- missing-binding/type-mismatch diagnostics do not become fake move diagnostics;
+- related-span renderer handles UTF-8, tabs and zero-width spans;
+- single-span lexical/parser/rustc-remap rendering remains compatible.
+
+## Non-negotiable #69 boundaries
+
+- **No ownership semantic changes.** Existing valid/invalid program classification must remain the same except richer diagnostics.
+- **No generated Rust changes for accepted programs.** If generated bytes change, stop and explain why before treating the work as diagnostics-only.
+- **No runtime cost.** Diagnostic provenance is compile-time state only.
+- No borrowing, lifetimes, references, partial moves, clone insertion, Copy inference, field-level move semantics expansion, LSP protocol work or generalized diagnostics-framework redesign.
+- Existing #4/#5 Ubuntu runtime/performance gates must remain green even though no new runtime benchmark is required for a diagnostics-only slice.
 
 ## CI rule
 
-Never create duplicate active Actions for the same SHA/workflow/input. A failed SHA is evidence, not a retry button with emotional support.
+Never create duplicate active Actions for the same SHA/workflow/input.
+
+If a run is queued or in progress, track that run ID and continue independent work. Failed SHAs are retained evidence; do not rerun them merely to obtain a friendlier color.
