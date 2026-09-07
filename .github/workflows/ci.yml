@@ -44,6 +44,22 @@ jobs:
       - name: Test workspace
         run: cargo test --workspace
 
+      - name: Fast edit-run turnaround evidence
+        id: fast_edit_run_turnaround
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_TURNAROUND_OUT: ${{ github.workspace }}/target/evo-fast-edit-run-turnaround
+        run: cargo test -p evo-cli --test fast_edit_run_turnaround fast_edit_run_turnaround_reports_verified_warm_speedup -- --ignored --exact --nocapture
+
+      - name: Upload fast edit-run turnaround evidence
+        if: matrix.os == 'ubuntu-latest' && always() && steps.fast_edit_run_turnaround.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-fast-edit-run-turnaround-ubuntu-latest
+          path: target/evo-fast-edit-run-turnaround/
+          if-no-files-found: error
+
       - name: Benchmark harness smoke
         run: cargo run -p evo-bench -- run benchmarks/cases/arithmetic-smoke --out target/evo-bench-smoke --report-only
 

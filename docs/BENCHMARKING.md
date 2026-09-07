@@ -136,6 +136,30 @@ The report includes the rustc verbose version, host target, sample configuration
 
 `benchmarks/cases/arithmetic-smoke` exists to verify the full harness path across platforms. It is intentionally tiny and therefore **must not be cited as evidence that Evolution is faster than or equal to Rust at runtime**. Process startup and scheduler noise dominate such a case. Meaningful performance acceptance begins once Evolution can express workloads with runtime-dependent input and enough work to measure defensibly.
 
+## Developer-turnaround evidence
+
+Developer edit-run latency is a different metric from generated-program runtime parity. Tooling changes such as the verified `evo run` compile cache must not use a faster development loop to excuse a runtime regression, and the `T_evolution <= T_reference_rust` invariant does not claim that compiler/tooling latency equals program runtime.
+
+Fast edit-run v0 therefore has a separate controlled Ubuntu evidence test in `crates/evo-cli/tests/fast_edit_run_turnaround.rs`.
+
+The evidence procedure is:
+
+1. compile a small deterministic Evolution fixture through `evo run` using a real-rustc forwarding wrapper;
+2. take multiple cold samples with a fresh empty `EVO_CACHE_DIR` for every sample;
+3. prime one separate warm cache with an untimed run;
+4. take multiple unchanged warm samples against that verified cache;
+5. count real rustc compile invocations independently of wall-clock timing;
+6. verify expected program output on every sample;
+7. emit `report.md`, `report.json`, and `raw-samples.csv` as a CI artifact.
+
+Fast edit-run v0 passes this tooling gate only when:
+
+- measured warm runs perform zero rustc compilations;
+- warm output remains correct;
+- the warm median is below the cold median on the controlled Ubuntu runner.
+
+The first accepted evidence is recorded in `docs/FAST_EDIT_RUN_CACHE.md`. The exact speedup is evidence for that runner/run, not a cross-machine performance guarantee.
+
 ## Initial benchmark corpus
 
 ### Core language
@@ -202,6 +226,7 @@ The report includes the rustc verbose version, host target, sample configuration
 - Keep failed/regressed results as artifacts rather than deleting them.
 - A smoke case is not a performance claim.
 - A noisy CI result is not a PASS merely because its median happened to be favorable.
+- Developer-turnaround evidence must stay separate from generated-program runtime parity evidence.
 
 ## CI design
 
