@@ -20,12 +20,7 @@ pub(crate) fn resolve_call_name(
     let Some(schema) = records.schema(name) else {
         if !records.has_function(name) {
             let message = format!("unknown function {name:?}");
-            register_name_suggestion(
-                &message,
-                span,
-                name,
-                records.function_names(),
-            );
+            register_name_suggestion(&message, span, name, records.function_names());
         }
         return Ok(CallNameResolution::Function);
     };

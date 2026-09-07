@@ -208,7 +208,9 @@ impl TypeEnvironment {
     }
 
     pub(crate) fn has_function(&self, name: &str) -> bool {
-        self.function_names.iter().any(|candidate| candidate == name)
+        self.function_names
+            .iter()
+            .any(|candidate| candidate == name)
     }
 
     pub(crate) fn resolve_type_name(
@@ -218,12 +220,7 @@ impl TypeEnvironment {
     ) -> Result<SemanticType, LowerError> {
         let result = self.records.resolve_type_name(type_name, span);
         if let (Err(error), SyntaxTypeName::Named(name)) = (&result, type_name) {
-            register_name_suggestion(
-                &error.message,
-                error.span,
-                name,
-                self.record_names(),
-            );
+            register_name_suggestion(&error.message, error.span, name, self.record_names());
         }
         result
     }
@@ -249,18 +246,16 @@ impl TypeEnvironment {
                             &error.message,
                             error.span,
                             &field.name,
-                            schema.fields.iter().map(|candidate| candidate.name.as_str()),
+                            schema
+                                .fields
+                                .iter()
+                                .map(|candidate| candidate.name.as_str()),
                         );
                         break;
                     }
                 }
             } else {
-                register_name_suggestion(
-                    &error.message,
-                    error.span,
-                    name,
-                    self.record_names(),
-                );
+                register_name_suggestion(&error.message, error.span, name, self.record_names());
             }
         }
         result
@@ -303,7 +298,11 @@ pub(crate) fn collect_record_environment(
 ) -> Result<RecordEnvironment, LowerError> {
     reject_enum_declarations(program)?;
 
-    let record_names: Vec<String> = program.records.iter().map(|record| record.name.clone()).collect();
+    let record_names: Vec<String> = program
+        .records
+        .iter()
+        .map(|record| record.name.clone())
+        .collect();
     for record in &program.records {
         for field in &record.fields {
             if let SyntaxRecordFieldType::Named(name) = &field.type_name
@@ -419,7 +418,7 @@ mod tests {
             "enum Flag\nOff\nOn\nend\nvalue = Flag.On()\nmatch value\ncase Flag.On\nprint 1\nend\n",
         );
         let error = validate_record_declarations(&program)
-            .expect_err("non-exhaustive match should precede unsupported codegen gate");
+            .expect_err("non-exhaustive match should precede unsupported enum execution");
         assert!(error.message.contains("missing variant(s): Off"));
         assert_eq!(error.span.line, 6);
     }
