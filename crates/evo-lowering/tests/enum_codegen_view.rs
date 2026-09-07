@@ -70,7 +70,9 @@ fn codegen_view_borrows_structured_executable_enum_ir() {
     };
     assert_eq!(enum_name, "Wrapped");
     let some_arm = arms.get(1).expect("Some arm should exist");
-    let binding = some_arm.binding().expect("Some arm should bind its payload");
+    let binding = some_arm
+        .binding()
+        .expect("Some arm should bind its payload");
     assert_eq!(binding.name(), "x");
     assert_eq!(binding.value_type(), EnumCodegenValueType::Enum("Inner"));
 }

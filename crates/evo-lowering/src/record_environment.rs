@@ -61,10 +61,10 @@ mod enums_impl {
 
     pub(crate) use executable_ir::{
         ExecutableEnumIr, ExecutableEnumProgramIr, ExecutableEnumVariantIr, ExecutableExprIr,
-        ExecutableExprKind, ExecutableFunctionIr, ExecutableMatchArmIr,
-        ExecutableMatchBindingIr, ExecutableOwnershipMode, ExecutableParameterIr,
-        ExecutableRecordFieldIr, ExecutableRecordFieldValueIr, ExecutableRecordIr,
-        ExecutableStmtIr, ExecutableStmtKind, ExecutableValueType,
+        ExecutableExprKind, ExecutableFunctionIr, ExecutableMatchArmIr, ExecutableMatchBindingIr,
+        ExecutableOwnershipMode, ExecutableParameterIr, ExecutableRecordFieldIr,
+        ExecutableRecordFieldValueIr, ExecutableRecordIr, ExecutableStmtIr, ExecutableStmtKind,
+        ExecutableValueType,
     };
 
     fn collect_validated_enum_state(
