@@ -4,114 +4,80 @@ This file is intentionally operational. A fresh chat/agent should be able to res
 
 Last verified update: **2026-09-07**
 
-## Active P0
+## Current state
 
-Parent milestone: **#50 — Enums v0: nominal sum types + exhaustive static matching**
+Enums v0 parent: **#50 — nominal sum types + exhaustive static matching**
+Final child: **#62 — differential performance parity + final language spec sync**
 
-Stable `main` baseline:
+PR #65 is merged.
 
-- #61 / PR #64 squash merge: `a7b8c08a71283cffa15216c7359078f1c8a34873`
-- post-merge main CI #274 / run `34106421537`: **SUCCESS**
+- final PR head: `1c946af9d15946163b77a92f5d29c89f73469be2`
+- final PR CI #277 / run `34112029258`: **SUCCESS**
+- squash merge: `6c7bc8a4376966775728765444002f0b6774cd31`
+- post-merge main CI #278 / run `34114143728`: **ACTIVE**
 - Rust toolchain: **1.98.0**
 
-Active final child:
+Do not close #62 or #50 until #278 succeeds on exact merge SHA `6c7bc8a4376966775728765444002f0b6774cd31`.
 
-- **#62 — Enums v0 differential performance parity + final language spec sync**
-- PR: **#65 — `perf: add Enums v0 differential parity gate`**
-- feature branch: `feature/enums-performance-v0`
-- staging branch: `work/enums-performance-v0`
+## Accepted Enums v0 performance evidence
 
-## Retained first benchmark failure
+The first benchmark head `2c898fa6b845f12f78de99356441cf98afe0e23b`, CI #275 / `34107195001`, is a retained **FAILURE** and must not be rerun. The handwritten generated-style Rust reference did not exactly mirror emitter ordering/shape, so deterministic LLVM/binary parity was invalid there.
 
-Initial feature head `2c898fa6b845f12f78de99356441cf98afe0e23b` ran as CI #275 / run `34107195001` and **FAILED** at the first Enums timing gate. Never rerun it.
+Corrected head `69bc2d1b15db1bd841b85e8a508c156dc689550d`, CI #276 / `34108814832`: **SUCCESS**.
 
-Retained #275 Enums evidence:
+Accepted artifact evidence:
 
 - correctness: **PASS**
-- normalized LLVM IR equal: `false`
-- exact binary equal: `false`
-- reference median: `16,535,571 ns`
-- Evolution median: `16,547,263 ns`
-- ratio: `1.000707082`
-- stable: `true`
-- final verdict: **FAIL**
-- verdict basis: `timing-median-ratio`
-
-Root cause was a benchmark-reference equivalence defect: the handwritten generated-style Rust reference did not exactly mirror emitter ordering/shape. No compiler/codegen semantics were changed to obtain a better result.
-
-## Accepted corrected benchmark evidence
-
-Corrected feature head:
-
-- `69bc2d1b15db1bd841b85e8a508c156dc689550d`
-- CI #276 / run `34108814832`: **SUCCESS**
-- Ubuntu, macOS, Windows: **SUCCESS**
-- Enums artifact: `evo-bench-enums-ubuntu-latest`, artifact id `10014284630`
-
-The corrected head adds an exact reference/generated-Rust integration lock and retains Enums artifacts even on unfavorable verdicts.
-
-Accepted #276 Enums evidence:
-
-- exact benchmark reference == generated Rust after newline normalization: **PASS**
-- differential stdout/stderr/exit correctness: **PASS**
+- exact reference/generated-Rust lock: **PASS**
 - normalized LLVM IR equal: `true`
 - exact executable equal: `true`
-- reference binary: `2,267,072 B`
-- Evolution binary: `2,267,072 B`
+- binary size: `2,267,072 B` on both sides
 - reference median: `16,506,786 ns`
 - Evolution median: `16,520,050 ns`
-- reference p95: `16,596,414 ns`
-- Evolution p95: `16,619,046 ns`
-- relative MAD: `0.001764426` reference / `0.002294908` Evolution
-- stable: `true`
 - observed ratio: `1.000803548`
-- timing-only verdict: **FAIL**
+- timing-only verdict: **FAIL** retained visibly
 - final verdict: **PASS**
-- verdict basis: `byte-identical-binary-parity`
+- basis: `byte-identical-binary-parity`
 
-Under #4/#5, correctness PASS plus byte-identical executable parity is stronger deterministic runtime parity evidence. Raw timing remains retained instead of hidden.
+No compiler/lowering/codegen semantics were changed to obtain the corrected benchmark result.
 
-All previous Ubuntu runtime gates and the release build also passed on #276.
+## Language state
 
-## Spec sync
+`docs/LANGUAGE_SPEC_V0.md` now documents the implemented Enums v0 surface:
 
-Accepted performance evidence unlocked the final language-spec synchronization.
-
-`docs/LANGUAGE_SPEC_V0.md` now documents proven Enums v0 behavior only:
-
-- `enum` declaration grammar and declaration placement;
-- unit/single-payload variants;
+- nominal `enum` declarations;
+- unit and single-payload variants;
 - qualified `Enum.Variant(...)` construction;
-- nominal payload typing and by-value layout-cycle rejection;
+- static nominal payload typing and by-value layout-cycle rejection;
 - exhaustive statement-only `match` / `case`;
-- arm-local payload binding scope and typing;
-- enum move semantics and exact-type reinitialization;
+- arm-local typed payload bindings;
+- by-value enum ownership and exact-type reinitialization;
 - direct static Rust enum/constructor/match lowering;
-- source-map/diagnostic policy;
-- accepted #276 differential parity evidence;
-- explicit non-goals such as generics, guards, wildcard/or/nested patterns, methods, references and runtime reflection.
+- source-map/diagnostic behavior;
+- accepted differential parity evidence;
+- explicit non-goals including generics, guards, wildcard/or/nested patterns, methods, references and runtime reflection.
 
 ## Resume sequence
 
-1. Synchronize #62 / #50 / PR #65 / handoff docs with #276 evidence and the spec update.
-2. Compare final staging against feature and confirm only intended #62 code/benchmark/spec/docs changes.
-3. Because #276 is completed, fast-forward `feature/enums-performance-v0` to the final staging head with `force=false`.
-4. Let that final docs-synchronized SHA receive exactly one new CI run. Do not manually rerun #275 or #276.
-5. If final CI fails, fix the actual failure on a new SHA and let that SHA receive its own CI.
-6. When final CI is green, update PR #65 validation evidence with exact final SHA/run.
-7. Mark PR #65 ready for review.
-8. Re-read PR head and mergeability, then squash-merge with `expected_head_sha` equal to the verified final head.
-9. Fetch post-merge `main` push CI for the returned squash SHA and verify it to completion.
-10. Only after post-merge main SUCCESS: close #62, complete/close parent #50, and update durable docs from merged-main evidence.
+1. Check CI #278 / run `34114143728` for exact merge SHA `6c7bc8a4376966775728765444002f0b6774cd31`.
+2. Never rerun old #275/#276/#277 runs merely to obtain another result.
+3. If #278 fails, inspect the actual failed job/log and fix the real issue on a new SHA. Do not close #62/#50.
+4. If #278 succeeds:
+   - update #62 and #50 with merged-main success;
+   - close #62 as completed;
+   - close #50 as completed;
+   - update `docs/PROJECT_STATE.md` and this file from merged-main evidence;
+   - update continuity issue #40;
+   - then move to the next roadmap action.
+5. After #50 closure, atomize one new P0 weakness from #6 under parent #2. Do not invent or start a new feature before the Enums parent is closed.
 
 ## Engineering constraints
 
 - No hidden clone, allocation, boxing, GC/RC, runtime map, reflection metadata or dynamic dispatch.
-- Evolution and reference Rust benchmark sides must perform the same work under the same compiler path.
-- Do not weaken previous performance gates.
-- Preserve unfavorable/noisy benchmark evidence rather than rerunning old SHAs.
-- No generics, guards, wildcard/or/arbitrary nested patterns, borrow inference, methods or reflection as collateral work.
+- Do not weaken previous runtime/performance gates.
+- Preserve unfavorable/noisy benchmark evidence instead of rerunning old SHAs.
+- Unsupported future ergonomics remain fail-closed until separately designed and proven.
 
 ## CI rule
 
-A running CI is work in progress, not a reason to create duplicate Actions. A failed SHA is evidence, not a slot machine lever.
+A running CI is work in progress, not a reason to create duplicate Actions. A failed SHA is evidence, not a slot-machine lever.
