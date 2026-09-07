@@ -65,7 +65,14 @@ pub fn clear_related_location() {
 pub fn render_error(path: &Path, source: &str, message: &str, span: Span) -> String {
     let related = take_related_location(message, span);
     let help = take_help(message, span);
-    render_error_with_context(path, source, message, span, related.as_ref(), help.as_deref())
+    render_error_with_context(
+        path,
+        source,
+        message,
+        span,
+        related.as_ref(),
+        help.as_deref(),
+    )
 }
 
 #[must_use]

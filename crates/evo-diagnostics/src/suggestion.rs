@@ -105,10 +105,22 @@ mod tests {
 
     #[test]
     fn suggests_single_insert_delete_substitute_or_transpose() {
-        assert_eq!(best_suggestion("coun", ["count"].into_iter()), Some("count".to_owned()));
-        assert_eq!(best_suggestion("countt", ["count"].into_iter()), Some("count".to_owned()));
-        assert_eq!(best_suggestion("coumt", ["count"].into_iter()), Some("count".to_owned()));
-        assert_eq!(best_suggestion("coutn", ["count"].into_iter()), Some("count".to_owned()));
+        assert_eq!(
+            best_suggestion("coun", ["count"].into_iter()),
+            Some("count".to_owned())
+        );
+        assert_eq!(
+            best_suggestion("countt", ["count"].into_iter()),
+            Some("count".to_owned())
+        );
+        assert_eq!(
+            best_suggestion("coumt", ["count"].into_iter()),
+            Some("count".to_owned())
+        );
+        assert_eq!(
+            best_suggestion("coutn", ["count"].into_iter()),
+            Some("count".to_owned())
+        );
     }
 
     #[test]
