@@ -39,51 +39,59 @@ Merged Enums v0 now has nominal declarations, qualified constructors, exhaustive
 
 ## First benchmark run — retained failure
 
-First feature head:
+Initial feature head `2c898fa6b845f12f78de99356441cf98afe0e23b` ran as CI #275 / `34107195001` and **FAILED** at the new Enums performance gate. It must not be rerun.
 
-- `2c898fa6b845f12f78de99356441cf98afe0e23b`
-- CI #275 / run `34107195001`: **FAILURE**
+Everything before that new gate remained green, including the new native same-type enum reinitialization process test on Ubuntu, Windows and macOS.
 
-The failure is retained and must not be rerun.
-
-All existing Ubuntu runtime/performance gates before the new Enums gate remained green. Ubuntu/Windows/macOS fmt, Clippy and workspace tests were green, and the new native same-type enum reinitialization process test passed.
-
-The first Enums differential result was:
+#275 Enums evidence:
 
 - correctness: **PASS**
 - normalized LLVM IR equal: `false`
 - exact binary equal: `false`
 - reference median: `16,535,571 ns`
 - Evolution median: `16,547,263 ns`
-- observed ratio: `1.000707082`
+- ratio: `1.000707082`
 - stable: `true`
-- timing verdict: **FAIL**
-- final verdict: **FAIL**
+- timing verdict/final verdict: **FAIL**
 - verdict basis: `timing-median-ratio`
 
-This run exposed a benchmark reference-equivalence defect. The handwritten generated-style Rust reference did not mirror the actual emitter ordering/shape: codegen emits `enum -> input helper -> function -> main`, while the initial reference used `enum -> function -> input helper -> main`; exact condition/arm formatting also differed. Therefore LLVM and binary identity were not a valid deterministic parity check on #275.
+The benchmark reference was not actually identical to the emitter output: declaration/helper/function ordering and exact condition/arm formatting differed. That invalidated deterministic LLVM/binary parity for #275. The unfavorable timing result remains preserved rather than rerun away.
 
-The timing failure remains recorded; it is not overwritten by another run of the same SHA.
+## Corrected benchmark contract
 
-## Current staging correction
+Feature head is now:
 
-Current staging contains three targeted corrections beyond the #275 feature head:
+- `69bc2d1b15db1bd841b85e8a508c156dc689550d`
+- authoritative run: CI #276 / `34108814832`
 
-1. `Upload Enums v0 report` uses `always()` so unfavorable or inconclusive benchmark artifacts are retained.
+The corrected head changes benchmark/evidence infrastructure only:
+
+1. Enums artifact upload runs with `always()` so unfavorable/inconclusive reports survive.
 2. `benchmarks/cases/enums-v0/reference.rs` mirrors actual generated Rust ordering/shape.
-3. `crates/evo-bench/tests/enums_reference.rs` asserts that the Enums benchmark reference and generated Rust are exactly equal after newline normalization, analogous to the existing function-call benchmark lock.
+3. `crates/evo-bench/tests/enums_reference.rs` asserts exact reference/generated Rust equality after newline normalization.
+4. Durable docs retain the #275 failure/root cause.
 
-No compiler or codegen semantics were changed merely to improve timing.
+No compiler/lowering/codegen semantics changed merely to improve timing.
+
+At the last verified #276 state:
+
+- Windows: **SUCCESS**
+- macOS: **SUCCESS**
+- Ubuntu: queued
+
+Therefore the exact-reference integration lock has already passed on two supported platforms. Performance is still pending Ubuntu evidence.
+
+Staging is intentionally allowed to move ahead of the feature branch only with documentation while #276 is active. Do not fast-forward feature again until #276 completes.
 
 ## Benchmark design
 
-`benchmarks/cases/enums-v0` remains runtime-dependent and exercises the feature in the hot path:
+`benchmarks/cases/enums-v0`:
 
-- stdin: `n = 20,000,000`, initial `x = 9`;
+- runtime stdin: `20,000,000` iterations, initial `x = 9`;
 - expected stdout: `15099959897`;
 - two scalar-payload `Step` variants;
 - by-value enum return from `classify`;
-- constructor + exhaustive match + payload binding on every loop iteration;
+- constructor + exhaustive match + payload binding on every iteration;
 - recurrence visits both variants;
 - warmup=3, samples=13, timeout=5000 ms, max relative MAD=0.15.
 
@@ -91,29 +99,20 @@ Evolution and reference Rust must use the same static enum layout, payload types
 
 ## #62 acceptance discipline
 
-Retain actual harness evidence for:
+Retain actual harness evidence for correctness, generated Rust, normalized LLVM, binary equality/size, raw samples, median/p95/MAD, normalized ratio and final PASS/FAIL/INCONCLUSIVE verdict.
 
-- differential stdout/stderr/exit correctness;
-- generated Rust direct static lowering;
-- no hidden allocation/boxing/clone/dispatch/runtime metadata;
-- normalized LLVM comparison where meaningful;
-- exact executable equality where achievable;
-- binary sizes;
-- raw timing samples, median, p95, MAD and normalized ratio;
-- PASS/FAIL/INCONCLUSIVE exactly according to #4/#5.
+Correctness must pass first. With the exact-reference lock, byte-identical binary parity is stronger deterministic runtime parity evidence when achieved. Otherwise stable `T_evolution / T_reference <= 1.00` is required. Noisy measurement is INCONCLUSIVE, never PASS.
 
-Correctness must pass before timing. Byte-identical binary parity is stronger deterministic parity evidence when achieved. Otherwise stable `T_evolution / T_reference <= 1.00` is required. Noisy measurement is INCONCLUSIVE, never PASS.
+`docs/LANGUAGE_SPEC_V0.md` remains unchanged until corrected performance evidence is accepted.
 
 ## Parent #50 remaining items
 
-Merged-main evidence already covers syntax/type/match/ownership/codegen/source-map/native correctness. The new process-level explicit reinitialization case passed #275 on all supported platforms, but #50 should be finalized only after #62 itself merges and post-merge main CI is green.
-
-Still open:
+The explicit same-type reinitialization process case is now proven by #275 on all supported platforms. Parent closure still waits for:
 
 - accepted dedicated Enums differential performance evidence;
-- final `docs/LANGUAGE_SPEC_V0.md` synchronization from accepted behavior/performance evidence;
+- final `docs/LANGUAGE_SPEC_V0.md` synchronization;
 - #62 merge + post-merge main CI;
-- final #50 closure.
+- final #50 closure from merged-main evidence.
 
 ## ZERO-cost boundary
 
