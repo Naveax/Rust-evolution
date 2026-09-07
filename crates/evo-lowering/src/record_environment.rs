@@ -338,12 +338,7 @@ fn register_record_declaration_suggestions(program: &SyntaxProgram) {
                     "unknown record type {name:?} for field {:?} in record {:?}",
                     field.name, record.name
                 );
-                register_name_suggestion(
-                    &message,
-                    field.span,
-                    name,
-                    record_names.iter().copied(),
-                );
+                register_name_suggestion(&message, field.span, name, record_names.iter().copied());
             }
         }
     }
