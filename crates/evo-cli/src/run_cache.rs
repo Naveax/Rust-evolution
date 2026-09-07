@@ -56,7 +56,7 @@ impl RunCache {
         generated_source: &str,
         compiler_fingerprint: &str,
     ) -> Result<Self, String> {
-        let root = cache_root().join(CACHE_LAYOUT);
+        let root = cache_root()?.join(CACHE_LAYOUT);
         fs::create_dir_all(&root)
             .map_err(|error| format!("failed to create run cache {}: {error}", root.display()))?;
 
@@ -84,6 +84,9 @@ impl RunCache {
         for entry in entries.flatten() {
             let name = entry.file_name();
             if !name.to_string_lossy().starts_with(&prefix) {
+                continue;
+            }
+            if !entry.file_type().ok()?.is_dir() {
                 continue;
             }
 
@@ -161,53 +164,62 @@ impl RunCache {
     }
 
     fn entry_is_valid(&self, dir: &Path) -> bool {
-        if fs::read(dir.join("complete")).ok().as_deref() != Some(COMPLETE_MARKER) {
+        if !exact_regular_file(dir.join("complete"), COMPLETE_MARKER) {
             return false;
         }
-        if fs::read(dir.join("source.evo")).ok().as_deref() != Some(&self.evolution_source) {
+        if !exact_regular_file(dir.join("source.evo"), &self.evolution_source) {
             return false;
         }
-        if fs::read(dir.join("generated.rs")).ok().as_deref() != Some(&self.generated_source) {
+        if !exact_regular_file(dir.join("generated.rs"), &self.generated_source) {
             return false;
         }
-        if fs::read(dir.join("compiler.txt")).ok().as_deref()
-            != Some(&self.compiler_fingerprint)
-        {
+        if !exact_regular_file(dir.join("compiler.txt"), &self.compiler_fingerprint) {
             return false;
         }
 
-        fs::metadata(dir.join(binary_name()))
-            .map(|metadata| metadata.is_file())
-            .unwrap_or(false)
+        regular_file_without_symlink(&dir.join(binary_name()))
     }
 }
 
-fn cache_root() -> PathBuf {
+fn exact_regular_file(path: PathBuf, expected: &[u8]) -> bool {
+    regular_file_without_symlink(&path)
+        && fs::read(path)
+            .map(|actual| actual == expected)
+            .unwrap_or(false)
+}
+
+fn regular_file_without_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_file() && !metadata.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+fn cache_root() -> Result<PathBuf, String> {
     if let Some(path) = env::var_os("EVO_CACHE_DIR").filter(|value| !value.is_empty()) {
-        return PathBuf::from(path);
+        return Ok(PathBuf::from(path));
     }
 
     #[cfg(windows)]
     if let Some(path) = env::var_os("LOCALAPPDATA").filter(|value| !value.is_empty()) {
-        return PathBuf::from(path).join("RustEvolution");
+        return Ok(PathBuf::from(path).join("RustEvolution"));
     }
 
     #[cfg(target_os = "macos")]
     if let Some(home) = env::var_os("HOME").filter(|value| !value.is_empty()) {
-        return PathBuf::from(home).join("Library/Caches/rust-evolution");
+        return Ok(PathBuf::from(home).join("Library/Caches/rust-evolution"));
     }
 
     #[cfg(not(any(windows, target_os = "macos")))]
     {
         if let Some(path) = env::var_os("XDG_CACHE_HOME").filter(|value| !value.is_empty()) {
-            return PathBuf::from(path).join("rust-evolution");
+            return Ok(PathBuf::from(path).join("rust-evolution"));
         }
         if let Some(home) = env::var_os("HOME").filter(|value| !value.is_empty()) {
-            return PathBuf::from(home).join(".cache/rust-evolution");
+            return Ok(PathBuf::from(home).join(".cache/rust-evolution"));
         }
     }
 
-    env::temp_dir().join("rust-evolution-cache")
+    Err("no per-user cache directory is available".to_owned())
 }
 
 fn binary_name() -> OsString {
@@ -265,7 +277,11 @@ fn prune_cache_entries(root: &Path, keep: &Path) {
 
     cached.sort_by_key(|(modified, _)| *modified);
     let remove_count = cached.len() - MAX_CACHE_ENTRIES;
-    for (_, path) in cached.into_iter().filter(|(_, path)| path != keep).take(remove_count) {
+    for (_, path) in cached
+        .into_iter()
+        .filter(|(_, path)| path.as_path() != keep)
+        .take(remove_count)
+    {
         let _ = fs::remove_dir_all(path);
     }
 }
