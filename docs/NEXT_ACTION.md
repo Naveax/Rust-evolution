@@ -4,80 +4,88 @@ This file is intentionally operational. A fresh chat/agent should be able to res
 
 Last verified update: **2026-09-07**
 
-## Current state
+## Stable baseline
 
-Enums v0 parent: **#50 — nominal sum types + exhaustive static matching**
-Final child: **#62 — differential performance parity + final language spec sync**
+Enums v0 milestone **#50 is completed**. Final child **#62 is completed**.
 
-PR #65 is merged.
+Authoritative `main`:
 
-- final PR head: `1c946af9d15946163b77a92f5d29c89f73469be2`
-- final PR CI #277 / run `34112029258`: **SUCCESS**
-- squash merge: `6c7bc8a4376966775728765444002f0b6774cd31`
-- post-merge main CI #278 / run `34114143728`: **ACTIVE**
+- `6c7bc8a4376966775728765444002f0b6774cd31`
+- PR #65 squash merge
+- post-merge CI #278 / run `34114143728`: **SUCCESS**
 - Rust toolchain: **1.98.0**
 
-Do not close #62 or #50 until #278 succeeds on exact merge SHA `6c7bc8a4376966775728765444002f0b6774cd31`.
+Final PR evidence:
+
+- final PR head `1c946af9d15946163b77a92f5d29c89f73469be2`
+- CI #277 / run `34112029258`: **SUCCESS** on Ubuntu/macOS/Windows
+
+Ubuntu #278 passed fmt, Clippy, workspace tests, benchmark smoke, runtime-repeat, control-flow, logical-operators, function-call, block-locals, Records v0, Enums v0 and release-build gates. macOS and Windows quality/release jobs also passed.
 
 ## Accepted Enums v0 performance evidence
 
-The first benchmark head `2c898fa6b845f12f78de99356441cf98afe0e23b`, CI #275 / `34107195001`, is a retained **FAILURE** and must not be rerun. The handwritten generated-style Rust reference did not exactly mirror emitter ordering/shape, so deterministic LLVM/binary parity was invalid there.
+Retained first failure:
 
-Corrected head `69bc2d1b15db1bd841b85e8a508c156dc689550d`, CI #276 / `34108814832`: **SUCCESS**.
+- head `2c898fa6b845f12f78de99356441cf98afe0e23b`
+- CI #275 / run `34107195001`: **FAILURE**, never rerun
+- correctness PASS
+- normalized LLVM equal `false`
+- exact executable equal `false`
+- ratio `1.000707082`
+- basis `timing-median-ratio`
 
-Accepted artifact evidence:
+Corrected accepted evidence:
 
-- correctness: **PASS**
-- exact reference/generated-Rust lock: **PASS**
-- normalized LLVM IR equal: `true`
-- exact executable equal: `true`
-- binary size: `2,267,072 B` on both sides
-- reference median: `16,506,786 ns`
-- Evolution median: `16,520,050 ns`
-- observed ratio: `1.000803548`
-- timing-only verdict: **FAIL** retained visibly
-- final verdict: **PASS**
-- basis: `byte-identical-binary-parity`
+- head `69bc2d1b15db1bd841b85e8a508c156dc689550d`
+- CI #276 / run `34108814832`: **SUCCESS**
+- correctness PASS
+- exact reference/generated-Rust lock PASS
+- normalized LLVM equal `true`
+- exact executable equal `true`
+- binary size `2,267,072 B` on both sides
+- reference median `16,506,786 ns`
+- Evolution median `16,520,050 ns`
+- ratio `1.000803548`
+- timing-only verdict FAIL retained visibly
+- final verdict PASS
+- basis `byte-identical-binary-parity`
 
 No compiler/lowering/codegen semantics were changed to obtain the corrected benchmark result.
 
-## Language state
+## Implemented language state
 
-`docs/LANGUAGE_SPEC_V0.md` now documents the implemented Enums v0 surface:
+`docs/LANGUAGE_SPEC_V0.md` is the current implemented-language source. Enums v0 now includes nominal declarations, unit/single-payload variants, qualified constructors, exhaustive statement-only matching, arm-local typed payload bindings, by-value ownership/reinitialization, direct static Rust lowering, source-native diagnostics/source maps and accepted performance evidence.
 
-- nominal `enum` declarations;
-- unit and single-payload variants;
-- qualified `Enum.Variant(...)` construction;
-- static nominal payload typing and by-value layout-cycle rejection;
-- exhaustive statement-only `match` / `case`;
-- arm-local typed payload bindings;
-- by-value enum ownership and exact-type reinitialization;
-- direct static Rust enum/constructor/match lowering;
-- source-map/diagnostic behavior;
-- accepted differential parity evidence;
-- explicit non-goals including generics, guards, wildcard/or/nested patterns, methods, references and runtime reflection.
+Unsupported future ergonomics remain outside the current spec and fail closed.
 
-## Resume sequence
+## Next active task
 
-1. Check CI #278 / run `34114143728` for exact merge SHA `6c7bc8a4376966775728765444002f0b6774cd31`.
-2. Never rerun old #275/#276/#277 runs merely to obtain another result.
-3. If #278 fails, inspect the actual failed job/log and fix the real issue on a new SHA. Do not close #62/#50.
-4. If #278 succeeds:
-   - update #62 and #50 with merged-main success;
-   - close #62 as completed;
-   - close #50 as completed;
-   - update `docs/PROJECT_STATE.md` and this file from merged-main evidence;
-   - update continuity issue #40;
-   - then move to the next roadmap action.
-5. After #50 closure, atomize one new P0 weakness from #6 under parent #2. Do not invent or start a new feature before the Enums parent is closed.
+Master roadmap #1 now requires:
+
+> **Atomize one new P0 weakness from #6 under parent #2.**
+
+No next feature has been selected yet. Do not jump directly into implementation.
+
+Selection work must:
+
+1. inspect #6 against current implemented capabilities;
+2. choose one bounded, high-impact weakness;
+3. define the measurable problem and user scenario;
+4. classify layer and cost class;
+5. define semantics/correctness and safety boundaries;
+6. define required source-native diagnostics/tooling behavior;
+7. define test and differential benchmark needs under #4/#5;
+8. create one focused P0 issue before implementation branches are opened.
+
+Prefer a problem that is useful, independently measurable and small enough to preserve the current evidence discipline. Do not smuggle in generics, async, methods, borrowing, collections, error handling and scripting all at once merely because humans enjoy impossible milestones.
 
 ## Engineering constraints
 
-- No hidden clone, allocation, boxing, GC/RC, runtime map, reflection metadata or dynamic dispatch.
-- Do not weaken previous runtime/performance gates.
-- Preserve unfavorable/noisy benchmark evidence instead of rerunning old SHAs.
-- Unsupported future ergonomics remain fail-closed until separately designed and proven.
+- No hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch unless a future feature explicitly declares a different cost class.
+- Do not weaken existing runtime/performance gates.
+- Preserve unfavorable/noisy evidence rather than rerunning old SHAs.
+- Every new feature must fail closed outside its declared semantics.
 
 ## CI rule
 
-A running CI is work in progress, not a reason to create duplicate Actions. A failed SHA is evidence, not a slot-machine lever.
+Never create duplicate active Actions for the same SHA/workflow/input. A failed SHA is evidence, not a retry button with emotional support.
