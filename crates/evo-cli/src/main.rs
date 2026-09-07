@@ -311,15 +311,16 @@ fn parse_rustc_short_error_line(line: &str) -> Option<RustcShortError> {
     })
 }
 
-fn run_generated(program: &LoadedProgram, source_path: &Path, use_cache: bool) -> Result<(), String> {
+fn run_generated(
+    program: &LoadedProgram,
+    source_path: &Path,
+    use_cache: bool,
+) -> Result<(), String> {
     if use_cache {
         let rustc = selected_rustc();
         if let Some(fingerprint) = compiler_fingerprint(&rustc)
-            && let Ok(cache) = RunCache::new(
-                &program.source,
-                &program.generated.source,
-                &fingerprint,
-            )
+            && let Ok(cache) =
+                RunCache::new(&program.source, &program.generated.source, &fingerprint)
         {
             if let Some(binary) = cache.lookup() {
                 return execute_runnable(binary);
