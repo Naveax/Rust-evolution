@@ -41,16 +41,113 @@ fn assert_check_fails_before_rustc(
     assert!(!stderr.contains("rustc failed"), "{stderr}");
 }
 
+fn native_enum_source() -> &'static str {
+    concat!(
+        "enum MaybeInt\n",
+        "None\n",
+        "Some int\n",
+        "end\n",
+        "fn unwrap(value MaybeInt) int\n",
+        "match value\n",
+        "case MaybeInt.None\n",
+        "return 0\n",
+        "case MaybeInt.Some(x)\n",
+        "return x\n",
+        "end\n",
+        "end\n",
+        "value = MaybeInt.Some(42)\n",
+        "print unwrap(value)\n",
+    )
+}
+
 #[test]
-fn check_promoted_enum_program_fails_closed_at_rust_codegen_boundary() {
-    assert_check_fails_before_rustc(
-        "enums-check-gate",
-        "maybe-int.evo",
-        "enum MaybeInt\nNone\nSome int\nend\nprint 1\n",
-        "Rust enum/match codegen is not implemented yet",
-        1,
-        1,
+fn check_accepts_valid_promoted_enum_program() {
+    let dir = temp_dir("enums-check-native");
+    fs::create_dir_all(&dir).expect("temporary directory should be created");
+    let source = dir.join("maybe-int.evo");
+    fs::write(&source, native_enum_source()).expect("enum source should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_evo"))
+        .arg("check")
+        .arg(&source)
+        .output()
+        .expect("evo check should run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(stdout, "ok\n");
+    assert!(!stderr.contains("rustc failed"), "{stderr}");
+    assert!(!stderr.contains("main.rs"), "{stderr}");
+}
+
+#[test]
+fn emit_rust_uses_static_enum_and_match_without_runtime_scaffolding() {
+    let dir = temp_dir("enums-emit-rust");
+    fs::create_dir_all(&dir).expect("temporary directory should be created");
+    let source = dir.join("maybe-int.evo");
+    fs::write(&source, native_enum_source()).expect("enum source should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_evo"))
+        .arg("emit-rust")
+        .arg(&source)
+        .output()
+        .expect("evo emit-rust should run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let rust = String::from_utf8(output.stdout).expect("generated Rust should be UTF-8");
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(output.status.success(), "{stderr}");
+    assert!(rust.contains("enum __EvoEnum_MaybeInt {"), "{rust}");
+    assert!(rust.contains("__EvoVariant_None,"), "{rust}");
+    assert!(rust.contains("__EvoVariant_Some(i64),"), "{rust}");
+    assert!(
+        rust.contains("__EvoEnum_MaybeInt::__EvoVariant_Some(__evo_x) => {"),
+        "{rust}"
     );
+    assert!(!rust.contains(".clone("), "{rust}");
+    assert!(!rust.contains("Box<"), "{rust}");
+    assert!(!rust.contains("Rc<"), "{rust}");
+    assert!(!rust.contains("Arc<"), "{rust}");
+    assert!(!rust.contains("HashMap"), "{rust}");
+}
+
+#[test]
+fn build_and_run_compile_static_enum_program_natively() {
+    let dir = temp_dir("enums-native-build-run");
+    fs::create_dir_all(&dir).expect("temporary directory should be created");
+    let source = dir.join("maybe-int.evo");
+    let binary = dir.join(format!("maybe-int{}", env::consts::EXE_SUFFIX));
+    fs::write(&source, native_enum_source()).expect("enum source should be written");
+
+    let build = Command::new(env!("CARGO_BIN_EXE_evo"))
+        .arg("build")
+        .arg(&source)
+        .arg(&binary)
+        .output()
+        .expect("evo build should run");
+    let build_stderr = String::from_utf8_lossy(&build.stderr);
+    assert!(build.status.success(), "{build_stderr}");
+    assert!(binary.exists(), "enum build should produce a native binary");
+
+    let binary_run = Command::new(&binary)
+        .output()
+        .expect("compiled enum binary should run");
+    let binary_stderr = String::from_utf8_lossy(&binary_run.stderr);
+    assert!(binary_run.status.success(), "{binary_stderr}");
+    assert_eq!(binary_run.stdout, b"42\n");
+
+    let cli_run = Command::new(env!("CARGO_BIN_EXE_evo"))
+        .arg("run")
+        .arg(&source)
+        .output()
+        .expect("evo run should compile and run enum source");
+    let cli_stderr = String::from_utf8_lossy(&cli_run.stderr);
+    assert!(cli_run.status.success(), "{cli_stderr}");
+    assert_eq!(cli_run.stdout, b"42\n");
+
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
