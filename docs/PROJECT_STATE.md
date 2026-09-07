@@ -9,31 +9,33 @@ This file is the durable project handoff. Fresh sessions should read `AGENTS.md`
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
 - Rust toolchain: **1.98.0**
-- Current merged `main` candidate: `6c7bc8a4376966775728765444002f0b6774cd31`
-- Post-merge main CI #278 / run `34114143728`: **ACTIVE**
+- Authoritative `main`: `6c7bc8a4376966775728765444002f0b6774cd31`
+- Post-merge main CI #278 / run `34114143728`: **SUCCESS**
 
-Do not treat the Enums milestone as closed until that exact push run succeeds.
+## Completed core data-model milestones
 
-## Records v0 baseline
+### Records v0
 
 Records v0 remains the accepted ZERO-cost nominal product-type baseline with direct static Rust lowering, explicit by-value ownership, source-native diagnostics and its differential performance gate preserved.
 
-## Enums v0 milestone — #50
+### Enums v0 — #50
 
-Delivery slices are merged:
+**COMPLETED** from merged-main evidence.
+
+Delivered slices:
 
 - #51 parser/formatter surface;
 - #54 semantic umbrella;
 - #60 ownership / PR #63;
-- #61 static executable codegen/source maps/native correctness / PR #64;
+- #61 executable static Rust codegen/source maps/native correctness / PR #64;
 - #62 differential performance + final language-spec sync / PR #65.
 
-Final #65 evidence:
+Final evidence:
 
-- final PR head: `1c946af9d15946163b77a92f5d29c89f73469be2`
-- final PR CI #277 / run `34112029258`: **SUCCESS** on Ubuntu/macOS/Windows
-- squash merge: `6c7bc8a4376966775728765444002f0b6774cd31`
-- post-merge main CI #278 / run `34114143728`: **ACTIVE**
+- final PR #65 head `1c946af9d15946163b77a92f5d29c89f73469be2`;
+- final PR CI #277 / run `34112029258`: **SUCCESS** on Ubuntu/macOS/Windows;
+- squash merge `6c7bc8a4376966775728765444002f0b6774cd31`;
+- post-merge main CI #278 / run `34114143728`: **SUCCESS**.
 
 Merged Enums v0 includes:
 
@@ -49,13 +51,13 @@ Merged Enums v0 includes:
 - dedicated differential performance evidence;
 - no hidden clone/allocation/boxing/GC/RC/runtime maps/reflection/dynamic dispatch.
 
-## Performance evidence
+## Enums v0 performance evidence
 
 ### Retained first failure
 
 Initial #62 head `2c898fa6b845f12f78de99356441cf98afe0e23b`, CI #275 / `34107195001`: **FAILURE**, never rerun.
 
-The handwritten generated-style Rust benchmark reference did not exactly mirror actual emitter ordering/shape. Its Enums result was:
+The handwritten generated-style Rust benchmark reference did not exactly mirror actual emitter ordering/shape. Its result remains preserved:
 
 - correctness PASS;
 - normalized LLVM equal `false`;
@@ -64,56 +66,56 @@ The handwritten generated-style Rust benchmark reference did not exactly mirror 
 - final verdict FAIL;
 - basis `timing-median-ratio`.
 
-The failure remains preserved as evidence.
-
 ### Accepted corrected parity
 
 Corrected head `69bc2d1b15db1bd841b85e8a508c156dc689550d`, CI #276 / `34108814832`: **SUCCESS**.
 
-Accepted Enums artifact evidence:
+Accepted evidence:
 
-- exact reference/generated-Rust integration lock: PASS;
-- differential correctness: PASS;
-- normalized LLVM IR equal: `true`;
-- exact executable equal: `true`;
-- binary size: `2,267,072 B` on both sides;
-- reference median: `16,506,786 ns`;
-- Evolution median: `16,520,050 ns`;
-- ratio: `1.000803548`;
-- stable: `true`;
-- timing-only verdict: FAIL retained visibly;
-- final verdict: PASS;
-- basis: `byte-identical-binary-parity`.
+- exact reference/generated-Rust integration lock PASS;
+- differential correctness PASS;
+- normalized LLVM IR equal `true`;
+- exact executable equal `true`;
+- binary size `2,267,072 B` on both sides;
+- reference median `16,506,786 ns`;
+- Evolution median `16,520,050 ns`;
+- ratio `1.000803548`;
+- timing-only verdict FAIL retained visibly;
+- final verdict PASS;
+- basis `byte-identical-binary-parity`.
 
 Correctness PASS plus byte-identical executables is accepted stronger deterministic runtime parity evidence under #4/#5. No compiler/lowering/codegen semantics were changed merely to obtain a friendlier benchmark result.
 
-All previous Ubuntu runtime/performance gates remained green on #276 and final PR head #277.
+Final PR head #277 and merged-main #278 kept all previous Ubuntu runtime/performance gates green.
 
 ## Language specification
 
-`docs/LANGUAGE_SPEC_V0.md` now contains the implemented Enums v0 behavior and accepted performance evidence. Vision-only enum ergonomics remain outside the current spec.
+`docs/LANGUAGE_SPEC_V0.md` is the current implemented-language source. It now includes the completed Enums v0 grammar, semantics, ownership, static Rust lowering, diagnostics/source maps and accepted performance evidence.
 
-Explicit non-goals for this slice include generic enums, `Option`/`Result` sugar, guards, wildcard/or/arbitrary nested patterns, methods/impl/derive/traits, references/borrow inference and runtime reflection.
+Vision-only ergonomics remain outside the current spec until separately implemented and proven.
 
-## Current closure gate
+## Current active roadmap state
 
-#62 and parent #50 remain open solely because post-merge `main` CI #278 is still active.
+There is no selected implementation feature after Enums v0 yet.
 
-If #278 succeeds:
+Master roadmap #1 says the next Phase-1 step is to atomize one new P0 weakness from #6 under parent #2 and then repeat the project methodology:
 
-1. mark merged-main verification complete on #62 and #50;
-2. close #62;
-3. close #50;
-4. synchronize this file, `docs/NEXT_ACTION.md`, and continuity issue #40 with the final merged-main result;
-5. then atomize one new P0 weakness from #6 under parent #2.
+1. define the measurable weakness and user scenario;
+2. identify layer/root cause;
+3. define semantics/correctness and safety boundaries;
+4. assign ZERO / EXPLICIT / MANAGED cost expectations where relevant;
+5. define source diagnostics/tooling expectations;
+6. design tests and #4/#5 differential performance evidence where applicable;
+7. create a focused P0 issue;
+8. only then start implementation branches.
 
-Do not begin a new language feature before #50 closes.
+Do not treat broad categories such as collections, errors, borrow ergonomics, scripting, methods, generics or async as one ticket.
 
 ## ZERO-cost boundary
 
 Current accepted Core-language slices must not silently introduce hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
 
-Future syntax/ergonomics must keep failing closed until semantics, safety, codegen and #4/#5 performance evidence are explicitly established.
+Future syntax/ergonomics must fail closed until semantics, safety, codegen and performance/cost behavior are explicitly established.
 
 ## Durable continuation infrastructure
 
