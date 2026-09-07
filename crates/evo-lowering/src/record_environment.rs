@@ -297,32 +297,14 @@ pub(crate) fn collect_record_environment(
     program: &SyntaxProgram,
 ) -> Result<RecordEnvironment, LowerError> {
     reject_enum_declarations(program)?;
+    register_record_declaration_suggestions(program);
 
-    let record_names: Vec<String> = program
+    let records = records_impl::collect_record_environment(program)?;
+    let record_names = program
         .records
         .iter()
         .map(|record| record.name.clone())
         .collect();
-    for record in &program.records {
-        for field in &record.fields {
-            if let SyntaxRecordFieldType::Named(name) = &field.type_name
-                && !record_names.iter().any(|candidate| candidate == name)
-            {
-                let message = format!(
-                    "unknown record type {name:?} for field {:?} in record {:?}",
-                    field.name, record.name
-                );
-                register_name_suggestion(
-                    &message,
-                    field.span,
-                    name,
-                    record_names.iter().map(String::as_str),
-                );
-            }
-        }
-    }
-
-    let records = records_impl::collect_record_environment(program)?;
     let function_names = program
         .functions
         .iter()
@@ -336,7 +318,35 @@ pub(crate) fn collect_record_environment(
 }
 
 pub(crate) fn validate_record_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
-    collect_record_environment(program).map(|_| ())
+    reject_enum_declarations(program)?;
+    register_record_declaration_suggestions(program);
+    records_impl::validate_record_declarations(program)
+}
+
+fn register_record_declaration_suggestions(program: &SyntaxProgram) {
+    let record_names: Vec<&str> = program
+        .records
+        .iter()
+        .map(|record| record.name.as_str())
+        .collect();
+    for record in &program.records {
+        for field in &record.fields {
+            if let SyntaxRecordFieldType::Named(name) = &field.type_name
+                && !record_names.contains(&name.as_str())
+            {
+                let message = format!(
+                    "unknown record type {name:?} for field {:?} in record {:?}",
+                    field.name, record.name
+                );
+                register_name_suggestion(
+                    &message,
+                    field.span,
+                    name,
+                    record_names.iter().copied(),
+                );
+            }
+        }
+    }
 }
 
 fn reject_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
