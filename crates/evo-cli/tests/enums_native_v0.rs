@@ -26,7 +26,10 @@ fn build_and_run(label: &str, source_text: &str) -> String {
         .expect("evo build should run");
     let build_stderr = String::from_utf8_lossy(&build.stderr);
     assert!(build.status.success(), "{build_stderr}");
-    assert!(binary.exists(), "enum program should produce a native binary");
+    assert!(
+        binary.exists(),
+        "enum program should produce a native binary"
+    );
 
     let run = Command::new(&binary)
         .output()
@@ -166,7 +169,10 @@ fn invalid_match_build_never_reaches_rustc_or_produces_binary() {
     let _ = fs::remove_dir_all(&dir);
 
     assert!(!build.status.success());
-    assert!(!binary_exists, "invalid enum match must not produce a binary");
+    assert!(
+        !binary_exists,
+        "invalid enum match must not produce a binary"
+    );
     assert!(stderr.contains("missing variant(s): Off"), "{stderr}");
     assert!(!stderr.contains("rustc failed"), "{stderr}");
     assert!(!stderr.contains("main.rs"), "{stderr}");
