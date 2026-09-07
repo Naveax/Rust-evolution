@@ -4,7 +4,9 @@ use evo_parser::{
     Expr as SyntaxExpr, ExprKind as SyntaxExprKind, Program as SyntaxProgram, Stmt as SyntaxStmt,
     StmtKind as SyntaxStmtKind,
 };
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use super::super::{
     EnumEnvironment, ResolvedPayloadType,
@@ -14,9 +16,17 @@ use super::super::{
 use super::{EnumTypeEnvironment, resolve_signature_type};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UseMode {
+pub(crate) enum OwnershipUseMode {
     Inspect,
     Consume,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResolvedOwnershipUse {
+    pub(crate) name: String,
+    pub(crate) value_type: ResolvedPayloadType,
+    pub(crate) mode: OwnershipUseMode,
+    pub(crate) span: Span,
 }
 
 #[derive(Debug)]
@@ -31,6 +41,7 @@ struct OwnershipAnalyzer<'a, 'e> {
     matches: &'a MatchEnvironment,
     scopes: Vec<HashMap<String, ResolvedPayloadType>>,
     state: MoveState<ResolvedPayloadType>,
+    uses: Rc<RefCell<Vec<ResolvedOwnershipUse>>>,
 }
 
 impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
@@ -40,6 +51,7 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
             matches,
             scopes: vec![HashMap::new()],
             state: MoveState::default(),
+            uses: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
@@ -68,7 +80,7 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
         match &statement.kind {
             SyntaxStmtKind::Bind { name, expr } => {
                 let inferred = self.environment.infer_expr(expr, &self.scopes)?;
-                self.use_expr(expr, UseMode::Consume)?;
+                self.use_expr(expr, OwnershipUseMode::Consume)?;
                 if let Some(value_type) = inferred {
                     if self.visible_type(name).is_some() {
                         self.reinitialize(name, value_type, statement.span)?;
@@ -79,15 +91,15 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                 Ok(true)
             }
             SyntaxStmtKind::Print(expr) => {
-                self.use_expr(expr, UseMode::Inspect)?;
+                self.use_expr(expr, OwnershipUseMode::Inspect)?;
                 Ok(true)
             }
             SyntaxStmtKind::Return(expr) => {
-                self.use_expr(expr, UseMode::Consume)?;
+                self.use_expr(expr, OwnershipUseMode::Consume)?;
                 Ok(false)
             }
             SyntaxStmtKind::Repeat { count, body } => {
-                self.use_expr(count, UseMode::Inspect)?;
+                self.use_expr(count, OwnershipUseMode::Inspect)?;
                 let entry = self.state.clone();
                 let body_result = self.run_child(body, None)?;
 
@@ -121,7 +133,7 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                 then_body,
                 else_body,
             } => {
-                self.use_expr(condition, UseMode::Inspect)?;
+                self.use_expr(condition, OwnershipUseMode::Inspect)?;
                 let then_result = self.run_child(then_body, None)?;
                 let else_result = self.run_child(else_body, None)?;
                 let mut merged = self.state.clone();
@@ -139,7 +151,7 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                 Ok(continues)
             }
             SyntaxStmtKind::Match { value, arms } => {
-                self.use_expr(value, UseMode::Consume)?;
+                self.use_expr(value, OwnershipUseMode::Consume)?;
                 let entry = self.state.clone();
                 let resolved = self
                     .matches
@@ -199,43 +211,57 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
         })
     }
 
-    fn use_expr(&mut self, expr: &SyntaxExpr, mode: UseMode) -> Result<(), LowerError> {
+    fn use_expr(
+        &mut self,
+        expr: &SyntaxExpr,
+        mode: OwnershipUseMode,
+    ) -> Result<(), LowerError> {
         match &expr.kind {
             SyntaxExprKind::Integer(_)
             | SyntaxExprKind::String(_)
             | SyntaxExprKind::Bool(_)
             | SyntaxExprKind::InputInt => Ok(()),
             SyntaxExprKind::Identifier(name) => {
+                let value_type = self.visible_type(name).cloned();
                 let result = match mode {
-                    UseMode::Inspect => self.state.inspect(name),
-                    UseMode::Consume => self.state.consume(name, is_reusable),
+                    OwnershipUseMode::Inspect => self.state.inspect(name),
+                    OwnershipUseMode::Consume => self.state.consume(name, is_reusable),
                 };
                 match result {
-                    Ok(_) => Ok(()),
+                    Ok(_) => {
+                        self.uses.borrow_mut().push(ResolvedOwnershipUse {
+                            name: name.clone(),
+                            value_type: value_type
+                                .expect("successful ownership read must have a visible type"),
+                            mode,
+                            span: expr.span,
+                        });
+                        Ok(())
+                    }
                     Err(error) => Err(self.read_error(name, expr.span, error)),
                 }
             }
             SyntaxExprKind::Call { arguments, .. } => {
                 for argument in arguments {
-                    self.use_expr(argument, UseMode::Consume)?;
+                    self.use_expr(argument, OwnershipUseMode::Consume)?;
                 }
                 Ok(())
             }
             SyntaxExprKind::Construct { fields, .. } => {
                 for field in fields {
-                    self.use_expr(&field.value, UseMode::Consume)?;
+                    self.use_expr(&field.value, OwnershipUseMode::Consume)?;
                 }
                 Ok(())
             }
             SyntaxExprKind::EnumConstruct { arguments, .. } => {
                 for argument in arguments {
-                    self.use_expr(argument, UseMode::Consume)?;
+                    self.use_expr(argument, OwnershipUseMode::Consume)?;
                 }
                 Ok(())
             }
             SyntaxExprKind::FieldAccess { base, field } => {
-                self.use_expr(base, UseMode::Inspect)?;
-                if mode == UseMode::Consume
+                self.use_expr(base, OwnershipUseMode::Inspect)?;
+                if mode == OwnershipUseMode::Consume
                     && let Some(value_type) = self.environment.infer_expr(expr, &self.scopes)?
                     && !is_reusable(&value_type)
                 {
@@ -249,11 +275,11 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                 Ok(())
             }
             SyntaxExprKind::LogicalNot(inner) | SyntaxExprKind::UnaryMinus(inner) => {
-                self.use_expr(inner, UseMode::Consume)
+                self.use_expr(inner, OwnershipUseMode::Consume)
             }
             SyntaxExprKind::Binary { left, right, .. } => {
-                self.use_expr(left, UseMode::Consume)?;
-                self.use_expr(right, UseMode::Consume)
+                self.use_expr(left, OwnershipUseMode::Consume)?;
+                self.use_expr(right, OwnershipUseMode::Consume)
             }
         }
     }
@@ -317,17 +343,18 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
     }
 }
 
-pub(super) fn validate_enum_ownership(
+pub(super) fn collect_enum_ownership(
     program: &SyntaxProgram,
     enums: &EnumEnvironment,
     matches: &MatchEnvironment,
-) -> Result<(), LowerError> {
+) -> Result<Vec<ResolvedOwnershipUse>, LowerError> {
     let environment = EnumTypeEnvironment::collect(program, enums)?;
     let record_names: HashSet<&str> = program
         .records
         .iter()
         .map(|record| record.name.as_str())
         .collect();
+    let mut uses = Vec::new();
 
     for function in &program.functions {
         let mut analyzer = OwnershipAnalyzer::new(&environment, matches);
@@ -341,11 +368,21 @@ pub(super) fn validate_enum_ownership(
             analyzer.define_new(parameter.name.clone(), value_type);
         }
         let _ = analyzer.validate_statements(&function.body)?;
+        uses.extend(analyzer.uses.borrow().iter().cloned());
     }
 
     let mut top_level = OwnershipAnalyzer::new(&environment, matches);
     let _ = top_level.validate_statements(&program.statements)?;
-    Ok(())
+    uses.extend(top_level.uses.borrow().iter().cloned());
+    Ok(uses)
+}
+
+pub(super) fn validate_enum_ownership(
+    program: &SyntaxProgram,
+    enums: &EnumEnvironment,
+    matches: &MatchEnvironment,
+) -> Result<(), LowerError> {
+    collect_enum_ownership(program, enums, matches).map(|_| ())
 }
 
 fn is_reusable(value_type: &ResolvedPayloadType) -> bool {
@@ -376,7 +413,7 @@ mod tests {
         collect_enum_environment, match_validation::collect_match_environment,
     };
     use super::super::validate_enum_type_semantics;
-    use super::validate_enum_ownership;
+    use super::{OwnershipUseMode, collect_enum_ownership, validate_enum_ownership};
     use evo_lexer::lex;
     use evo_parser::parse;
 
@@ -387,6 +424,34 @@ mod tests {
         let matches = collect_match_environment(&program, &enums)?;
         validate_enum_type_semantics(&program, &enums)?;
         validate_enum_ownership(&program, &enums, &matches)
+    }
+
+    #[test]
+    fn ownership_sidecar_records_validated_use_modes_types_and_spans() {
+        let source = "enum Flag\nOff\nOn\nend\nn = 1\nvalue = Flag.On()\nprint n\nmoved = value\n";
+        let tokens = lex(source).expect("ownership sidecar source should lex");
+        let program = parse(&tokens).expect("ownership sidecar source should parse");
+        let enums = collect_enum_environment(&program).expect("enum environment should resolve");
+        let matches = collect_match_environment(&program, &enums)
+            .expect("ownership sidecar source should resolve matches");
+        validate_enum_type_semantics(&program, &enums)
+            .expect("ownership sidecar source should type-check");
+        let uses = collect_enum_ownership(&program, &enums, &matches)
+            .expect("ownership sidecar source should validate ownership");
+
+        assert_eq!(uses.len(), 2);
+        assert_eq!(uses[0].name, "n");
+        assert_eq!(uses[0].value_type, super::ResolvedPayloadType::Integer);
+        assert_eq!(uses[0].mode, OwnershipUseMode::Inspect);
+        assert_eq!(uses[0].span.line, 7);
+
+        assert_eq!(uses[1].name, "value");
+        assert_eq!(
+            uses[1].value_type,
+            super::ResolvedPayloadType::Enum("Flag".to_owned())
+        );
+        assert_eq!(uses[1].mode, OwnershipUseMode::Consume);
+        assert_eq!(uses[1].span.line, 8);
     }
 
     #[test]

@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
+[lib]
+path = "src/lib_entry.rs"
+
 [dependencies]
 evo-lexer = { path = "../evo-lexer" }
 evo-lowering = { path = "../evo-lowering" }

@@ -24,6 +24,22 @@ pub struct Program {
     pub records: Vec<RecordIr>,
     pub functions: Vec<Function>,
     pub statements: Vec<Stmt>,
+    enum_program: Option<record_environment::ExecutableEnumProgramIr>,
+}
+
+impl Program {
+    #[must_use]
+    pub fn has_enum_program(&self) -> bool {
+        self.enum_program.is_some()
+    }
+
+    #[must_use]
+    pub fn enum_source_span(&self) -> Option<Span> {
+        self.enum_program
+            .as_ref()
+            .and_then(|program| program.enums.first())
+            .map(|enum_ir| enum_ir.span)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,6 +169,16 @@ struct FunctionSignature {
 }
 
 pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
+    if !program.enums.is_empty() {
+        let enum_program = record_environment::collect_executable_enum_program_ir(program)?;
+        return Ok(Program {
+            records: Vec::new(),
+            functions: Vec::new(),
+            statements: Vec::new(),
+            enum_program: Some(enum_program),
+        });
+    }
+
     record_environment::validate_record_declarations(program)?;
     let record_environment = record_environment::collect_record_environment(program)?;
     let records = record_ir::lower_record_schemas(program);
@@ -176,6 +202,7 @@ pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
         records,
         functions,
         statements,
+        enum_program: None,
     })
 }
 
@@ -1176,7 +1203,7 @@ mod tests {
         assert!(error.message.contains("argument 1"));
 
         let error = lower_source("fn bad() int\nreturn true\nend\n")
-            .expect_err("wrong return type should fail");
+            .expect_err("wrong return type must fail");
         assert!(error.message.contains("return type mismatch"));
     }
 
