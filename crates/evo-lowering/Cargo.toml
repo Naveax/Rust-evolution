@@ -8,6 +8,7 @@ rust-version.workspace = true
 path = "src/lib_entry.rs"
 
 [dependencies]
+evo-diagnostics = { path = "../evo-diagnostics" }
 evo-lexer = { path = "../evo-lexer" }
 evo-parser = { path = "../evo-parser" }
 
