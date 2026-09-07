@@ -72,8 +72,7 @@ impl MoveTracker {
                 span,
             }),
             Err(
-                MoveStateError::UnavailableBinding(_)
-                | MoveStateError::RepeatWouldConsume { .. },
+                MoveStateError::UnavailableBinding(_) | MoveStateError::RepeatWouldConsume { .. },
             ) => unreachable!("reinitialization only reports missing bindings or type mismatches"),
         }
     }
@@ -106,12 +105,7 @@ impl MoveTracker {
                 let message = format!(
                     "record local {name:?} is moved by repeat body and would be unavailable on a later iteration"
                 );
-                set_related_location(
-                    &message,
-                    span,
-                    provenance.reason.note(),
-                    provenance.span,
-                );
+                set_related_location(&message, span, provenance.reason.note(), provenance.span);
                 Err(LowerError { message, span })
             }
             Err(
@@ -155,12 +149,7 @@ fn record_read_error(name: &str, span: Span, error: MoveStateError) -> LowerErro
         },
         MoveStateError::UnavailableBinding(provenance) => {
             let message = format!("use of moved record local {name:?}");
-            set_related_location(
-                &message,
-                span,
-                provenance.reason.note(),
-                provenance.span,
-            );
+            set_related_location(&message, span, provenance.reason.note(), provenance.span);
             LowerError { message, span }
         }
         MoveStateError::TypeMismatch | MoveStateError::RepeatWouldConsume { .. } => {

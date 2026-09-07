@@ -8,7 +8,10 @@ fn temp_dir(label: &str) -> std::path::PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be valid")
         .as_nanos();
-    env::temp_dir().join(format!("evo-move-diagnostics-{label}-{}-{nanos}", process::id()))
+    env::temp_dir().join(format!(
+        "evo-move-diagnostics-{label}-{}-{nanos}",
+        process::id()
+    ))
 }
 
 fn check(label: &str, source_text: &str) -> (bool, String, String) {
@@ -32,7 +35,10 @@ fn check(label: &str, source_text: &str) -> (bool, String, String) {
 
 fn assert_location(stderr: &str, path: &str, line: usize) {
     let location = format!(" --> {path}:{line}:");
-    assert!(stderr.contains(&location), "missing {location:?} in:\n{stderr}");
+    assert!(
+        stderr.contains(&location),
+        "missing {location:?} in:\n{stderr}"
+    );
 }
 
 #[test]
@@ -43,7 +49,10 @@ fn direct_record_reuse_shows_the_original_move_site() {
     );
 
     assert!(!success);
-    assert!(stderr.contains("use of moved record local \"value\""), "{stderr}");
+    assert!(
+        stderr.contains("use of moved record local \"value\""),
+        "{stderr}"
+    );
     assert_location(&stderr, &path, 5);
     assert_location(&stderr, &path, 4);
     assert!(stderr.contains("5 | return value"), "{stderr}");
@@ -60,7 +69,10 @@ fn direct_enum_reuse_shows_the_original_move_site() {
     );
 
     assert!(!success);
-    assert!(stderr.contains("use of moved enum local \"value\""), "{stderr}");
+    assert!(
+        stderr.contains("use of moved enum local \"value\""),
+        "{stderr}"
+    );
     assert_location(&stderr, &path, 7);
     assert_location(&stderr, &path, 6);
     assert!(stderr.contains("note: value was moved here"), "{stderr}");
@@ -94,7 +106,10 @@ fn owned_match_reuse_identifies_the_scrutinee_move() {
     assert!(!success);
     assert_location(&stderr, &path, 12);
     assert_location(&stderr, &path, 6);
-    assert!(stderr.contains("note: value was moved into this match"), "{stderr}");
+    assert!(
+        stderr.contains("note: value was moved into this match"),
+        "{stderr}"
+    );
     assert!(stderr.contains("6 | match value"), "{stderr}");
 }
 
@@ -126,7 +141,10 @@ fn two_continuing_branch_moves_choose_source_order_deterministically() {
     assert_location(&stderr, &path, 11);
     assert_location(&stderr, &path, 7);
     assert!(stderr.contains("7 | first = value"), "{stderr}");
-    assert!(!stderr.contains("note: value was moved here\n --> "), "{stderr}");
+    assert!(
+        !stderr.contains("note: value was moved here\n --> "),
+        "{stderr}"
+    );
     assert!(
         stderr.contains("note: a continuing control-flow path moved the value here"),
         "{stderr}"
@@ -169,7 +187,10 @@ fn repeat_loop_carried_move_points_to_the_body_move() {
     assert!(stderr.contains("later iteration"), "{stderr}");
     assert_location(&stderr, &path, 6);
     assert_location(&stderr, &path, 7);
-    assert!(stderr.contains("note: repeat body moves the value here"), "{stderr}");
+    assert!(
+        stderr.contains("note: repeat body moves the value here"),
+        "{stderr}"
+    );
     assert!(stderr.contains("7 | first = value"), "{stderr}");
 }
 
@@ -187,6 +208,9 @@ fn child_scope_and_type_errors_do_not_inherit_move_notes() {
         "enum A\nOne\nend\nenum B\nOne\nend\nvalue = A.One()\nvalue = B.One()\n",
     );
     assert!(!type_success);
-    assert!(type_stderr.contains("different value type"), "{type_stderr}");
+    assert!(
+        type_stderr.contains("different value type"),
+        "{type_stderr}"
+    );
     assert!(!type_stderr.contains("note:"), "{type_stderr}");
 }

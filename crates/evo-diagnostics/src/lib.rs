@@ -169,9 +169,7 @@ fn expand_tabs(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        RelatedLocation, render_error, render_error_with_related, set_related_location,
-    };
+    use super::{RelatedLocation, render_error, render_error_with_related, set_related_location};
     use evo_lexer::{Span, lex};
     use std::path::Path;
 
