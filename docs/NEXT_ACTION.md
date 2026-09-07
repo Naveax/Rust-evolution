@@ -21,17 +21,17 @@ Active child:
 - feature branch: `feature/enums-performance-v0`
 - staging branch: `work/enums-performance-v0`
 
-## #62 first benchmark evidence
+## Retained first benchmark failure
 
-First feature head:
+Initial feature head:
 
 - `2c898fa6b845f12f78de99356441cf98afe0e23b`
 - CI #275 / run `34107195001`: **FAILURE**
 
-#275 must never be rerun. Its Ubuntu result is retained as real evidence:
+#275 must never be rerun. Its Ubuntu result remains real evidence:
 
 - all existing runtime/performance gates before Enums v0: **PASS**
-- new native enum reinitialization process test: **PASS** on Ubuntu, Windows and macOS
+- native enum reinitialization process test: **PASS** on Ubuntu, Windows and macOS
 - Enums differential correctness: **PASS**
 - normalized LLVM IR equality: `false`
 - exact binary equality: `false`
@@ -43,45 +43,57 @@ First feature head:
 - final verdict: **FAIL**
 - verdict basis: `timing-median-ratio`
 
-The failure exposed a benchmark-reference defect rather than accepted parity: the handwritten generated-style Rust reference did not mirror actual emitter ordering/shape. Actual codegen emits `enum -> input helper -> function -> main`; the first reference used `enum -> function -> input helper -> main` and also differed in exact condition/arm formatting. This made LLVM/binary comparison non-identical before timing.
+Root cause: the handwritten generated-style Rust benchmark reference did not mirror actual emitter ordering/shape. Actual codegen emits `enum -> input helper -> function -> main`; the first reference used `enum -> function -> input helper -> main` and also differed in exact condition/arm formatting. The timing failure remains recorded rather than being rerun away.
 
-## Current staging correction
+## Corrected feature head / active CI
 
-Code/evidence correction head:
+Feature branch currently points at:
 
-- `9da2a360948edf9f474428260bc9bedfed45566c`
+- `69bc2d1b15db1bd841b85e8a508c156dc689550d`
+- CI #276 / run `34108814832`: **ACTIVE**
 
-Changes since failed #275 head are intentionally limited to:
+The correction is intentionally benchmark/evidence-only:
 
 1. Enums artifact upload uses `always()` so FAIL/INCONCLUSIVE reports are retained.
-2. `benchmarks/cases/enums-v0/reference.rs` now mirrors actual generated Rust ordering/shape.
-3. `crates/evo-bench/tests/enums_reference.rs` requires the Enums benchmark reference to match generated Rust exactly, analogous to the existing function-call reference lock.
+2. `benchmarks/cases/enums-v0/reference.rs` mirrors actual generated Rust ordering/shape.
+3. `crates/evo-bench/tests/enums_reference.rs` requires reference Rust to equal generated Rust exactly after newline normalization.
+4. Durable docs record #275 rather than hiding it.
 
-Staging may be ahead of `9da2a360...` only by durable documentation updates recording #275 and this correction. No compiler/codegen semantics were changed to obtain a more favorable benchmark result.
+No compiler/lowering/codegen semantics changed to improve timing.
+
+Current #276 evidence:
+
+- Windows job: **SUCCESS**
+- macOS job: **SUCCESS**
+- Ubuntu job: queued at the last verified check
+- therefore the exact-reference lock has already passed workspace tests on Windows/macOS, but Enums performance is not yet accepted.
+
+Staging may be ahead of the feature branch by documentation-only commits recording this active state. Do not fast-forward the feature branch while #276 is active.
 
 ## Resume sequence
 
-1. Confirm #275 is completed and do not rerun it.
-2. Fast-forward `feature/enums-performance-v0` to the current staging head with `force=false`.
-3. Let that new SHA receive exactly one CI run.
-4. If the exact-reference integration test fails, fix that mismatch on a new SHA; do not reinterpret timing evidence.
-5. If the Enums gate runs, always retain and inspect `evo-bench-enums-ubuntu-latest` artifact:
+1. Check CI #276 / run `34108814832` for exact SHA `69bc2d1b15db1bd841b85e8a508c156dc689550d`.
+2. Do not rerun #275 or #276 manually.
+3. When Ubuntu finishes, fetch artifact `evo-bench-enums-ubuntu-latest` even if the Enums gate fails or is inconclusive.
+4. Inspect and retain at minimum:
    - `report.json`
    - `report.md`
    - `raw-samples.csv`
    - generated Rust / LLVM / binaries where present.
-6. Accept performance only from the reported #4/#5 contract:
+5. Record exact correctness, normalized LLVM equality, binary equality, binary sizes, raw samples, median/p95/MAD, normalized ratio, timing verdict, final verdict and verdict basis.
+6. Accept performance only under #4/#5:
    - correctness must PASS first;
-   - byte-identical binary parity is stronger deterministic parity evidence when achieved;
+   - byte-identical binary parity is stronger deterministic runtime parity evidence when achieved against the exact-reference lock;
    - otherwise stable `T_evolution / T_reference <= 1.00` is required;
    - noisy measurement is INCONCLUSIVE, never PASS.
-7. Only after performance evidence is accepted, update `docs/LANGUAGE_SPEC_V0.md` for Enums v0.
-8. Final docs-synchronized head must receive its own CI before PR #65 is made ready/merged.
-9. Verify post-merge `main` CI before closing #62 or parent #50.
+7. If #276 performance evidence is accepted, update `docs/LANGUAGE_SPEC_V0.md` on staging from proven implementation/tests only.
+8. Update #62 / #50 / PR #65 / handoff docs with exact accepted evidence.
+9. Fast-forward the final spec/docs-synchronized staging head to the feature branch only after #276 completes, then let it receive exactly one fresh CI run.
+10. On final green CI, mark PR #65 ready, re-read exact head/mergeability, squash-merge with expected head SHA, and verify post-merge `main` push CI before closing #62 or #50.
 
 ## #62 scope still pending
 
-- accepted Enums differential performance evidence;
+- accepted corrected Enums differential performance evidence;
 - generated Rust / LLVM / binary evidence recorded from the accepted run;
 - final `LANGUAGE_SPEC_V0.md` synchronization;
 - final #50 checklist/documentation sync;
