@@ -152,6 +152,9 @@ mod enums_impl {
     }
 }
 
+// Records integration harnesses include this file directly without the crate-root
+// enum codegen view. In the normal crate these bridge imports are all consumed.
+#[allow(unused_imports)]
 pub(crate) use enums_impl::{
     ExecutableEnumIr, ExecutableEnumProgramIr, ExecutableEnumVariantIr, ExecutableExprIr,
     ExecutableExprKind, ExecutableFunctionIr, ExecutableMatchArmIr, ExecutableMatchBindingIr,
