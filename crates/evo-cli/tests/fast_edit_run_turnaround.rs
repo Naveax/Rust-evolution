@@ -113,13 +113,7 @@ fn timed_run(
     (output, start.elapsed())
 }
 
-fn run(
-    source: &Path,
-    cache_dir: &Path,
-    wrapper: &Path,
-    rustc: &OsStr,
-    counter: &Path,
-) -> Output {
+fn run(source: &Path, cache_dir: &Path, wrapper: &Path, rustc: &OsStr, counter: &Path) -> Output {
     evo_command(source, cache_dir, wrapper, rustc, counter)
         .output()
         .expect("evo run should execute")
@@ -149,7 +143,7 @@ fn median_ms(samples: &[Duration]) -> f64 {
         .collect::<Vec<_>>();
     values.sort_by(|left, right| left.total_cmp(right));
     let middle = values.len() / 2;
-    if values.len() % 2 == 0 {
+    if values.len().is_multiple_of(2) {
         (values[middle - 1] + values[middle]) / 2.0
     } else {
         values[middle]
