@@ -2,6 +2,9 @@ mod legacy {
     include!("lib.rs");
 }
 
+#[cfg(test)]
+mod enum_codegen;
+
 use evo_lowering::Program;
 pub use legacy::{GeneratedRust, SourceMapping};
 
