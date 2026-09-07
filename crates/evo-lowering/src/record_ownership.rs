@@ -2,17 +2,27 @@ use crate::{
     LowerError,
     record_environment::{RecordEnvironment, SemanticType},
 };
+use evo_diagnostics::{clear_related_location, set_related_location};
 use evo_lexer::Span;
 
 mod move_state {
     include!("move_state.rs");
 }
 
-use move_state::{MoveState, MoveStateError};
+use move_state::{MoveReason, MoveState, MoveStateError};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct MoveTracker {
     state: MoveState<SemanticType>,
+}
+
+impl Default for MoveTracker {
+    fn default() -> Self {
+        clear_related_location();
+        Self {
+            state: MoveState::default(),
+        }
+    }
 }
 
 impl MoveTracker {
@@ -36,7 +46,12 @@ impl MoveTracker {
         span: Span,
     ) -> Result<SemanticType, LowerError> {
         self.state
-            .consume(name, SemanticType::is_trivially_reusable_v0)
+            .consume(
+                name,
+                span,
+                MoveReason::Direct,
+                SemanticType::is_trivially_reusable_v0,
+            )
             .map_err(|error| record_read_error(name, span, error))
     }
 
@@ -56,9 +71,10 @@ impl MoveTracker {
                 message: format!("cannot assign a different value type to existing local {name:?}"),
                 span,
             }),
-            Err(MoveStateError::UnavailableBinding | MoveStateError::RepeatWouldConsume) => {
-                unreachable!("reinitialization only reports missing bindings or type mismatches")
-            }
+            Err(
+                MoveStateError::UnavailableBinding(_)
+                | MoveStateError::RepeatWouldConsume { .. },
+            ) => unreachable!("reinitialization only reports missing bindings or type mismatches"),
         }
     }
 
@@ -86,13 +102,21 @@ impl MoveTracker {
             .merge_repeat(&body_exit.state, SemanticType::is_trivially_reusable_v0)
         {
             Ok(()) => Ok(()),
-            Err(MoveStateError::RepeatWouldConsume) => Err(LowerError {
-                message: repeat_move_message(self, body_exit),
-                span,
-            }),
+            Err(MoveStateError::RepeatWouldConsume { name, provenance }) => {
+                let message = format!(
+                    "record local {name:?} is moved by repeat body and would be unavailable on a later iteration"
+                );
+                set_related_location(
+                    &message,
+                    span,
+                    provenance.reason.note(),
+                    provenance.span,
+                );
+                Err(LowerError { message, span })
+            }
             Err(
                 MoveStateError::MissingBinding
-                | MoveStateError::UnavailableBinding
+                | MoveStateError::UnavailableBinding(_)
                 | MoveStateError::TypeMismatch,
             ) => unreachable!("repeat merge only reports a move that breaks later iterations"),
         }
@@ -129,37 +153,19 @@ fn record_read_error(name: &str, span: Span, error: MoveStateError) -> LowerErro
             message: format!("use of local {name:?} before definition or outside its scope"),
             span,
         },
-        MoveStateError::UnavailableBinding => LowerError {
-            message: format!("use of moved record local {name:?}"),
-            span,
-        },
-        MoveStateError::TypeMismatch | MoveStateError::RepeatWouldConsume => {
+        MoveStateError::UnavailableBinding(provenance) => {
+            let message = format!("use of moved record local {name:?}");
+            set_related_location(
+                &message,
+                span,
+                provenance.reason.note(),
+                provenance.span,
+            );
+            LowerError { message, span }
+        }
+        MoveStateError::TypeMismatch | MoveStateError::RepeatWouldConsume { .. } => {
             unreachable!("record reads only report missing or unavailable bindings")
         }
-    }
-}
-
-fn repeat_move_message(entry: &MoveTracker, body_exit: &MoveTracker) -> String {
-    // Preserve the existing source-native diagnostic without leaking generic move-state
-    // machinery into user-facing Records v0 behavior. Find the first binding that is
-    // available on entry but unavailable after one body iteration.
-    for name in entry.binding_names() {
-        if entry.is_available(name) && !body_exit.is_available(name) {
-            return format!(
-                "record local {name:?} is moved by repeat body and would be unavailable on a later iteration"
-            );
-        }
-    }
-    unreachable!("repeat merge reported a move-only availability regression")
-}
-
-impl MoveTracker {
-    fn binding_names(&self) -> impl Iterator<Item = &str> {
-        self.state.binding_names()
-    }
-
-    fn is_available(&self, name: &str) -> bool {
-        self.state.is_available(name)
     }
 }
 
