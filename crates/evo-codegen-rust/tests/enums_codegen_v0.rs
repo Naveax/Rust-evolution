@@ -32,16 +32,15 @@ fn enum_codegen_orders_static_definitions_and_preserves_line_mappings() {
         "let __evo_value = __EvoEnum_Flag::__EvoVariant_On;",
     );
     let match_line = generated_line(&generated.source, "match __evo_value");
-    let on_arm_line = generated_line(
-        &generated.source,
-        "__EvoEnum_Flag::__EvoVariant_On => {",
-    );
+    let on_arm_line = generated_line(&generated.source, "__EvoEnum_Flag::__EvoVariant_On => {");
     let main_line = generated_line(&generated.source, "fn main() {");
 
     assert!(enum_line < function_line);
     assert!(function_line < main_line);
     assert_eq!(
-        generated.source_span_for_line(enum_line).map(|span| span.line),
+        generated
+            .source_span_for_line(enum_line)
+            .map(|span| span.line),
         Some(1)
     );
     assert_eq!(
@@ -57,11 +56,15 @@ fn enum_codegen_orders_static_definitions_and_preserves_line_mappings() {
         Some(13)
     );
     assert_eq!(
-        generated.source_span_for_line(match_line).map(|span| span.line),
+        generated
+            .source_span_for_line(match_line)
+            .map(|span| span.line),
         Some(6)
     );
     assert_eq!(
-        generated.source_span_for_line(on_arm_line).map(|span| span.line),
+        generated
+            .source_span_for_line(on_arm_line)
+            .map(|span| span.line),
         Some(9)
     );
 }
