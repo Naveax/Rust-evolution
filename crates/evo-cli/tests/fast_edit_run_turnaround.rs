@@ -189,7 +189,9 @@ fn write_report(
     } else {
         "FAIL"
     };
-    let git_sha = env::var("GITHUB_SHA").unwrap_or_else(|_| "local".to_owned());
+    let git_sha = env::var("EVO_GIT_SHA")
+        .or_else(|_| env::var("GITHUB_SHA"))
+        .unwrap_or_else(|_| "local".to_owned());
 
     let markdown = format!(
         "# Fast edit-run turnaround evidence\n\n\

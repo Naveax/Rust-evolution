@@ -44,9 +44,10 @@ The current `main` language includes, among other validated slices:
 - generated-Rust source mapping;
 - rustc diagnostic remapping to Evolution source;
 - native `check`, `emit-rust`, `build`, `run`, and `fmt` workflows;
+- verified persistent native compile caching for unchanged `evo run` inputs, with an explicit `--no-cache` bypass;
 - differential correctness/performance harness with raw/JSON/Markdown artifacts, LLVM comparison, binary-size comparison and exact executable parity evidence.
 
-The authoritative implemented language semantics are in `docs/LANGUAGE_SPEC_V0.md`.
+The authoritative implemented language semantics are in `docs/LANGUAGE_SPEC_V0.md`. Fast edit-run cache behavior is tooling, not language semantics; see `docs/FAST_EDIT_RUN_CACHE.md`.
 
 ## Example
 
@@ -77,9 +78,18 @@ From the workspace:
 cargo run -p evo-cli -- check examples/basic.evo
 cargo run -p evo-cli -- emit-rust examples/basic.evo
 cargo run -p evo-cli -- run examples/basic.evo
+cargo run -p evo-cli -- run examples/basic.evo --no-cache
 cargo run -p evo-cli -- build examples/basic.evo
 cargo run -p evo-cli -- fmt examples/basic.evo
 ```
+
+### Fast edit-run cache
+
+`evo run` validates the current source and generated Rust on every invocation, then reuses a verified native artifact when all compilation-relevant identity data still matches. A warm cache hit does not invoke rustc compilation.
+
+The cache uses deterministic per-user storage or the `EVO_CACHE_DIR` override. Exact identity files are verified in addition to the cache index; corrupt or incomplete entries fail closed to recompilation. `--no-cache` forces a cold compile path.
+
+See `docs/FAST_EDIT_RUN_CACHE.md` for locations, invalidation inputs, limits, safety boundaries, and the controlled Ubuntu turnaround evidence.
 
 ## Non-negotiable zero-cost runtime rule
 
@@ -135,9 +145,7 @@ Detailed procedure: `docs/CONTINUATION_PROTOCOL.md`.
 
 ## Current active work
 
-At the time of the latest handoff, the active P0 is **#38 Block-local bindings v0**, tracked in draft PR **#39** on branch `feature/block-locals-v0`.
-
-Do not trust this README alone for volatile status. Read `docs/PROJECT_STATE.md` and `docs/NEXT_ACTION.md`.
+Volatile issue/PR/CI status is intentionally not hardcoded in this README. Read `docs/PROJECT_STATE.md` and `docs/NEXT_ACTION.md`, then verify the referenced GitHub issue/PR and exact-head Actions state.
 
 ## Research model
 
@@ -161,12 +169,13 @@ Rust Evolution may study ideas from many languages and ecosystems, but syntax is
 - `docs/PROJECT_STATE.md` — verified current status
 - `docs/NEXT_ACTION.md` — exact continuation point
 - `docs/LANGUAGE_SPEC_V0.md` — implemented language
+- `docs/FAST_EDIT_RUN_CACHE.md` — verified `evo run` cache behavior and turnaround evidence
 - `docs/OMNI_VISION.md` — long-term north star
 - `docs/DECISIONS.md` — durable architecture/language decisions
 - `docs/COST_MODEL.md` — explicit cost architecture
 - `docs/PROFILE_MODEL.md` — profile/capability architecture
 - `docs/PERFORMANCE_CONTRACT.md` — runtime invariant
-- `docs/BENCHMARKING.md` — differential harness policy
+- `docs/BENCHMARKING.md` — differential and turnaround evidence policy
 - `docs/ROADMAP.md` + issue #1 — staged roadmap
 - `research/languages/README.md` — multi-language idea evaluation matrix
 

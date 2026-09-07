@@ -101,6 +101,21 @@ end
 
 **Decision:** Development workflows that edit/commit source automatically must be removed once their one-shot purpose is complete. Normal CI remains the authoritative validation path.
 
+## D-017 — `evo run` cache is verified tooling state, not language/runtime semantics
+
+**Decision:** Fast edit-run caching may reuse a previously compiled native artifact only after the current Evolution source has passed frontend validation/codegen and the cache entry's exact compilation identity has been verified.
+
+- a hash/key may locate candidates but is never sufficient proof of identity;
+- exact Evolution source, generated Rust, and compiler/configuration identity are verified on hit;
+- incomplete, corrupt, missing, or mismatched entries fail closed to recompilation;
+- the default cache is per-user, with `EVO_CACHE_DIR` as an explicit override;
+- `evo run --no-cache` remains an explicit bypass;
+- v0 may compile redundantly under races rather than risk executing a partial artifact;
+- no remote cache, daemon, executable download, VM, GC, or incremental-rustc machinery is implied;
+- generated Rust bytes and generated-program runtime semantics must remain unchanged by whether a cache hit occurs.
+
+**Reason:** The rapid edit-run weakness is a developer-tooling latency problem. Solving it must not weaken source validation, cache correctness, security boundaries, or the independent runtime parity contract.
+
 ## Changing a decision
 
 A future change should record:

@@ -48,6 +48,7 @@ jobs:
         id: fast_edit_run_turnaround
         if: matrix.os == 'ubuntu-latest'
         env:
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           EVO_TURNAROUND_OUT: ${{ github.workspace }}/target/evo-fast-edit-run-turnaround
         run: cargo test -p evo-cli --test fast_edit_run_turnaround fast_edit_run_turnaround_reports_verified_warm_speedup -- --ignored --exact --nocapture
 
