@@ -1,9 +1,12 @@
+mod run_cache;
+
 use evo_codegen_rust::{GeneratedRust, try_generate_lowered_rust_with_map};
 use evo_diagnostics::render_error;
 use evo_formatter::format_source;
 use evo_lexer::lex_recovering;
 use evo_lowering::lower;
 use evo_parser::parse_recovering;
+use run_cache::{RunCache, RunnableBinary};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -11,6 +14,10 @@ use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const RUST_EDITION: &str = "2024";
+const RUST_OPT_LEVEL: &str = "3";
+const RUST_CODEGEN_UNITS: &str = "1";
 
 #[derive(Debug)]
 struct LoadedProgram {
@@ -75,16 +82,22 @@ fn run_cli() -> Result<(), String> {
             Ok(())
         }
         "run" => {
+            let use_cache = match args.next() {
+                None => true,
+                Some(value) if value == "--no-cache" => false,
+                Some(_) => return Err(usage()),
+            };
             reject_extra_args(args)?;
             let program = load_program(&source_path)?;
-            run_generated(&program, &source_path)
+            run_generated(&program, &source_path, use_cache)
         }
         _ => Err(usage()),
     }
 }
 
 fn usage() -> String {
-    "usage: evo <check|emit-rust|fmt|build|run> <file.evo> [build-output|--check]".to_owned()
+    "usage: evo <check|emit-rust|fmt|build|run> <file.evo> [build-output|--check|--no-cache]"
+        .to_owned()
 }
 
 fn reject_extra_args(mut args: impl Iterator<Item = String>) -> Result<(), String> {
@@ -156,7 +169,37 @@ fn render_parse_errors(path: &Path, source: &str, errors: &[evo_parser::ParseErr
         .join("\n\n")
 }
 
+fn selected_rustc() -> OsString {
+    env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc"))
+}
+
+fn compiler_fingerprint(rustc: &OsString) -> Option<String> {
+    let output = Command::new(rustc).arg("-vV").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    Some(format!(
+        "rustc-command={rustc:?}\nrustc-stdout={}\nrustc-stderr={}\nedition={RUST_EDITION}\nopt-level={RUST_OPT_LEVEL}\ncodegen-units={RUST_CODEGEN_UNITS}\nos={}\narch={}\nexe-suffix={:?}\n",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+        env::consts::OS,
+        env::consts::ARCH,
+        env::consts::EXE_SUFFIX,
+    ))
+}
+
 fn compile_rust(program: &LoadedProgram, source_path: &Path, output: &Path) -> Result<(), String> {
+    let rustc = selected_rustc();
+    compile_rust_with_rustc(program, source_path, output, &rustc)
+}
+
+fn compile_rust_with_rustc(
+    program: &LoadedProgram,
+    source_path: &Path,
+    output: &Path,
+    rustc: &OsString,
+) -> Result<(), String> {
     let work_dir = unique_temp_dir("compile")?;
     fs::create_dir_all(&work_dir)
         .map_err(|error| format!("failed to create {}: {error}", work_dir.display()))?;
@@ -172,15 +215,14 @@ fn compile_rust(program: &LoadedProgram, source_path: &Path, output: &Path) -> R
             .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     }
 
-    let rustc = env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc"));
     let result = Command::new(rustc)
         .arg(&generated_path)
-        .arg("--edition=2024")
+        .arg(format!("--edition={RUST_EDITION}"))
         .arg("--error-format=short")
         .arg("-C")
-        .arg("opt-level=3")
+        .arg(format!("opt-level={RUST_OPT_LEVEL}"))
         .arg("-C")
-        .arg("codegen-units=1")
+        .arg(format!("codegen-units={RUST_CODEGEN_UNITS}"))
         .arg("-o")
         .arg(output)
         .output()
@@ -269,7 +311,42 @@ fn parse_rustc_short_error_line(line: &str) -> Option<RustcShortError> {
     })
 }
 
-fn run_generated(program: &LoadedProgram, source_path: &Path) -> Result<(), String> {
+fn run_generated(program: &LoadedProgram, source_path: &Path, use_cache: bool) -> Result<(), String> {
+    if use_cache {
+        let rustc = selected_rustc();
+        if let Some(fingerprint) = compiler_fingerprint(&rustc)
+            && let Ok(cache) = RunCache::new(
+                &program.source,
+                &program.generated.source,
+                &fingerprint,
+            )
+        {
+            if let Some(binary) = cache.lookup() {
+                return execute_runnable(binary);
+            }
+
+            if let Ok(staging) = cache.prepare_staging() {
+                match compile_rust_with_rustc(program, source_path, &staging.binary, &rustc) {
+                    Ok(()) => return execute_runnable(cache.publish(staging)),
+                    Err(error) => {
+                        staging.cleanup();
+                        return Err(error);
+                    }
+                }
+            }
+        }
+    }
+
+    run_generated_uncached(program, source_path)
+}
+
+fn execute_runnable(binary: RunnableBinary) -> Result<(), String> {
+    let result = execute_generated_binary(binary.path());
+    binary.cleanup();
+    result
+}
+
+fn run_generated_uncached(program: &LoadedProgram, source_path: &Path) -> Result<(), String> {
     let work_dir = unique_temp_dir("run")?;
     fs::create_dir_all(&work_dir)
         .map_err(|error| format!("failed to create {}: {error}", work_dir.display()))?;
@@ -280,10 +357,15 @@ fn run_generated(program: &LoadedProgram, source_path: &Path) -> Result<(), Stri
         return Err(error);
     }
 
-    let status = Command::new(&binary)
+    let result = execute_generated_binary(&binary);
+    let _ = fs::remove_dir_all(&work_dir);
+    result
+}
+
+fn execute_generated_binary(binary: &Path) -> Result<(), String> {
+    let status = Command::new(binary)
         .status()
         .map_err(|error| format!("failed to execute generated binary: {error}"))?;
-    let _ = fs::remove_dir_all(&work_dir);
     if status.success() {
         Ok(())
     } else {
