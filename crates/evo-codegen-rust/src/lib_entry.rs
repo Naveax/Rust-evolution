@@ -35,7 +35,11 @@ impl std::error::Error for CodegenError {}
 
 #[must_use]
 pub fn generate_lowered_rust(program: &Program) -> String {
-    generate_lowered_rust_with_map(program).source
+    if let Some(view) = program.enum_codegen_view() {
+        enum_codegen::generate_enum_rust(view).source
+    } else {
+        legacy::generate_lowered_rust(program)
+    }
 }
 
 #[must_use]
@@ -48,7 +52,7 @@ pub fn generate_lowered_rust_with_map(program: &Program) -> GeneratedRust {
 }
 
 pub fn try_generate_lowered_rust(program: &Program) -> Result<String, CodegenError> {
-    Ok(try_generate_lowered_rust_with_map(program)?.source)
+    Ok(generate_lowered_rust(program))
 }
 
 pub fn try_generate_lowered_rust_with_map(
