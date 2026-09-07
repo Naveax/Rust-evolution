@@ -9,87 +9,97 @@ This file is the durable project handoff. Fresh sessions should read `AGENTS.md`
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
 - Rust toolchain: **1.98.0**
-- Latest verified code-bearing `main` baseline: `17206a702b497731bd5174a0e011225711492d3e`
-- Baseline source: PR **#68** squash merge
-- Post-merge main CI **#289** / run `34124829348`: **SUCCESS**
+- Latest verified code-bearing `main` baseline: `795461c53f896c2223443cdb022f340a5032a0bd`
+- Baseline source: PR **#71** squash merge
+- Post-merge main CI **#302** / run `34158551578`: **SUCCESS**
 
-A later docs-only handoff merge may advance `main` beyond the code-bearing baseline above. Always verify the live branch head before starting code; do not pretend a self-referential documentation commit can contain its own future squash SHA, because hashes remain stubbornly uninterested in human convenience.
+A later docs-only handoff merge may advance `main` beyond the code-bearing baseline above. Always verify the live branch head before starting code. A documentation commit cannot contain its own future squash SHA, a small inconvenience imposed by causality.
 
-## Completed P0 — Fast edit-run v0 (#67)
+## Completed P0 — Move diagnostics v0 (#69)
 
-Issue **#67** is **completed**. PR **#68** is merged.
+Issue **#69** is **completed**. PR **#71** is merged.
 
 Delivered behavior:
 
-- `evo run <file.evo>` still performs current-source lex/parse/lower/codegen validation on every invocation;
-- unchanged runs may reuse a verified persistent native binary;
-- `evo run <file.evo> --no-cache` forces an uncached compile path;
-- cache identity includes exact Evolution source bytes, generated Rust bytes, selected rustc command, `rustc -vV`, edition, optimization/codegen flags, OS/architecture and executable suffix;
-- exact identity files are verified in addition to the cache key, so hash equality alone is not correctness proof;
-- cache entries require regular non-symlink files and a completion marker;
-- compilation happens in staging and successful publication uses staging-to-final rename;
-- stale/incomplete/corrupt/mismatched entries fail closed to recompilation;
-- concurrent misses may compile redundantly rather than execute a partial artifact;
-- cache setup/fingerprint/publication optimization failures fall back to normal compilation when safe;
-- `evo build` behavior is unchanged;
-- no network cache, daemon, VM, GC, executable download, unsafe Rust, hidden clone/allocation/boxing/dynamic dispatch or incremental-rustc machinery was introduced.
-
-Cache behavior and locations are documented in `docs/FAST_EDIT_RUN_CACHE.md`.
+- move-only record/enum bindings retain compile-time move provenance while unavailable;
+- the invalid reuse remains the primary Evolution source span;
+- at most one bounded related Evolution-source location identifies the move origin;
+- direct moves and the existing enum argument/return/owned-match contexts retain source-native cause information;
+- continuing branch provenance is selected deterministically by source order;
+- terminal paths remain excluded from continuing-state joins;
+- repeat-body move failures retain the responsible body source location;
+- exact same-type reinitialization clears stale provenance;
+- lexical scope exit forgets provenance with the binding;
+- existing single-span lexical/parser/rustc-remap rendering remains compatible;
+- public `LowerError { message, span }` remains compatible for this bounded slice;
+- no ownership accept/reject semantics changed;
+- no generated-program runtime metadata was added;
+- generated-program runtime cost remains **ZERO**.
 
 ### Final exact-head evidence
 
 Final PR head:
 
-- `b26a84819e8a89f27220ebd2eb16d4d91d513094`
+- `74f6a5955d46bd9620045bd39e9703383ae30679`
 
 Final PR CI:
 
-- CI **#288** / run `34123896927`: **SUCCESS**
-- Ubuntu: fmt, Clippy, workspace tests, turnaround evidence + artifact upload, benchmark smoke, runtime-repeat, control-flow, logical operators, functions, block-locals, Records v0, Enums v0 and release build all passed;
-- Windows/macOS: fmt, Clippy, workspace tests, benchmark smoke and release build passed.
+- CI **#301** / run `34141025715`: **SUCCESS**
+- Ubuntu: fmt, Clippy, workspace tests, fast edit-run turnaround evidence, benchmark smoke, runtime-repeat, control-flow, logical operators, functions, block-locals, Records v0, Enums v0 and release build all passed;
+- Windows/macOS: fmt, Clippy, workspace tests, benchmark smoke and release build passed;
+- exactly one PR run existed for the final SHA/workflow/input.
 
-Controlled Ubuntu turnaround evidence:
+Generated-Rust preservation evidence from the final Ubuntu Enums artifact:
 
-- cold samples: `5`, each with a fresh empty cache;
-- warm samples: `9`, after one untimed prime;
-- cold median: **69.258 ms**;
-- warm median: **14.972 ms**;
-- warm speedup: **4.626x**;
-- cold rustc compile count: **5**;
-- measured warm rustc compile count: **0**;
-- verdict: **PASS**;
-- artifact: `evo-fast-edit-run-turnaround-ubuntu-latest`;
-- artifact id: `10019395817`;
-- digest: `sha256:2cbb68765c69b231bdee08460a1a925ca336af39ac53e1833f1ac57c8920ca34`.
+- artifact: `evo-bench-enums-ubuntu-latest`;
+- artifact id: `10027015101`;
+- artifact digest: `sha256:4d27ca15beb78e9edd50cefaab314f9071d5e6f2bfdff4e49aebf4215407e2ac`;
+- `generated.rs`: **1240 bytes**;
+- `generated.rs` SHA-256: `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`;
+- this exactly matches the accepted pre-#69 Enums generated-Rust baseline from main CI #291;
+- correctness: **PASS**;
+- normalized LLVM IR equality: `true`;
+- exact executable equality: `true`;
+- binary size: **2,267,072 bytes** on both sides;
+- final verdict: **PASS** via `byte-identical-binary-parity`.
 
-The speedup number is runner-specific evidence, not a universal promise. The accepted property is that verified unchanged warm runs perform zero rustc **compilations** and measure below cold-run median on the controlled evidence runner. The rustc fingerprint probe may still execute `rustc -vV`.
+Raw timing remains retained rather than hidden:
+
+- reference median: `16,489,932 ns`;
+- Evolution median: `16,558,059 ns`;
+- observed ratio: `1.004131430`;
+- timing-only verdict: `FAIL`.
+
+Under D-006, byte-identical executables after correctness PASS are deterministic runtime-parity evidence. Scheduler timing noise remains visible but does not turn the same executable bytes into different generated runtime behavior.
 
 ### Retained failed-head evidence
 
-Failed evidence was preserved and never rerun:
+Failed/intermediate heads remain evidence and were not rerun merely for color:
 
-- CI **#285** / run `34122517074`, head `0c9a5821...`: rustfmt-only failure in the newly added turnaround evidence test;
-- CI **#286** / run `34122829838`, head `44ecf5eb...`: turnaround test itself passed (`72.323 ms` cold, `15.387 ms` warm, `4.700x`, warm compile count `0`) but artifact upload failed because the output path was relative to the integration-test working directory.
+- CI #292 / run `34131329043` and CI #295 / run `34132081700`: obsolete pre-concurrency-policy evidence;
+- CI #298 / run `34139263767`: rustfmt-only failure after synchronization;
+- CI #299 / run `34140117995`: Clippy dead-code failure because Records privately includes the shared move-state file containing enum-only diagnostic reason variants;
+- CI #300 / run `34140487296`: Windows-only checkout-CRLF reference-fixture failure; generated Rust itself remained LF.
 
-Both root causes were fixed on new SHAs. Old red runs remain evidence rather than being emotionally negotiated with a rerun button.
+Each root cause was fixed on a new SHA. Old red runs remain evidence instead of being cosmetically retried.
 
 ## Post-merge verification
 
 Squash merge:
 
-- `17206a702b497731bd5174a0e011225711492d3e`
+- `795461c53f896c2223443cdb022f340a5032a0bd`
 
 Post-merge main CI:
 
-- CI **#289** / run `34124829348`: **SUCCESS**
-- Ubuntu repeated the turnaround evidence, benchmark smoke, all existing runtime/performance gates and release build successfully;
-- macOS and Windows quality/benchmark-smoke/release jobs also passed.
+- CI **#302** / run `34158551578`: **SUCCESS**
+- Ubuntu repeated fmt, Clippy, workspace tests, turnaround evidence, benchmark smoke, every existing runtime/performance gate and release build successfully;
+- Windows and macOS quality/test/benchmark-smoke/release jobs also passed.
 
-Issue #67 closed automatically as **completed** from the merged PR.
+Issue #69 closed automatically as **completed** from the merged PR.
 
 ## Current implemented language state
 
-`docs/LANGUAGE_SPEC_V0.md` remains the implemented-language source of truth.
+`docs/LANGUAGE_SPEC_V0.md` is the implemented-language source of truth.
 
 Current accepted core includes:
 
@@ -102,77 +112,63 @@ Current accepted core includes:
 - nominal Records v0 with by-value ownership;
 - nominal Enums v0 with unit/single-payload variants and exhaustive statement-only matching;
 - explicit same-type reinitialization after moves;
+- deterministic source-native move-origin related diagnostics for accepted ownership semantics;
 - direct static Rust lowering;
-- source maps and source-native diagnostics;
+- generated-line source maps and rustc remapping;
 - native `check`, `emit-rust`, `build`, `run`, `fmt` workflows;
 - verified persistent `evo run` compile caching;
 - differential correctness/performance infrastructure and retained artifacts.
 
-The current `string` value semantics are still **static/literal**; do not silently treat the type as a general owned runtime string.
+The current `string` value semantics remain **static/literal**. Do not silently treat the type as a general owned runtime string.
+
+## Prior accepted P0 — Fast edit-run v0 (#67)
+
+Issue #67 remains completed and PR #68 merged.
+
+Key accepted evidence:
+
+- final PR #68 head `b26a84819e8a89f27220ebd2eb16d4d91d513094`;
+- PR CI #288 / run `34123896927`: **SUCCESS**;
+- feature merge `17206a702b497731bd5174a0e011225711492d3e`;
+- post-feature main CI #289 / run `34124829348`: **SUCCESS**;
+- docs handoff merge `ac61b3d36f62a12a9f82df7abe75317b6cbcc7d0`;
+- handoff post-main CI #291 / run `34125967329`: **SUCCESS**;
+- controlled cold median **69.258 ms**;
+- warm median **14.972 ms**;
+- observed warm speedup **4.626x**;
+- measured warm rustc compile count **0**.
+
+Fast edit-run remains tooling state only and does not alter generated-program semantics.
 
 ## Prior accepted core milestones
 
-### Records v0
+Records v0 remains the accepted ZERO-cost nominal product-type baseline with direct static Rust lowering and by-value ownership.
 
-Records v0 remains the accepted ZERO-cost nominal product-type baseline with direct static Rust lowering, explicit by-value ownership, source-native diagnostics and its differential performance gate preserved.
+Enums v0 milestone #50 and final child #62 remain completed. Its accepted differential evidence retains correctness PASS and exact executable equality. Historical timing evidence remains visible under the benchmark policy.
 
-### Enums v0 — #50
+## Next bounded P0 research
 
-Enums v0 milestone **#50** is completed. Final child **#62** is completed.
+There is currently no open feature PR and no successor atomic P0 issue yet.
 
-Final delivery evidence:
+The strongest researched candidate is **source-native deterministic typo/symbol suggestions**:
 
-- PR #65 final head `1c946af9d15946163b77a92f5d29c89f73469be2`;
-- PR CI #277 / run `34112029258`: **SUCCESS**;
-- squash merge `6c7bc8a4376966775728765444002f0b6774cd31`;
-- post-merge main CI #278 / run `34114143728`: **SUCCESS**.
+- roadmap: #1 Phase 3.2 Suggested fixes;
+- weakness source: #6 complex diagnostics/refactoring cost;
+- layer: semantic analysis / diagnostics / developer experience;
+- current source-native failure points already exist for unknown locals/functions, nominal types/constructors, record fields and enum variants;
+- candidate sets can remain context-specific rather than creating a global fuzzy namespace;
+- current identifiers are ASCII, allowing deterministic bounded edit-distance matching without Unicode-identifier redesign;
+- the bounded experiment should emit a suggestion only for a conservative unique best candidate within a fixed threshold;
+- tied, distant, invisible-scope or wrong-namespace candidates must produce no suggestion;
+- suggestion metadata is compile-time only and must not change accepted generated Rust or generated-program runtime behavior.
 
-Accepted corrected Enums parity evidence from CI #276 / run `34108814832` retained exact executable equality and deterministic runtime parity. The earlier unfavorable #275 result also remains preserved.
-
-## Current active roadmap state
-
-The next bounded P0 has now been selected and atomized:
-
-- **#69 — P0 move diagnostics v0: source-native move provenance and recovery guidance**
-- parent umbrella: #2
-- weakness source: #6 ownership learning / complex type-system errors / move-refactoring cost
-- roadmap link: #1 Phase 3.3 move diagnostics
-
-### Why #69 was selected
-
-The current ownership engine has real move semantics, but `MoveState` stores only `value_type + available: bool`. Once a move-only value becomes unavailable, the compiler loses the source span/reason that caused the move. A later error can identify the invalid use but cannot point back to the move origin.
-
-The current diagnostics renderer also has a one-primary-span surface only.
-
-#69 is therefore deliberately diagnostics-only:
-
-- preserve the existing accept/reject semantics;
-- preserve generated Rust bytes for accepted programs;
-- retain deterministic move provenance through direct consumption, branch joins, repeat analysis and owned enum matching;
-- clear stale provenance on exact-type reinitialization;
-- add a bounded related/secondary Evolution-source location renderer;
-- keep generated-program runtime cost **ZERO** and leave #4/#5 runtime semantics unchanged.
-
-## #69 start gate
-
-Do **not** start feature implementation until the docs-only post-fast-edit-run handoff has its own exact-head CI and is merged.
-
-After that gate:
-
-1. verify live `main`, open PRs/issues and active CI;
-2. create a focused feature branch from the verified handoff baseline;
-3. implement structured move provenance without changing ownership semantics;
-4. add related-span diagnostic rendering while preserving single-span compatibility;
-5. add Records/Enums/function/match/if/repeat/reinitialization provenance tests;
-6. prove accepted generated Rust remains unchanged;
-7. run the normal three-OS CI and existing Ubuntu runtime/performance gates;
-8. merge only from exact-head green evidence.
+Do not turn this into LSP completion, parser correction, global spellchecking, namespace redesign, or an excuse to start Result/Option/owned-string/collection semantics in the same issue. Humans have already demonstrated that vague tickets expand quite adequately without compiler assistance.
 
 ## ZERO-cost boundary
 
 Current accepted Core-language slices must not silently introduce hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
 
-Diagnostics metadata is compile-time state. #69 must not emit persistent runtime metadata or alter accepted generated program behavior.
+Diagnostics metadata is compile-time state. Move provenance and any future typo/symbol suggestion metadata must not emit persistent runtime metadata or alter accepted generated-program behavior.
 
 ## Durable continuation infrastructure
 
