@@ -22,14 +22,13 @@ Completed and merged before #62:
 - semantic umbrella #54;
 - ownership child #60 / PR #63;
 - static executable codegen child #61 / PR #64:
-  - final PR head `8d45ea094db44e777a5c6f8c0876ecde45320b4f`;
   - final PR CI #273 / run `34106104357`: **SUCCESS**;
   - squash merge `a7b8c08a71283cffa15216c7359078f1c8a34873`;
   - post-merge main CI #274 / run `34106421537`: **SUCCESS**.
 
-Merged Enums v0 now has nominal declarations, qualified constructors, exhaustive statement-only matches, typed lexical payload bindings, explicit by-value ownership, static Rust enum/match codegen, source maps and native correctness coverage without hidden clone/allocation/boxing/GC/RC/runtime maps/reflection/dynamic dispatch.
+Merged Enums behavior includes nominal declarations, qualified constructors, exhaustive statement-only matches, typed lexical payload bindings, explicit by-value ownership, static Rust enum/match codegen, source maps and native correctness coverage without hidden clone/allocation/boxing/GC/RC/runtime maps/reflection/dynamic dispatch.
 
-## Active final child — #62 differential performance + final spec sync
+## Active final child — #62
 
 - Issue: **#62 — P0 enums performance: differential parity gate and language spec sync**
 - PR: **#65 — `perf: add Enums v0 differential parity gate`**
@@ -37,11 +36,9 @@ Merged Enums v0 now has nominal declarations, qualified constructors, exhaustive
 - Staging branch: `work/enums-performance-v0`
 - Exact branch base: `a7b8c08a71283cffa15216c7359078f1c8a34873`
 
-## First benchmark run — retained failure
+## Retained first benchmark failure
 
-Initial feature head `2c898fa6b845f12f78de99356441cf98afe0e23b` ran as CI #275 / `34107195001` and **FAILED** at the new Enums performance gate. It must not be rerun.
-
-Everything before that new gate remained green, including the new native same-type enum reinitialization process test on Ubuntu, Windows and macOS.
+Initial feature head `2c898fa6b845f12f78de99356441cf98afe0e23b` ran as CI #275 / `34107195001` and **FAILED** the first Enums timing gate. It must not be rerun.
 
 #275 Enums evidence:
 
@@ -52,71 +49,80 @@ Everything before that new gate remained green, including the new native same-ty
 - Evolution median: `16,547,263 ns`
 - ratio: `1.000707082`
 - stable: `true`
-- timing verdict/final verdict: **FAIL**
+- final verdict: **FAIL**
 - verdict basis: `timing-median-ratio`
 
-The benchmark reference was not actually identical to the emitter output: declaration/helper/function ordering and exact condition/arm formatting differed. That invalidated deterministic LLVM/binary parity for #275. The unfavorable timing result remains preserved rather than rerun away.
+The benchmark reference was not exactly equivalent to emitter output, so deterministic LLVM/binary parity was invalid on #275. The unfavorable result remains retained rather than rerun away.
 
-## Corrected benchmark contract
+## Accepted corrected benchmark evidence
 
-Feature head is now:
+Corrected feature head:
 
 - `69bc2d1b15db1bd841b85e8a508c156dc689550d`
-- authoritative run: CI #276 / `34108814832`
+- CI #276 / run `34108814832`: **SUCCESS**
+- Ubuntu/macOS/Windows matrix: **SUCCESS**
+- Enums artifact id: `10014284630`
 
-The corrected head changes benchmark/evidence infrastructure only:
+The corrected benchmark locks `reference.rs` to generated Rust exactly after newline normalization and uploads Enums evidence with `always()`.
 
-1. Enums artifact upload runs with `always()` so unfavorable/inconclusive reports survive.
-2. `benchmarks/cases/enums-v0/reference.rs` mirrors actual generated Rust ordering/shape.
-3. `crates/evo-bench/tests/enums_reference.rs` asserts exact reference/generated Rust equality after newline normalization.
-4. Durable docs retain the #275 failure/root cause.
+Accepted #276 Enums result:
 
-No compiler/lowering/codegen semantics changed merely to improve timing.
+- correctness: **PASS**
+- normalized LLVM IR equal: `true`
+- exact executable equal: `true`
+- binary size: `2,267,072 B` on both sides
+- reference median: `16,506,786 ns`
+- Evolution median: `16,520,050 ns`
+- reference p95: `16,596,414 ns`
+- Evolution p95: `16,619,046 ns`
+- relative MAD: `0.001764426` / `0.002294908`
+- stable: `true`
+- ratio: `1.000803548`
+- timing-only verdict: **FAIL**
+- final verdict: **PASS**
+- verdict basis: `byte-identical-binary-parity`
 
-At the last verified #276 state:
+Correctness PASS plus byte-identical executables is accepted deterministic runtime parity under #4/#5. Raw timing remains preserved as evidence.
 
-- Windows: **SUCCESS**
-- macOS: **SUCCESS**
-- Ubuntu: queued
+All previous Ubuntu runtime gates and release build passed on #276.
 
-Therefore the exact-reference integration lock has already passed on two supported platforms. Performance is still pending Ubuntu evidence.
+## Native correctness completion
 
-Staging is intentionally allowed to move ahead of the feature branch only with documentation while #276 is active. Do not fast-forward feature again until #276 completes.
+The dedicated explicit same-type enum reinitialization process test passed on Ubuntu, Windows and macOS in #275 and remained green in #276. This satisfies the remaining process-level reinitialization evidence for parent #50.
 
-## Benchmark design
+## Language spec sync
 
-`benchmarks/cases/enums-v0`:
+Accepted #276 evidence unlocked the final stable-sketch update on staging.
 
-- runtime stdin: `20,000,000` iterations, initial `x = 9`;
-- expected stdout: `15099959897`;
-- two scalar-payload `Step` variants;
-- by-value enum return from `classify`;
-- constructor + exhaustive match + payload binding on every iteration;
-- recurrence visits both variants;
-- warmup=3, samples=13, timeout=5000 ms, max relative MAD=0.15.
+`docs/LANGUAGE_SPEC_V0.md` now includes Enums v0:
 
-Evolution and reference Rust must use the same static enum layout, payload types, algorithm, input/output and pinned rustc release path.
+- declaration grammar/placement;
+- unit and single-payload variants;
+- exact nominal payload typing;
+- qualified construction;
+- exhaustive statement-only matching;
+- arm-local payload binding scope/type;
+- by-value ownership and exact-type reinitialization;
+- direct static Rust lowering;
+- source-map/diagnostic rules;
+- accepted #276 parity evidence;
+- explicit Enums non-goals.
 
-## #62 acceptance discipline
+## Remaining #62 completion path
 
-Retain actual harness evidence for correctness, generated Rust, normalized LLVM, binary equality/size, raw samples, median/p95/MAD, normalized ratio and final PASS/FAIL/INCONCLUSIVE verdict.
+Only release-process work remains:
 
-Correctness must pass first. With the exact-reference lock, byte-identical binary parity is stronger deterministic runtime parity evidence when achieved. Otherwise stable `T_evolution / T_reference <= 1.00` is required. Noisy measurement is INCONCLUSIVE, never PASS.
-
-`docs/LANGUAGE_SPEC_V0.md` remains unchanged until corrected performance evidence is accepted.
-
-## Parent #50 remaining items
-
-The explicit same-type reinitialization process case is now proven by #275 on all supported platforms. Parent closure still waits for:
-
-- accepted dedicated Enums differential performance evidence;
-- final `docs/LANGUAGE_SPEC_V0.md` synchronization;
-- #62 merge + post-merge main CI;
-- final #50 closure from merged-main evidence.
+1. synchronize issue/PR/handoff evidence;
+2. fast-forward final staging to feature only after completed #276;
+3. run exactly one CI on that final docs-synchronized head;
+4. mark PR #65 ready only after final CI SUCCESS;
+5. squash-merge with exact expected head SHA;
+6. verify post-merge `main` push CI;
+7. close #62 and parent #50 only from merged-main evidence.
 
 ## ZERO-cost boundary
 
-Enums v0 remains a ZERO-cost-class target: ordinary static Rust enum values and matches, with no hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
+Enums v0 is a ZERO-cost-class target: ordinary static Rust enums and matches, with no hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
 
 Do not add generics, guards, wildcard/or/arbitrary nested patterns, references/borrow inference, methods, derives or runtime reflection as collateral work.
 
