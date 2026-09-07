@@ -94,5 +94,9 @@ fn enum_payload_types_lower_to_direct_builtin_record_and_enum_rust_types() {
     ));
     assert!(!generated.source.contains(".clone("));
     assert!(!generated.source.contains("Box<"));
+    assert!(!generated.source.contains("Rc<"));
+    assert!(!generated.source.contains("Arc<"));
     assert!(!generated.source.contains("HashMap"));
+    assert!(!generated.source.contains("dyn "));
+    assert!(!generated.source.contains("TypeId"));
 }
