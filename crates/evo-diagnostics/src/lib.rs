@@ -1,3 +1,10 @@
+mod diagnostic_help;
+mod suggestion;
+
+pub use diagnostic_help::{clear_help, set_help};
+pub use suggestion::best_suggestion;
+
+use diagnostic_help::take_help;
 use evo_lexer::Span;
 use std::cell::RefCell;
 use std::path::Path;
@@ -57,7 +64,8 @@ pub fn clear_related_location() {
 #[must_use]
 pub fn render_error(path: &Path, source: &str, message: &str, span: Span) -> String {
     let related = take_related_location(message, span);
-    render_error_with_related(path, source, message, span, related.as_ref())
+    let help = take_help(message, span);
+    render_error_with_context(path, source, message, span, related.as_ref(), help.as_deref())
 }
 
 #[must_use]
@@ -68,6 +76,17 @@ pub fn render_error_with_related(
     span: Span,
     related: Option<&RelatedLocation>,
 ) -> String {
+    render_error_with_context(path, source, message, span, related, None)
+}
+
+fn render_error_with_context(
+    path: &Path,
+    source: &str,
+    message: &str,
+    span: Span,
+    related: Option<&RelatedLocation>,
+    help: Option<&str>,
+) -> String {
     let mut rendered = format!("error: {message}\n{}", render_location(path, source, span));
     if let Some(related) = related {
         rendered.push('\n');
@@ -76,6 +95,10 @@ pub fn render_error_with_related(
             related.message,
             render_location(path, source, related.span)
         ));
+    }
+    if let Some(help) = help {
+        rendered.push('\n');
+        rendered.push_str(&format!("help: {help}"));
     }
     rendered
 }
@@ -169,7 +192,9 @@ fn expand_tabs(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{RelatedLocation, render_error, render_error_with_related, set_related_location};
+    use super::{
+        RelatedLocation, render_error, render_error_with_related, set_help, set_related_location,
+    };
     use evo_lexer::{Span, lex};
     use std::path::Path;
 
@@ -341,5 +366,56 @@ mod tests {
 
         let later = render_error(Path::new("stale.evo"), source, "move error", span);
         assert!(!later.contains("note:"));
+    }
+
+    #[test]
+    fn matching_help_renders_without_changing_the_primary_location() {
+        let source = "print coutn\n";
+        let start = source.find("coutn").expect("identifier exists");
+        let span = Span {
+            start,
+            end: start + 5,
+            line: 1,
+            column: 7,
+        };
+        set_help("unknown local \"coutn\"", span, "did you mean \"count\"?");
+
+        let rendered = render_error(
+            Path::new("help.evo"),
+            source,
+            "unknown local \"coutn\"",
+            span,
+        );
+        assert!(rendered.contains("1 | print coutn"));
+        assert!(rendered.contains("help: did you mean \"count\"?"));
+    }
+
+    #[test]
+    fn help_and_related_location_can_coexist_and_stale_help_is_dropped() {
+        let source = "move\nuse\n";
+        let primary = Span {
+            start: 5,
+            end: 8,
+            line: 2,
+            column: 1,
+        };
+        let related = Span {
+            start: 0,
+            end: 4,
+            line: 1,
+            column: 1,
+        };
+        set_related_location("primary", primary, "value was moved here", related);
+        set_help("primary", primary, "try rebuilding the value first");
+
+        let rendered = render_error(Path::new("both.evo"), source, "primary", primary);
+        assert!(rendered.contains("note: value was moved here"));
+        assert!(rendered.contains("help: try rebuilding the value first"));
+
+        set_help("old", primary, "stale");
+        let unrelated = render_error(Path::new("both.evo"), source, "new", primary);
+        assert!(!unrelated.contains("help:"));
+        let later = render_error(Path::new("both.evo"), source, "old", primary);
+        assert!(!later.contains("help:"));
     }
 }
