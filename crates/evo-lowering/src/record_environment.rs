@@ -35,6 +35,10 @@ mod enums_impl {
         }
     }
 
+    mod static_semantics {
+        include!("enum_static_semantics.rs");
+    }
+
     mod match_validation {
         include!("enum_match_validation.rs");
     }
@@ -74,6 +78,7 @@ mod enums_impl {
         let environment = collect_enum_environment(program)?;
         let matches = match_validation::collect_match_environment(program, &environment)?;
         constructor_typing::validate_enum_type_semantics(program, &environment)?;
+        static_semantics::validate_enum_static_semantics(program, &environment)?;
         match_sidecar::validate_match_sidecar(program, &matches)?;
         let ownership =
             constructor_typing::collect_enum_ownership(program, &environment, &matches)?;
