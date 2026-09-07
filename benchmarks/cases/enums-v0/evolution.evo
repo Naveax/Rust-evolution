@@ -1,0 +1,28 @@
+enum Step
+Small int
+Large int
+end
+
+fn classify(value int) Step
+if value > 1000
+return Step.Large(value)
+else
+return Step.Small(value)
+end
+end
+
+n = input_int
+x = input_int
+sum = 0
+repeat n
+step = classify(x)
+match step
+case Step.Small(value)
+sum = sum + value
+x = value + 7
+case Step.Large(value)
+sum = sum + value
+x = value / 2
+end
+end
+print sum
