@@ -86,7 +86,10 @@ impl RunCache {
             if !name.to_string_lossy().starts_with(&prefix) {
                 continue;
             }
-            if !entry.file_type().ok()?.is_dir() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_dir() {
                 continue;
             }
 
