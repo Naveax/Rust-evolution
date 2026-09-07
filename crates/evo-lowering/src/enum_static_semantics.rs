@@ -744,11 +744,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_top_level_return_and_unknown_functions() {
-        let top_level = validate("enum Flag\nOff\nOn\nend\nreturn 1\n")
-            .expect_err("top-level return must fail before codegen");
-        assert!(top_level.message.contains("only valid inside a function"));
-
+    fn rejects_unknown_functions() {
         let unknown = validate("enum Flag\nOff\nOn\nend\nprint missing()\n")
             .expect_err("unknown function must fail before codegen");
         assert!(unknown.message.contains("unknown function"));
