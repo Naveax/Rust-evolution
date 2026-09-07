@@ -6,134 +6,172 @@ Last verified update: **2026-09-07**
 
 ## Verified merged feature baseline
 
-Fast edit-run v0 **#67 is completed** and PR **#68 is merged**.
+Move diagnostics v0 **#69 is completed** and PR **#71 is merged**.
 
 Latest verified code-bearing `main` baseline:
 
-- `17206a702b497731bd5174a0e011225711492d3e`
-- PR #68 squash merge
-- post-merge CI **#289** / run `34124829348`: **SUCCESS**
+- `795461c53f896c2223443cdb022f340a5032a0bd`
+- PR #71 squash merge
+- post-merge CI **#302** / run `34158551578`: **SUCCESS**
 - Rust toolchain: **1.98.0**
 
-A later docs-only handoff merge may advance the live `main` SHA. Before starting code, read the live branch head and active Actions rather than assuming this document can predict its own future merge hash.
+A later docs-only handoff merge may advance the live `main` SHA. Before starting code, read live `main` and active Actions rather than asking this document to predict its own future hash.
 
-## Final fast edit-run evidence
+## Final move-diagnostics evidence
 
 Final PR head:
 
-- `b26a84819e8a89f27220ebd2eb16d4d91d513094`
+- `74f6a5955d46bd9620045bd39e9703383ae30679`
 
 Final PR CI:
 
-- CI **#288** / run `34123896927`: **SUCCESS**
+- CI **#301** / run `34141025715`: **SUCCESS** on Ubuntu, Windows and macOS.
 
-Controlled Ubuntu turnaround evidence:
+Final Ubuntu Enums preservation artifact:
 
-- cold median: **69.258 ms** across 5 fresh-cache samples;
-- warm median: **14.972 ms** across 9 measured warm samples after one untimed prime;
-- warm speedup: **4.626x**;
-- cold rustc compile count: **5**;
-- measured warm rustc compile count: **0**;
-- verdict: **PASS**;
-- artifact id `10019395817`;
-- digest `sha256:2cbb68765c69b231bdee08460a1a925ca336af39ac53e1833f1ac57c8920ca34`.
+- artifact `evo-bench-enums-ubuntu-latest`;
+- id `10027015101`;
+- digest `sha256:4d27ca15beb78e9edd50cefaab314f9071d5e6f2bfdff4e49aebf4215407e2ac`;
+- `generated.rs`: **1240 bytes**;
+- SHA-256 `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`;
+- exactly matches the accepted pre-#69 Enums baseline;
+- correctness PASS;
+- normalized LLVM IR equal;
+- exact executable equality;
+- both binaries 2,267,072 bytes;
+- final `byte-identical-binary-parity` PASS.
 
-The cache is developer-tooling state only. Accepted generated Rust bytes and generated-program runtime semantics were not changed.
+Post-merge main CI:
 
-Retained failed-head evidence remains visible:
+- CI **#302** / run `34158551578`: **SUCCESS**;
+- Ubuntu repeated turnaround, benchmark smoke, all existing runtime/performance gates and release build;
+- Windows/macOS quality/test/benchmark-smoke/release jobs passed.
 
-- #285 / `34122517074`: rustfmt-only failure;
-- #286 / `34122829838`: turnaround measurement passed but artifact upload path failed.
+Retained failed/intermediate evidence was not rerun merely for color:
 
-Neither failed SHA was rerun.
+- #292 / `34131329043` and #295 / `34132081700`: obsolete pre-concurrency-policy evidence;
+- #298 / `34139263767`: rustfmt-only failure;
+- #299 / `34140117995`: Clippy dead-code failure from Records' private include of shared move-state reason variants;
+- #300 / `34140487296`: Windows-only checkout-CRLF reference-fixture failure; generated Rust stayed LF.
 
-## Current implemented language state
+## Current accepted ownership diagnostics
 
-`docs/LANGUAGE_SPEC_V0.md` is still the implemented-language source of truth.
+For existing by-value Records/Enums ownership semantics:
 
-Relevant current ownership behavior:
+- invalid reuse is the primary Evolution-source error location;
+- one bounded related Evolution-source location may identify the move origin;
+- direct consumption and existing enum argument/return/owned-match contexts retain source-native provenance;
+- continuing branch provenance selection is deterministic by source order;
+- terminal paths do not poison continuing ownership state;
+- repeat-body move errors identify the responsible body source;
+- exact same-type reinitialization clears stale move provenance;
+- lexical scope exit removes provenance with the binding;
+- ordinary missing-binding/type-mismatch errors do not inherit fake move notes;
+- diagnostics metadata remains compile-time only;
+- accepted generated Rust and generated-program runtime behavior remain unchanged.
 
-- Records v0 and Enums v0 are nominal and by-value;
-- move-only nominal locals become unavailable after consuming reads/calls/returns/matches according to existing lowering rules;
-- exact same-type reinitialization restores availability;
-- `if`, `repeat`, and exhaustive `match` use conservative ownership joins;
-- terminal branches are excluded from continuing-state joins;
-- no implicit clone, borrow, reference inference, boxing or managed runtime is inserted.
+## Next bounded P0 to atomize
 
-## Next active P0
+No successor issue has been opened yet. There are no open feature PRs at this handoff point.
 
-**#69 — P0 move diagnostics v0: source-native move provenance and recovery guidance**
+Current researched candidate:
+
+**P0 diagnostic suggestions v0: deterministic nearest-symbol hints for source-native unknown-name errors**
 
 Parent: #2
 
-Weakness source: #6 ownership learning curve / complex type-system errors / move-refactoring cost.
+Weakness source: #6 complex error messages / refactoring cost / learning ergonomics.
 
-Roadmap: #1 Phase 3.3 move diagnostics.
+Roadmap: #1 Phase 3.2 — Suggested fixes.
 
-### Root cause already verified
+### Verified root-cause / feasibility
 
-Current `crates/evo-lowering/src/move_state.rs` stores each binding as essentially:
+Current lowering already emits source-native semantic errors at distinct resolution sites for:
 
-```text
-value_type + available: bool
-```
+- local use before definition/outside visible lexical scope;
+- unknown named function;
+- unknown record/nominal type;
+- unknown record constructor;
+- unknown record field / constructor field;
+- unknown enum constructor;
+- unknown enum variant;
+- unknown enum/record payload type.
 
-When a move-only binding becomes unavailable, the source move location/reason is discarded.
+Candidate sets already exist in the relevant lexical scope or record/enum/function environments. A bounded suggestion layer therefore does not require grammar redesign, runtime reflection, a global symbol registry, or generated-code changes.
 
-Current `crates/evo-diagnostics/src/lib.rs` exposes a one-primary-span `render_error` surface. A use-after-move error can point at the invalid use but cannot structurally point back to the Evolution source that consumed the value.
+Current identifiers are ASCII, so v0 can use deterministic bounded edit distance without expanding Unicode identifier semantics.
 
-## Start gate
+### Proposed acceptance boundary
 
-The docs-only post-fast-edit-run handoff must first:
+Atomize a focused issue before creating a feature branch. The issue should require at minimum:
 
-1. receive its own exact-head CI;
-2. remain docs-only;
-3. merge cleanly to `main`;
-4. have its post-merge main state verified.
+1. context-specific candidate sets only;
+2. a conservative deterministic distance/threshold policy;
+3. exactly one suggestion only when there is a unique best candidate within the threshold;
+4. tied candidates => no suggestion;
+5. distant candidates => no suggestion;
+6. invisible lexical-scope locals => no suggestion;
+7. names from the wrong namespace => no suggestion;
+8. accepted/invalid program classification unchanged except richer diagnostic text;
+9. no parser recovery/autocorrection;
+10. no LSP/completion protocol work;
+11. no runtime metadata/cost;
+12. accepted generated Rust unchanged;
+13. cross-platform deterministic diagnostic text tests;
+14. normal three-OS CI and all existing Ubuntu runtime/performance gates green.
 
-Only then start #69 implementation.
+Suggested edit cases for the deterministic matcher:
 
-## #69 implementation sequence
+- one-character substitution;
+- insertion;
+- deletion;
+- adjacent transposition if explicitly supported by the chosen metric;
+- same-distance ambiguity;
+- threshold boundary;
+- empty candidate set;
+- case-sensitive distinction under current identifier rules.
 
-After the handoff gate is green:
+Suggested semantic cases:
 
-1. verify live `main`, working diff, open PRs/issues and active CI;
-2. create `feature/move-diagnostics-v0` from the verified baseline;
-3. keep the first code patch focused on structured move provenance, not renderer cosmetics;
-4. extend move-state entries so unavailable move-only bindings retain a deterministic Evolution-source span and reason;
-5. preserve current availability/merge/reinitialization semantics exactly;
-6. propagate structured provenance through the Records/Enums ownership path;
-7. add a bounded related/secondary-span diagnostic renderer while keeping existing single-span rendering compatible;
-8. wire CLI lowering diagnostics to the related source location without exposing generated Rust;
-9. add focused unit + process-level tests;
-10. prove accepted generated Rust remains byte-for-byte unchanged;
-11. run normal exact-head CI and merge only after all gates pass.
+- visible local typo;
+- hidden/out-of-scope local is not suggested;
+- function typo does not suggest record/enum names;
+- record constructor typo uses nominal constructor candidates only;
+- record field typo uses only the resolved record schema's fields;
+- enum variant typo uses only the resolved enum's variants;
+- nominal type typo uses the correct nominal type namespace;
+- no suggestion is attached to unrelated type/ownership/parser errors.
 
-## Required #69 test matrix
+### Diagnostics API boundary
 
-At minimum cover:
+Do not reuse the move-origin related-location sidecar to carry textual spelling suggestions. #69's related location means “this source span caused the move”. A spelling hint has different semantics and often no second source span.
 
-- direct record move then reuse;
-- direct enum move then reuse;
-- by-value function argument consumption;
-- owned enum `match` consumption;
-- one continuing `if` branch moves the value;
-- terminal branch move does not poison continuation;
-- both continuing branches move the same value with deterministic provenance selection;
-- reinitialization clears old provenance and later moves record the new site;
-- repeat-body move identifies the body source responsible for later-iteration invalidity;
-- child-scope provenance disappears with the child binding;
-- missing-binding/type-mismatch diagnostics do not become fake move diagnostics;
-- related-span renderer handles UTF-8, tabs and zero-width spans;
-- single-span lexical/parser/rustc-remap rendering remains compatible.
+Prefer a small dedicated compile-time text-help/suggestion representation or another equally bounded design. Keep `render_error` compatibility where possible and prove ordinary diagnostics remain byte-stable when no suggestion exists.
 
-## Non-negotiable #69 boundaries
+## First next action
 
-- **No ownership semantic changes.** Existing valid/invalid program classification must remain the same except richer diagnostics.
-- **No generated Rust changes for accepted programs.** If generated bytes change, stop and explain why before treating the work as diagnostics-only.
-- **No runtime cost.** Diagnostic provenance is compile-time state only.
-- No borrowing, lifetimes, references, partial moves, clone insertion, Copy inference, field-level move semantics expansion, LSP protocol work or generalized diagnostics-framework redesign.
-- Existing #4/#5 Ubuntu runtime/performance gates must remain green even though no new runtime benchmark is required for a diagnostics-only slice.
+1. Verify live `main`, open PRs/issues and active CI after the docs-only handoff merge.
+2. Atomize the diagnostic-suggestions P0 issue with the boundaries above.
+3. Inspect exact current unknown-symbol error sites/tests on that verified baseline.
+4. Create a focused feature branch only after the issue exists.
+5. Implement the matcher/helper first with deterministic unit tests.
+6. Integrate one semantic namespace at a time; do not widen grammar or runtime semantics.
+7. Add process-level diagnostic regressions and generated-Rust preservation evidence.
+8. Use one natural exact-head CI run and merge only after all gates pass.
+
+## Larger candidates explicitly deferred
+
+Do not fold these into the diagnostic-suggestions slice:
+
+- Result/Option propagation syntax;
+- owned/runtime strings;
+- Vec/collections;
+- general error-handling semantics;
+- borrowing/references/lifetime inference;
+- global IDE/LSP completion;
+- parser autocorrection.
+
+Each has broader language/runtime prerequisites and deserves its own measured issue rather than hiding behind a spelling helper.
 
 ## CI rule
 

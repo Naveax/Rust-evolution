@@ -116,6 +116,28 @@ end
 
 **Reason:** The rapid edit-run weakness is a developer-tooling latency problem. Solving it must not weaken source validation, cache correctness, security boundaries, or the independent runtime parity contract.
 
+## D-018 — Move provenance diagnostics are bounded compile-time metadata
+
+**Decision:** Source-native move diagnostics may retain structured provenance for existing move-only ownership semantics, but that provenance is compiler diagnostic state only.
+
+- the invalid reuse remains the primary Evolution source location;
+- v0 renders at most one related Evolution-source location for the move origin;
+- provenance records a source span and bounded reason, not generated/runtime metadata;
+- continuing-path joins choose provenance deterministically by source order;
+- terminal paths remain excluded from continuing-state joins;
+- repeat analysis may retain the responsible body move location;
+- exact same-type reinitialization clears stale provenance;
+- lexical scope exit removes provenance with the binding;
+- missing-binding and type-mismatch errors must not inherit unrelated move provenance;
+- the public `LowerError { message, span }` shape remains compatible for this bounded slice;
+- a matching one-shot compile-time diagnostic sidecar may transport the related location without making rendered text part of semantic correctness;
+- accepted generated Rust bytes and generated-program runtime semantics must remain unchanged;
+- no persistent runtime metadata, clone, allocation, boxing, managed ownership or dispatch is implied.
+
+**Reason:** The ownership learning/refactoring weakness can be improved substantially by pointing to the actual Evolution move origin. Doing so does not justify changing ownership semantics, forcing a repository-wide error-type migration, or charging generated programs for compiler diagnostics.
+
+Evidence for the accepted decision is PR #71, final head `74f6a5955d46bd9620045bd39e9703383ae30679`, CI #301 / run `34141025715`, squash merge `795461c53f896c2223443cdb022f340a5032a0bd`, and post-merge main CI #302 / run `34158551578`.
+
 ## Changing a decision
 
 A future change should record:

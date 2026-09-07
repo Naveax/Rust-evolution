@@ -569,6 +569,19 @@ Recovered lexer/parser errors are displayed in source order. Parser errors preve
 
 Known record/enum errors are rejected before Rust codegen, including declaration/type errors, constructor errors, invalid match semantics, ownership reuse-after-move, invalid payload-binding scope, and unsupported partial-move cases.
 
+For move-only record/enum reuse diagnostics:
+
+- the invalid reuse remains the primary Evolution source location;
+- when deterministic move provenance is available, the diagnostic renders at most one related Evolution-source location identifying the move origin;
+- direct consumption is source-native, and function-argument, return, owned-match, continuing-control-flow, and repeat-body causes are retained where the existing ownership analysis exposes that context;
+- Records v0 generic expression consumption may use the direct move wording rather than inventing a context the Records lowering path does not structurally expose;
+- when multiple continuing paths make the same binding unavailable, provenance selection is deterministic by source order;
+- terminal paths are excluded from continuing-state ownership joins;
+- exact same-type reinitialization clears prior move provenance;
+- provenance disappears with a binding when its lexical scope ends;
+- missing-binding, type-mismatch, parser, and unrelated semantic diagnostics do not inherit a move-origin note;
+- move-provenance metadata is compile-time diagnostic state only and does not change accepted generated Rust bytes or generated-program runtime behavior.
+
 ## Generated Rust source mapping
 
 Codegen returns generated-line to Evolution `Span` sidecar metadata.
