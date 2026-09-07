@@ -1,11 +1,11 @@
 use crate::{GeneratedRust, SourceMapping};
 use evo_lexer::Span;
-use evo_lowering::enum_codegen_view::{
-    EnumCodegenExprKindView, EnumCodegenExprView, EnumCodegenFunctionView,
-    EnumCodegenMatchArmView, EnumCodegenProgramView, EnumCodegenRecordView,
-    EnumCodegenStmtKindView, EnumCodegenStmtView, EnumCodegenValueType,
-};
 use evo_lowering::BinaryOp;
+use evo_lowering::enum_codegen_view::{
+    EnumCodegenExprKindView, EnumCodegenExprView, EnumCodegenFunctionView, EnumCodegenMatchArmView,
+    EnumCodegenProgramView, EnumCodegenRecordView, EnumCodegenStmtKindView, EnumCodegenStmtView,
+    EnumCodegenValueType,
+};
 
 pub(super) fn generate_enum_rust(program: EnumCodegenProgramView<'_>) -> GeneratedRust {
     EnumGenerator::new().generate(program)
@@ -414,9 +414,9 @@ fn expr_uses_input_int(expr: EnumCodegenExprView<'_>) -> bool {
         EnumCodegenExprKindView::Call { arguments, .. } => {
             arguments.iter().any(expr_uses_input_int)
         }
-        EnumCodegenExprKindView::RecordConstruct { fields, .. } => {
-            fields.iter().any(|field| expr_uses_input_int(field.value()))
-        }
+        EnumCodegenExprKindView::RecordConstruct { fields, .. } => fields
+            .iter()
+            .any(|field| expr_uses_input_int(field.value())),
         EnumCodegenExprKindView::EnumConstruct { payload, .. } => {
             payload.is_some_and(expr_uses_input_int)
         }
@@ -464,19 +464,25 @@ mod tests {
                 .source
                 .contains("__EvoVariant_Some(__EvoEnum_Inner),")
         );
-        assert!(generated.source.contains(
-            "__evo_field_value: __EvoEnum_Wrapped,"
-        ));
+        assert!(
+            generated
+                .source
+                .contains("__evo_field_value: __EvoEnum_Wrapped,")
+        );
         assert!(generated.source.contains(
             "let __evo_value = __EvoEnum_Wrapped::__EvoVariant_Some(__EvoEnum_Inner::__EvoVariant_A(7));"
         ));
         assert!(generated.source.contains("match __evo_value {"));
-        assert!(generated.source.contains(
-            "__EvoEnum_Wrapped::__EvoVariant_Some(__evo_x) => {"
-        ));
-        assert!(generated.source.contains(
-            "__EvoEnum_Inner::__EvoVariant_A(__evo_y) => {"
-        ));
+        assert!(
+            generated
+                .source
+                .contains("__EvoEnum_Wrapped::__EvoVariant_Some(__evo_x) => {")
+        );
+        assert!(
+            generated
+                .source
+                .contains("__EvoEnum_Inner::__EvoVariant_A(__evo_y) => {")
+        );
         assert!(!generated.source.contains(".clone("));
         assert!(!generated.source.contains("Box<"));
         assert!(!generated.source.contains("Rc<"));
@@ -519,7 +525,9 @@ mod tests {
             + 1;
 
         assert_eq!(
-            generated.source_span_for_line(enum_line).map(|span| span.line),
+            generated
+                .source_span_for_line(enum_line)
+                .map(|span| span.line),
             Some(1)
         );
         assert_eq!(
@@ -529,11 +537,15 @@ mod tests {
             Some(3)
         );
         assert_eq!(
-            generated.source_span_for_line(match_line).map(|span| span.line),
+            generated
+                .source_span_for_line(match_line)
+                .map(|span| span.line),
             Some(6)
         );
         assert_eq!(
-            generated.source_span_for_line(on_arm_line).map(|span| span.line),
+            generated
+                .source_span_for_line(on_arm_line)
+                .map(|span| span.line),
             Some(9)
         );
     }
