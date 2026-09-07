@@ -107,9 +107,7 @@ impl RunCache {
 
     pub(crate) fn prepare_staging(&self) -> Result<StagingEntry, String> {
         let generation = unique_generation()?;
-        let staging_dir = self
-            .root
-            .join(format!("staging-{}-{generation}", self.key));
+        let staging_dir = self.root.join(format!("staging-{}-{generation}", self.key));
         let final_dir = self.root.join(format!("entry-{}-{generation}", self.key));
 
         fs::create_dir(&staging_dir).map_err(|error| {
@@ -348,9 +346,18 @@ mod tests {
     #[test]
     fn cache_key_changes_for_each_compilation_identity_part() {
         let baseline = stable_cache_key(&[b"source", b"generated", b"compiler"]);
-        assert_ne!(baseline, stable_cache_key(&[b"changed", b"generated", b"compiler"]));
-        assert_ne!(baseline, stable_cache_key(&[b"source", b"changed", b"compiler"]));
-        assert_ne!(baseline, stable_cache_key(&[b"source", b"generated", b"changed"]));
+        assert_ne!(
+            baseline,
+            stable_cache_key(&[b"changed", b"generated", b"compiler"])
+        );
+        assert_ne!(
+            baseline,
+            stable_cache_key(&[b"source", b"changed", b"compiler"])
+        );
+        assert_ne!(
+            baseline,
+            stable_cache_key(&[b"source", b"generated", b"changed"])
+        );
     }
 
     #[test]
@@ -375,6 +382,11 @@ mod tests {
         assert!(cache.lookup().is_some(), "complete exact entry should hit");
         fs::write(entry.join("generated.rs"), b"corrupt").expect("generated should be corrupted");
         assert!(cache.lookup().is_none(), "corrupted metadata must miss");
+
+        fs::write(entry.join("generated.rs"), b"generated").expect("generated should be restored");
+        let binary = entry.join(format!("program{}", std::env::consts::EXE_SUFFIX));
+        fs::remove_file(binary).expect("cached binary should be removable");
+        assert!(cache.lookup().is_none(), "missing cached binary must miss");
 
         let _ = fs::remove_dir_all(root);
     }
