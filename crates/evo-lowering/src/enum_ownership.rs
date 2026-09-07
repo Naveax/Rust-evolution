@@ -1,4 +1,5 @@
 use crate::LowerError;
+use evo_diagnostics::{clear_related_location, set_related_location};
 use evo_lexer::Span;
 use evo_parser::{
     Expr as SyntaxExpr, ExprKind as SyntaxExprKind, Program as SyntaxProgram, Stmt as SyntaxStmt,
@@ -11,7 +12,7 @@ use std::rc::Rc;
 use super::super::{
     EnumEnvironment, ResolvedPayloadType,
     match_validation::{MatchEnvironment, ResolvedMatchBinding},
-    ownership_state::{MoveState, MoveStateError},
+    ownership_state::{MoveReason, MoveState, MoveStateError},
 };
 use super::{EnumTypeEnvironment, resolve_signature_type};
 
@@ -80,7 +81,7 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
         match &statement.kind {
             SyntaxStmtKind::Bind { name, expr } => {
                 let inferred = self.environment.infer_expr(expr, &self.scopes)?;
-                self.use_expr(expr, OwnershipUseMode::Consume)?;
+                self.use_expr(expr, OwnershipUseMode::Consume, MoveReason::Direct)?;
                 if let Some(value_type) = inferred {
                     if self.visible_type(name).is_some() {
                         self.reinitialize(name, value_type, statement.span)?;
@@ -91,15 +92,15 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                 Ok(true)
             }
             SyntaxStmtKind::Print(expr) => {
-                self.use_expr(expr, OwnershipUseMode::Inspect)?;
+                self.use_expr(expr, OwnershipUseMode::Inspect, MoveReason::Direct)?;
                 Ok(true)
             }
             SyntaxStmtKind::Return(expr) => {
-                self.use_expr(expr, OwnershipUseMode::Consume)?;
+                self.use_expr(expr, OwnershipUseMode::Consume, MoveReason::Return)?;
                 Ok(false)
             }
             SyntaxStmtKind::Repeat { count, body } => {
-                self.use_expr(count, OwnershipUseMode::Inspect)?;
+                self.use_expr(count, OwnershipUseMode::Inspect, MoveReason::Direct)?;
                 let entry = self.state.clone();
                 let body_result = self.run_child(body, None)?;
 
@@ -110,20 +111,31 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                     return Ok(true);
                 }
 
-                let mut merged = entry.clone();
+                let mut merged = entry;
                 match merged.merge_repeat(&body_result.state, is_reusable) {
                     Ok(()) => {
                         self.state = merged;
                         Ok(true)
                     }
-                    Err(MoveStateError::RepeatWouldConsume) => Err(self.repeat_move_error(
-                        &entry,
-                        &body_result.state,
-                        statement.span,
-                    )),
+                    Err(MoveStateError::RepeatWouldConsume { name, provenance }) => {
+                        let kind = nominal_kind(self.visible_type(&name));
+                        let message = format!(
+                            "{kind} local {name:?} is moved by repeat body and would be unavailable on a later iteration"
+                        );
+                        set_related_location(
+                            &message,
+                            statement.span,
+                            provenance.reason.note(),
+                            provenance.span,
+                        );
+                        Err(LowerError {
+                            message,
+                            span: statement.span,
+                        })
+                    }
                     Err(
                         MoveStateError::MissingBinding
-                        | MoveStateError::UnavailableBinding
+                        | MoveStateError::UnavailableBinding(_)
                         | MoveStateError::TypeMismatch,
                     ) => unreachable!("repeat ownership merge only reports later-iteration moves"),
                 }
@@ -133,7 +145,7 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                 then_body,
                 else_body,
             } => {
-                self.use_expr(condition, OwnershipUseMode::Inspect)?;
+                self.use_expr(condition, OwnershipUseMode::Inspect, MoveReason::Direct)?;
                 let then_result = self.run_child(then_body, None)?;
                 let else_result = self.run_child(else_body, None)?;
                 let mut merged = self.state.clone();
@@ -151,7 +163,7 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                 Ok(continues)
             }
             SyntaxStmtKind::Match { value, arms } => {
-                self.use_expr(value, OwnershipUseMode::Consume)?;
+                self.use_expr(value, OwnershipUseMode::Consume, MoveReason::MatchScrutinee)?;
                 let entry = self.state.clone();
                 let resolved = self
                     .matches
@@ -215,6 +227,7 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
         &mut self,
         expr: &SyntaxExpr,
         mode: OwnershipUseMode,
+        reason: MoveReason,
     ) -> Result<(), LowerError> {
         match &expr.kind {
             SyntaxExprKind::Integer(_)
@@ -225,7 +238,9 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                 let value_type = self.visible_type(name).cloned();
                 let result = match mode {
                     OwnershipUseMode::Inspect => self.state.inspect(name),
-                    OwnershipUseMode::Consume => self.state.consume(name, is_reusable),
+                    OwnershipUseMode::Consume => {
+                        self.state.consume(name, expr.span, reason, is_reusable)
+                    }
                 };
                 match result {
                     Ok(_) => {
@@ -243,24 +258,28 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
             }
             SyntaxExprKind::Call { arguments, .. } => {
                 for argument in arguments {
-                    self.use_expr(argument, OwnershipUseMode::Consume)?;
+                    self.use_expr(
+                        argument,
+                        OwnershipUseMode::Consume,
+                        MoveReason::FunctionArgument,
+                    )?;
                 }
                 Ok(())
             }
             SyntaxExprKind::Construct { fields, .. } => {
                 for field in fields {
-                    self.use_expr(&field.value, OwnershipUseMode::Consume)?;
+                    self.use_expr(&field.value, OwnershipUseMode::Consume, reason)?;
                 }
                 Ok(())
             }
             SyntaxExprKind::EnumConstruct { arguments, .. } => {
                 for argument in arguments {
-                    self.use_expr(argument, OwnershipUseMode::Consume)?;
+                    self.use_expr(argument, OwnershipUseMode::Consume, reason)?;
                 }
                 Ok(())
             }
             SyntaxExprKind::FieldAccess { base, field } => {
-                self.use_expr(base, OwnershipUseMode::Inspect)?;
+                self.use_expr(base, OwnershipUseMode::Inspect, MoveReason::Direct)?;
                 if mode == OwnershipUseMode::Consume
                     && let Some(value_type) = self.environment.infer_expr(expr, &self.scopes)?
                     && !is_reusable(&value_type)
@@ -275,11 +294,11 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                 Ok(())
             }
             SyntaxExprKind::LogicalNot(inner) | SyntaxExprKind::UnaryMinus(inner) => {
-                self.use_expr(inner, OwnershipUseMode::Consume)
+                self.use_expr(inner, OwnershipUseMode::Consume, reason)
             }
             SyntaxExprKind::Binary { left, right, .. } => {
-                self.use_expr(left, OwnershipUseMode::Consume)?;
-                self.use_expr(right, OwnershipUseMode::Consume)
+                self.use_expr(left, OwnershipUseMode::Consume, reason)?;
+                self.use_expr(right, OwnershipUseMode::Consume, reason)
             }
         }
     }
@@ -300,9 +319,10 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                 message: format!("cannot assign a different value type to existing local {name:?}"),
                 span,
             }),
-            Err(MoveStateError::UnavailableBinding | MoveStateError::RepeatWouldConsume) => {
-                unreachable!("reinitialization only reports missing bindings or type mismatches")
-            }
+            Err(
+                MoveStateError::UnavailableBinding(_)
+                | MoveStateError::RepeatWouldConsume { .. },
+            ) => unreachable!("reinitialization only reports missing bindings or type mismatches"),
         }
     }
 
@@ -312,34 +332,20 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                 message: format!("use of local {name:?} before definition or outside its scope"),
                 span,
             },
-            MoveStateError::UnavailableBinding => LowerError {
-                message: moved_local_message(name, self.visible_type(name)),
-                span,
-            },
-            MoveStateError::TypeMismatch | MoveStateError::RepeatWouldConsume => {
+            MoveStateError::UnavailableBinding(provenance) => {
+                let message = moved_local_message(name, self.visible_type(name));
+                set_related_location(
+                    &message,
+                    span,
+                    provenance.reason.note(),
+                    provenance.span,
+                );
+                LowerError { message, span }
+            }
+            MoveStateError::TypeMismatch | MoveStateError::RepeatWouldConsume { .. } => {
                 unreachable!("ownership reads only report missing or unavailable bindings")
             }
         }
-    }
-
-    fn repeat_move_error(
-        &self,
-        entry: &MoveState<ResolvedPayloadType>,
-        body_exit: &MoveState<ResolvedPayloadType>,
-        span: Span,
-    ) -> LowerError {
-        for name in entry.binding_names() {
-            if entry.is_available(name) && !body_exit.is_available(name) {
-                let kind = nominal_kind(self.visible_type(name));
-                return LowerError {
-                    message: format!(
-                        "{kind} local {name:?} is moved by repeat body and would be unavailable on a later iteration"
-                    ),
-                    span,
-                };
-            }
-        }
-        unreachable!("repeat ownership merge reported an availability regression")
     }
 }
 
@@ -348,6 +354,7 @@ pub(super) fn collect_enum_ownership(
     enums: &EnumEnvironment,
     matches: &MatchEnvironment,
 ) -> Result<Vec<ResolvedOwnershipUse>, LowerError> {
+    clear_related_location();
     let environment = EnumTypeEnvironment::collect(program, enums)?;
     let record_names: HashSet<&str> = program
         .records

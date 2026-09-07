@@ -1,10 +1,96 @@
 use evo_lexer::Span;
+use std::cell::RefCell;
 use std::path::Path;
 
 const TAB_WIDTH: usize = 4;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelatedLocation {
+    pub message: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingRelatedLocation {
+    primary_message: String,
+    primary_span: Span,
+    related: RelatedLocation,
+}
+
+thread_local! {
+    static PENDING_RELATED_LOCATION: RefCell<Option<PendingRelatedLocation>> = const {
+        RefCell::new(None)
+    };
+}
+
+/// Registers one bounded related source location for the next matching primary diagnostic.
+///
+/// Lowering uses this as a compile-time diagnostic sidecar so the public lowering error shape and
+/// accepted generated-program representation remain unchanged. A render with a non-matching
+/// primary consumes and discards the pending location, preventing unrelated diagnostics from
+/// inheriting stale move provenance.
+pub fn set_related_location(
+    primary_message: &str,
+    primary_span: Span,
+    related_message: &str,
+    related_span: Span,
+) {
+    PENDING_RELATED_LOCATION.with(|pending| {
+        *pending.borrow_mut() = Some(PendingRelatedLocation {
+            primary_message: primary_message.to_owned(),
+            primary_span,
+            related: RelatedLocation {
+                message: related_message.to_owned(),
+                span: related_span,
+            },
+        });
+    });
+}
+
+/// Clears pending compile-time related-location metadata.
+pub fn clear_related_location() {
+    PENDING_RELATED_LOCATION.with(|pending| {
+        let _ = pending.borrow_mut().take();
+    });
+}
+
 #[must_use]
 pub fn render_error(path: &Path, source: &str, message: &str, span: Span) -> String {
+    let related = take_related_location(message, span);
+    render_error_with_related(path, source, message, span, related.as_ref())
+}
+
+#[must_use]
+pub fn render_error_with_related(
+    path: &Path,
+    source: &str,
+    message: &str,
+    span: Span,
+    related: Option<&RelatedLocation>,
+) -> String {
+    let mut rendered = format!("error: {message}\n{}", render_location(path, source, span));
+    if let Some(related) = related {
+        rendered.push('\n');
+        rendered.push_str(&format!(
+            "note: {}\n{}",
+            related.message,
+            render_location(path, source, related.span)
+        ));
+    }
+    rendered
+}
+
+fn take_related_location(message: &str, span: Span) -> Option<RelatedLocation> {
+    PENDING_RELATED_LOCATION.with(|pending| {
+        pending
+            .borrow_mut()
+            .take()
+            .filter(|pending| pending.primary_message == message && pending.primary_span == span)
+            .map(|pending| pending.related)
+    })
+}
+
+fn render_location(path: &Path, source: &str, span: Span) -> String {
     let start = clamp_to_char_boundary(source, span.start);
     let end = clamp_to_char_boundary(source, span.end.max(start));
     let line_start = source[..start].rfind('\n').map_or(0, |index| index + 1);
@@ -31,13 +117,11 @@ pub fn render_error(path: &Path, source: &str, message: &str, span: Span) -> Str
 
     format!(
         concat!(
-            "error: {message}\n",
             " --> {path}:{line}:{column}\n",
             "{gutter} |\n",
             "{line_label} | {source_line}\n",
             "{gutter} | {padding}{underline}\n"
         ),
-        message = message,
         path = path.display(),
         line = line_number,
         column = column,
@@ -85,7 +169,7 @@ fn expand_tabs(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::render_error;
+    use super::{RelatedLocation, render_error, render_error_with_related, set_related_location};
     use evo_lexer::{Span, lex};
     use std::path::Path;
 
@@ -156,5 +240,106 @@ mod tests {
         );
 
         assert!(rendered.contains("  |   ^^^"));
+    }
+
+    #[test]
+    fn related_location_reuses_utf8_and_tab_alignment() {
+        let source = "é\tmove\nuse\n";
+        let primary_start = source.find("use").expect("use exists");
+        let related_start = source.find("move").expect("move exists");
+        let related = RelatedLocation {
+            message: "value was moved here".to_owned(),
+            span: Span {
+                start: related_start,
+                end: related_start + "move".len(),
+                line: 1,
+                column: 3,
+            },
+        };
+        let rendered = render_error_with_related(
+            Path::new("related.evo"),
+            source,
+            "use of moved local",
+            Span {
+                start: primary_start,
+                end: primary_start + "use".len(),
+                line: 2,
+                column: 1,
+            },
+            Some(&related),
+        );
+
+        assert!(rendered.contains("note: value was moved here"));
+        assert!(rendered.contains(" --> related.evo:1:3"));
+        assert!(rendered.contains("1 | é   move"));
+        assert!(rendered.contains("  |     ^^^^"));
+    }
+
+    #[test]
+    fn zero_width_related_eof_span_is_safe() {
+        let source = "use\n";
+        let related = RelatedLocation {
+            message: "move ended here".to_owned(),
+            span: Span {
+                start: source.len(),
+                end: source.len(),
+                line: 2,
+                column: 1,
+            },
+        };
+        let rendered = render_error_with_related(
+            Path::new("related-eof.evo"),
+            source,
+            "primary",
+            Span {
+                start: 0,
+                end: 3,
+                line: 1,
+                column: 1,
+            },
+            Some(&related),
+        );
+
+        assert!(rendered.contains("note: move ended here"));
+        assert!(rendered.contains(" --> related-eof.evo:2:1"));
+        assert!(rendered.ends_with("  | ^\n"));
+    }
+
+    #[test]
+    fn absent_related_location_preserves_single_span_bytes() {
+        let source = "print @\n";
+        let span = Span {
+            start: 6,
+            end: 7,
+            line: 1,
+            column: 7,
+        };
+        let direct = render_error_with_related(
+            Path::new("same.evo"),
+            source,
+            "unexpected character",
+            span,
+            None,
+        );
+        let ordinary = render_error(Path::new("same.evo"), source, "unexpected character", span);
+        assert_eq!(ordinary, direct);
+    }
+
+    #[test]
+    fn mismatched_pending_related_location_is_dropped_instead_of_leaking() {
+        let source = "x\n";
+        let span = Span {
+            start: 0,
+            end: 1,
+            line: 1,
+            column: 1,
+        };
+        set_related_location("move error", span, "value was moved here", span);
+
+        let unrelated = render_error(Path::new("stale.evo"), source, "different error", span);
+        assert!(!unrelated.contains("note:"));
+
+        let later = render_error(Path::new("stale.evo"), source, "move error", span);
+        assert!(!later.contains("note:"));
     }
 }

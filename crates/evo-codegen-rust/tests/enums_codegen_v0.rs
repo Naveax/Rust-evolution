@@ -18,6 +18,10 @@ fn generated_line(source: &str, needle: &str) -> usize {
         + 1
 }
 
+fn normalize_checkout_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
 #[test]
 fn enum_codegen_orders_static_definitions_and_preserves_line_mappings() {
     let generated = generate(
@@ -99,4 +103,15 @@ fn enum_payload_types_lower_to_direct_builtin_record_and_enum_rust_types() {
     assert!(!generated.source.contains("HashMap"));
     assert!(!generated.source.contains("dyn "));
     assert!(!generated.source.contains("TypeId"));
+}
+
+#[test]
+fn enum_benchmark_codegen_remains_byte_identical_to_accepted_reference() {
+    let source = include_str!("../../../benchmarks/cases/enums-v0/evolution.evo");
+    let reference = normalize_checkout_newlines(include_str!(
+        "../../../benchmarks/cases/enums-v0/reference.rs"
+    ));
+    let generated = generate(source);
+
+    assert_eq!(generated.source.as_bytes(), reference.as_bytes());
 }
