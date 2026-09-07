@@ -9,125 +9,120 @@ This file is the durable project handoff. Fresh sessions should read `AGENTS.md`
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
 - Rust toolchain: **1.98.0**
-- Current authoritative `main`: `fc611c0e92a48d15d94373998b3618f154f0d0e5`
-- Post-merge main CI #243 / run `33117962228`: **SUCCESS**
+- Current authoritative `main`: `a7b8c08a71283cffa15216c7359078f1c8a34873`
+- Post-merge main CI #274 / run `34106421537`: **SUCCESS**
 
-Records v0 remains the accepted ZERO-cost nominal product-type baseline: static Rust structs/field access, by-value move tracking, no hidden allocation/boxing/GC/RC/clone/dynamic dispatch/runtime metadata, with its differential performance gate preserved.
+Records v0 remains the accepted ZERO-cost nominal product-type baseline with its differential performance gate preserved.
 
 ## Enums v0 milestone — #50
 
-Completed and merged before #61:
+Completed and merged before #62:
 
 - parser/formatter child #51;
-- semantic umbrella #54, including constructor and exhaustive match typing;
-- ownership child #60 / PR #63:
-  - squash merge `fc611c0e92a48d15d94373998b3618f154f0d0e5`;
-  - post-merge main CI #243 / run `33117962228`: **SUCCESS**.
+- semantic umbrella #54;
+- ownership child #60 / PR #63;
+- static executable codegen child #61 / PR #64:
+  - final PR CI #273 / run `34106104357`: **SUCCESS**;
+  - squash merge `a7b8c08a71283cffa15216c7359078f1c8a34873`;
+  - post-merge main CI #274 / run `34106421537`: **SUCCESS**.
 
-#60 remains the ownership authority for Enums v0. Enum/record payloads and enum values use explicit by-value move semantics; scalar payloads remain reusable; exhaustive owned match consumes the scrutinee; branch/repeat merges are conservative; no implicit clone or partial nominal field move is invented.
+Merged Enums behavior includes nominal declarations, qualified constructors, exhaustive statement-only matches, typed lexical payload bindings, explicit by-value ownership, static Rust enum/match codegen, source maps and native correctness coverage without hidden clone/allocation/boxing/GC/RC/runtime maps/reflection/dynamic dispatch.
 
-## Active child — #61 static enum/match codegen
+## Active final child — #62
 
-- Issue: **#61 — P0 enums codegen: static Rust enum/match lowering and source maps**
-- PR: **#64 — `feat: promote Enums v0 into executable IR`**
-- Feature branch: `feature/enums-codegen-v0`
-- Staging branch: `work/enums-codegen-v0`
-- Base on `main`: `fc611c0e92a48d15d94373998b3618f154f0d0e5`
-- PR remains draft until the final docs-synchronized head is green.
+- Issue: **#62 — P0 enums performance: differential parity gate and language spec sync**
+- PR: **#65 — `perf: add Enums v0 differential parity gate`**
+- Feature branch: `feature/enums-performance-v0`
+- Staging branch: `work/enums-performance-v0`
+- Exact branch base: `a7b8c08a71283cffa15216c7359078f1c8a34873`
 
-### Proven implementation layers
+## Retained first benchmark failure
 
-1. **Executable structured IR promotion**
-   - validated schemas, constructors, exhaustive matches, typed arm bindings and #60 ownership decisions are promoted into `evo-lowering::Program`;
-   - structured executable nominal types distinguish `Record` from `Enum`;
-   - enum/variant semantic identity remains structured.
+Initial feature head `2c898fa6b845f12f78de99356441cf98afe0e23b` ran as CI #275 / `34107195001` and **FAILED** the first Enums timing gate. It must not be rerun.
 
-2. **Borrowed codegen view**
-   - codegen consumes a borrowed read-only view of private executable enum IR;
-   - no semantic re-resolution or compiler-side clone.
+#275 Enums evidence:
 
-3. **Static Rust enum/match emitter**
-   - deterministic `__EvoEnum_*` / `__EvoVariant_*` names;
-   - ordinary static Rust enum definitions before functions/main;
-   - builtin, record and enum payloads lower to ordinary Rust types;
-   - direct variant construction and exhaustive Rust `match`;
-   - lexical payload pattern bindings;
-   - line-level mappings for enum definitions, variants, constructor-owning statements, matches and arms;
-   - generated-code inspection rejects `.clone()`, `Box`, `Rc`, `Arc`, runtime maps, dynamic dispatch and reflection-style metadata.
+- correctness: **PASS**
+- normalized LLVM IR equal: `false`
+- exact binary equal: `false`
+- reference median: `16,535,571 ns`
+- Evolution median: `16,547,263 ns`
+- ratio: `1.000707082`
+- stable: `true`
+- final verdict: **FAIL**
+- verdict basis: `timing-median-ratio`
 
-4. **Strict enum-program frontend semantics**
-   - enum-enabled programs do not rely on rustc to discover frontend type errors that the legacy scalar/Records analyzer would normally catch;
-   - validation covers function names/signatures/call arity/types, return types/terminal paths, record construction/fields, assignment types, operator operands, `if`/`repeat` operand types and unsupported whole nominal print/equality.
+The benchmark reference was not exactly equivalent to emitter output, so deterministic LLVM/binary parity was invalid on #275. The unfavorable result remains retained rather than rerun away.
 
-5. **Production dispatch and native execution**
-   - legacy scalar/Records programs retain the existing emitter;
-   - enum-enabled `Program` values dispatch to the static enum emitter;
-   - CLI `check`, `emit-rust`, `build` and `run` use the same production path.
+## Accepted corrected benchmark evidence
 
-### Final implementation/acceptance CI evidence
+Corrected feature head:
 
-- CI #267 / run `34096854858`: **SUCCESS** after correcting an unreachable parser-invalid test from #266; #266 was not rerun.
-- CI #268 failed only a Clippy dead-code warning after production dispatch; fixed on a new SHA and not rerun.
-- corrected production head `cc10319f61ef51abe843039671152b6d176c5e29` passed CI #269 / run `34097330115`: **SUCCESS**.
-- acceptance head `c0becf2e8d358aa3315816e0990f0a6ca6c708eb` failed CI #270 only at rustfmt; #270 was not rerun.
-- rustfmt-corrected head `5fa923227962c89d23a68deee4d990b237e3c325` passed CI #271 / run `34097977337`: **SUCCESS** on Ubuntu/Windows/macOS; Ubuntu preserved every existing runtime/performance gate.
-- final repeat/ZERO-cost/docs-pre-sync feature head `3f293c5db66d7fb503c56af535bfa57523af3332` passed CI #272 / run `34098463593`: **SUCCESS** on Ubuntu/Windows/macOS; Ubuntu again preserved every existing runtime/performance gate.
+- `69bc2d1b15db1bd841b85e8a508c156dc689550d`
+- CI #276 / run `34108814832`: **SUCCESS**
+- Ubuntu/macOS/Windows matrix: **SUCCESS**
+- Enums artifact id: `10014284630`
 
-### #61 acceptance proven on the feature head
+The corrected benchmark locks `reference.rs` to generated Rust exactly after newline normalization and uploads Enums evidence with `always()`.
 
-The current proven corpus includes:
+Accepted #276 Enums result:
 
-- unit-only enums and matching every unit variant;
-- scalar payload enum native execution;
-- acyclic record payload extraction;
-- enum parameter/return roundtrip;
-- payload binding use inside its lexical arm;
-- nested `if` + nested `match` behavior;
-- `repeat` + enum construction + exhaustive match composition;
-- invalid non-exhaustive match build fails before rustc and produces no native binary;
-- source-map checks for enum declaration, variant, constructor-owning statement, match and arm lines;
-- raw rustc fallback remains covered for unmapped generated diagnostics;
-- direct builtin/record/enum payload Rust types;
-- no hidden clone, boxing, RC, runtime map, dynamic dispatch or reflection metadata;
-- existing Records/scalar/function quality/runtime/performance gates remain green.
+- correctness: **PASS**
+- normalized LLVM IR equal: `true`
+- exact executable equal: `true`
+- binary size: `2,267,072 B` on both sides
+- reference median: `16,506,786 ns`
+- Evolution median: `16,520,050 ns`
+- reference p95: `16,596,414 ns`
+- Evolution p95: `16,619,046 ns`
+- relative MAD: `0.001764426` / `0.002294908`
+- stable: `true`
+- ratio: `1.000803548`
+- timing-only verdict: **FAIL**
+- final verdict: **PASS**
+- verdict basis: `byte-identical-binary-parity`
 
-## Current pre-merge state
+Correctness PASS plus byte-identical executables is accepted deterministic runtime parity under #4/#5. Raw timing remains preserved as evidence.
 
-Feature head `3f293c5db66d7fb503c56af535bfa57523af3332` is fully green in CI #272.
+All previous Ubuntu runtime gates and release build passed on #276.
 
-Staging is now ahead only with final evidence synchronization in `docs/NEXT_ACTION.md` and this file. Production code and acceptance tests are unchanged from the #272-proven feature head.
+## Native correctness completion
 
-Before merge:
+The dedicated explicit same-type enum reinitialization process test passed on Ubuntu, Windows and macOS in #275 and remained green in #276. This satisfies the remaining process-level reinitialization evidence for parent #50.
 
-1. confirm staging vs `3f293c5db66d7fb503c56af535bfa57523af3332` is docs-only;
-2. fast-forward `feature/enums-codegen-v0` to staging with `force=false`;
-3. allow exactly one CI run for that docs-synchronized SHA;
-4. on green, update #61 and PR #64 evidence, mark ready, confirm exact head/mergeability, and squash-merge with the exact expected head SHA.
+## Language spec sync
 
-After merge:
+Accepted #276 evidence unlocked the final stable-sketch update on staging.
 
-1. record the actual squash merge SHA;
-2. verify the post-merge `main` push CI to completion;
-3. only then close #61 and update parent #50 codegen/native/source-map checklist from merged-main evidence;
-4. update durable docs to the actual merge SHA/post-merge CI;
-5. start #62 from the actual #64 squash merge SHA.
+`docs/LANGUAGE_SPEC_V0.md` now includes Enums v0:
 
-## Remaining Enums v0 queue
+- declaration grammar/placement;
+- unit and single-payload variants;
+- exact nominal payload typing;
+- qualified construction;
+- exhaustive statement-only matching;
+- arm-local payload binding scope/type;
+- by-value ownership and exact-type reinitialization;
+- direct static Rust lowering;
+- source-map/diagnostic rules;
+- accepted #276 parity evidence;
+- explicit Enums non-goals.
 
-1. Merge **#61** and verify post-merge `main` CI.
-2. **#62 — differential performance parity + final language spec sync**.
+## Remaining #62 completion path
 
-#62, not #61, owns the dedicated Enums differential benchmark and final `LANGUAGE_SPEC_V0.md` synchronization.
+Only release-process work remains:
 
-## Parent #50 state
-
-Syntax, nominal/type semantics, exhaustive match semantics and ownership are already merged on `main`. Direct executable static Rust enum/match codegen, native correctness and executable source maps are now proven on PR #64 but must not be marked as merged-main acceptance until #64 is merged and its `main` push CI succeeds.
-
-Dedicated Enums differential performance evidence and final language specification synchronization remain #62.
+1. synchronize issue/PR/handoff evidence;
+2. fast-forward final staging to feature only after completed #276;
+3. run exactly one CI on that final docs-synchronized head;
+4. mark PR #65 ready only after final CI SUCCESS;
+5. squash-merge with exact expected head SHA;
+6. verify post-merge `main` push CI;
+7. close #62 and parent #50 only from merged-main evidence.
 
 ## ZERO-cost boundary
 
-Enums v0 remains a ZERO-cost-class target: ordinary static Rust enum values and matches, with no hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
+Enums v0 is a ZERO-cost-class target: ordinary static Rust enums and matches, with no hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
 
 Do not add generics, guards, wildcard/or/arbitrary nested patterns, references/borrow inference, methods, derives or runtime reflection as collateral work.
 

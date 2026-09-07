@@ -10,107 +10,108 @@ Parent milestone: **#50 — Enums v0: nominal sum types + exhaustive static matc
 
 Stable `main` baseline:
 
-- ownership child #60 / PR #63 squash merge: `fc611c0e92a48d15d94373998b3618f154f0d0e5`
-- post-merge main CI #243 / run `33117962228`: **SUCCESS**
+- #61 / PR #64 squash merge: `a7b8c08a71283cffa15216c7359078f1c8a34873`
+- post-merge main CI #274 / run `34106421537`: **SUCCESS**
 - Rust toolchain: **1.98.0**
 
-Active child:
+Active final child:
 
-- **#61 — static Rust enum/match codegen + source maps**
-- PR: **#64 — `feat: promote Enums v0 into executable IR`**
-- feature branch: `feature/enums-codegen-v0`
-- staging branch: `work/enums-codegen-v0`
+- **#62 — Enums v0 differential performance parity + final language spec sync**
+- PR: **#65 — `perf: add Enums v0 differential parity gate`**
+- feature branch: `feature/enums-performance-v0`
+- staging branch: `work/enums-performance-v0`
 
-Following child:
+## Retained first benchmark failure
 
-- **#62 — differential performance parity + final language spec sync**
+Initial feature head `2c898fa6b845f12f78de99356441cf98afe0e23b` ran as CI #275 / run `34107195001` and **FAILED** at the first Enums timing gate. Never rerun it.
 
-## Proven #61 implementation
+Retained #275 Enums evidence:
 
-### Executable lowering
+- correctness: **PASS**
+- normalized LLVM IR equal: `false`
+- exact binary equal: `false`
+- reference median: `16,535,571 ns`
+- Evolution median: `16,547,263 ns`
+- ratio: `1.000707082`
+- stable: `true`
+- final verdict: **FAIL**
+- verdict basis: `timing-median-ratio`
 
-- validated enum schemas, constructors, exhaustive matches, typed arm-local bindings and explicit #60 ownership decisions are promoted into `evo-lowering::Program`;
-- executable nominal types distinguish Records from Enums without name-prefix guessing;
-- enum/variant semantic identity remains structured.
+Root cause was a benchmark-reference equivalence defect: the handwritten generated-style Rust reference did not exactly mirror emitter ordering/shape. No compiler/codegen semantics were changed to obtain a better result.
 
-### Static Rust codegen
+## Accepted corrected benchmark evidence
 
-- codegen consumes a borrowed read-only view of validated executable enum IR;
-- deterministic `__EvoEnum_*` / `__EvoVariant_*` identifiers;
-- ordinary static Rust enum definitions emitted before functions/main;
-- builtin, record and enum payloads lower to ordinary static Rust types;
-- direct variant construction and exhaustive Rust `match` with lexical payload bindings;
-- source mappings cover enum declarations, variants, constructor-owning statements, matches and arms;
-- generated-code inspection rejects hidden `.clone()`, `Box`, `Rc`, `Arc`, runtime maps, dynamic dispatch and reflection-style metadata.
+Corrected feature head:
 
-### Strict frontend semantics and production dispatch
+- `69bc2d1b15db1bd841b85e8a508c156dc689550d`
+- CI #276 / run `34108814832`: **SUCCESS**
+- Ubuntu, macOS, Windows: **SUCCESS**
+- Enums artifact: `evo-bench-enums-ubuntu-latest`, artifact id `10014284630`
 
-- enum-enabled programs validate function calls/signatures/returns, record construction/fields, assignment types, operator operands and control-flow operand types before codegen;
-- scalar/Records programs retain the legacy emitter;
-- enum-enabled `Program` values dispatch to the static enum emitter;
-- CLI `check`, `emit-rust`, `build` and `run` share the production path.
+The corrected head adds an exact reference/generated-Rust integration lock and retains Enums artifacts even on unfavorable verdicts.
 
-## CI history relevant to the final layer
+Accepted #276 Enums evidence:
 
-- CI #267 / run `34096854858`: **SUCCESS** after removing an unreachable parser-invalid test case from #266; #266 was not rerun.
-- CI #268 failed only a Clippy dead-code warning after production dispatch; it was not rerun.
-- corrected production head `cc10319f61ef51abe843039671152b6d176c5e29` passed CI #269 / run `34097330115`: **SUCCESS**.
-- expanded acceptance head `c0becf2e8d358aa3315816e0990f0a6ca6c708eb` failed CI #270 only at `cargo fmt --check`; #270 was not rerun.
-- rustfmt-corrected acceptance head `5fa923227962c89d23a68deee4d990b237e3c325` passed CI #271 / run `34097977337`: **SUCCESS** on Ubuntu, Windows and macOS; Ubuntu preserved every existing runtime/performance gate.
-- final repeat/ZERO-cost/docs-pre-sync feature head `3f293c5db66d7fb503c56af535bfa57523af3332` passed CI #272 / run `34098463593`: **SUCCESS** on Ubuntu, Windows and macOS; Ubuntu again preserved every existing runtime/performance gate.
+- exact benchmark reference == generated Rust after newline normalization: **PASS**
+- differential stdout/stderr/exit correctness: **PASS**
+- normalized LLVM IR equal: `true`
+- exact executable equal: `true`
+- reference binary: `2,267,072 B`
+- Evolution binary: `2,267,072 B`
+- reference median: `16,506,786 ns`
+- Evolution median: `16,520,050 ns`
+- reference p95: `16,596,414 ns`
+- Evolution p95: `16,619,046 ns`
+- relative MAD: `0.001764426` reference / `0.002294908` Evolution
+- stable: `true`
+- observed ratio: `1.000803548`
+- timing-only verdict: **FAIL**
+- final verdict: **PASS**
+- verdict basis: `byte-identical-binary-parity`
 
-## #61 acceptance now proven on the feature head
+Under #4/#5, correctness PASS plus byte-identical executable parity is stronger deterministic runtime parity evidence. Raw timing remains retained instead of hidden.
 
-The feature-head corpus covers:
+All previous Ubuntu runtime gates and the release build also passed on #276.
 
-- unit-only enum and matching every unit variant;
-- scalar payload enum native execution;
-- acyclic record payload extraction;
-- enum parameter/return roundtrip;
-- payload binding use inside its arm;
-- nested `if` + nested `match` behavior;
-- `repeat` + enum construction + exhaustive match composition;
-- invalid non-exhaustive match fails before rustc and produces no binary;
-- source-map lines for enum declaration, variant, constructor-owning statement, match and arm;
-- unmapped rustc failures retain raw stderr through the existing CLI regression;
-- direct builtin/record/enum Rust payload types;
-- no hidden clone, boxing, RC, runtime map, dynamic dispatch or reflection metadata.
+## Spec sync
 
-## Current staging state
+Accepted performance evidence unlocked the final language-spec synchronization.
 
-Feature head `3f293c5db66d7fb503c56af535bfa57523af3332` is fully green in CI #272.
+`docs/LANGUAGE_SPEC_V0.md` now documents proven Enums v0 behavior only:
 
-Staging is now being advanced only for this final evidence synchronization in `docs/NEXT_ACTION.md` and `docs/PROJECT_STATE.md`. Production code and acceptance tests are unchanged from the #272-proven head.
+- `enum` declaration grammar and declaration placement;
+- unit/single-payload variants;
+- qualified `Enum.Variant(...)` construction;
+- nominal payload typing and by-value layout-cycle rejection;
+- exhaustive statement-only `match` / `case`;
+- arm-local payload binding scope and typing;
+- enum move semantics and exact-type reinitialization;
+- direct static Rust enum/constructor/match lowering;
+- source-map/diagnostic policy;
+- accepted #276 differential parity evidence;
+- explicit non-goals such as generics, guards, wildcard/or/nested patterns, methods, references and runtime reflection.
 
 ## Resume sequence
 
-1. Compare the current staging head against `3f293c5db66d7fb503c56af535bfa57523af3332` and confirm the delta is documentation-only.
-2. Fast-forward `feature/enums-codegen-v0` to that staging head with `force=false`.
-3. Let the docs-synchronized head receive exactly one fresh CI run. Do not manually rerun old SHAs or create duplicate active runs.
-4. If that final docs-synchronized CI is green:
-   - update #61 checklist only from actual test/CI evidence;
-   - update PR #64 body with the exact final head SHA and CI run;
-   - mark PR #64 ready;
-   - re-fetch PR metadata, confirm mergeability and exact head SHA;
-   - squash-merge with `expected_head_sha` equal to that exact final head.
-5. Record the returned squash merge SHA and verify the post-merge `main` push CI to completion.
-6. Only after post-merge `main` CI succeeds:
-   - close #61 completed;
-   - update parent #50 codegen/native/source-map checklist from merged-main evidence;
-   - update durable docs to the actual merge SHA and post-merge CI;
-   - create/start #62 from the actual #64 squash merge SHA.
+1. Synchronize #62 / #50 / PR #65 / handoff docs with #276 evidence and the spec update.
+2. Compare final staging against feature and confirm only intended #62 code/benchmark/spec/docs changes.
+3. Because #276 is completed, fast-forward `feature/enums-performance-v0` to the final staging head with `force=false`.
+4. Let that final docs-synchronized SHA receive exactly one new CI run. Do not manually rerun #275 or #276.
+5. If final CI fails, fix the actual failure on a new SHA and let that SHA receive its own CI.
+6. When final CI is green, update PR #65 validation evidence with exact final SHA/run.
+7. Mark PR #65 ready for review.
+8. Re-read PR head and mergeability, then squash-merge with `expected_head_sha` equal to the verified final head.
+9. Fetch post-merge `main` push CI for the returned squash SHA and verify it to completion.
+10. Only after post-merge main SUCCESS: close #62, complete/close parent #50, and update durable docs from merged-main evidence.
 
 ## Engineering constraints
 
-- Enum/variant identity remains structured; never concatenate semantic identity into magic names.
-- Record-vs-enum nominal kind remains explicit.
-- #60 ownership analysis remains authoritative; #61 must not invent another move model.
-- No implicit clone, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
-- Preserve every accepted Records v0 generated-code/runtime gate.
-- `LANGUAGE_SPEC_V0.md` remains intentionally unchanged until #62.
+- No hidden clone, allocation, boxing, GC/RC, runtime map, reflection metadata or dynamic dispatch.
+- Evolution and reference Rust benchmark sides must perform the same work under the same compiler path.
+- Do not weaken previous performance gates.
+- Preserve unfavorable/noisy benchmark evidence rather than rerunning old SHAs.
+- No generics, guards, wildcard/or/arbitrary nested patterns, borrow inference, methods or reflection as collateral work.
 
 ## CI rule
 
-A running CI is work in progress, not a reason to stop. Continue independent staging/docs work, but never create multiple active Actions for the same SHA/workflow/input.
-
-If a run fails, fix the actual failure on a new SHA. Never rerun an old failed SHA merely to obtain another result.
+A running CI is work in progress, not a reason to create duplicate Actions. A failed SHA is evidence, not a slot machine lever.
