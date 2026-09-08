@@ -243,6 +243,7 @@ struct ReportInput<'a> {
     cold_compile_count: u64,
     warm_compile_count: u64,
     edit_compile_count: u64,
+    direct_compile_count: u64,
     generated_rust: &'a [u8],
     fixture_source: &'a [u8],
     fixture_stdin: &'a [u8],
@@ -290,7 +291,7 @@ fn write_report(out_dir: &Path, input: &ReportInput<'_>) {
 - warm measured rustc compile invocations: `{}`\n\
 - edit measured rustc compile invocations: `{}`\n\
 - direct rustc measured compilations: `{}`\n\n\
-`build - direct rustc` is retained as a rough attribution signal only; subtraction of separately sampled medians is not causal profiling. Cold samples use fresh output paths. Warm samples reuse one primed source/output pair. Each edit sample primes a baseline output, changes one generated-Rust-affecting but result-preserving source line, then rebuilds. Direct rustc compiles the exact emitted Rust with the same successful-build flags.\n",
+`build - direct rustc` is retained as a rough attribution signal only; subtraction of separately sampled medians is not causal profiling. All measured native compilation classes use the same rustc-counting wrapper, so instrumentation process overhead is present on both sides. Cold samples use fresh output paths. Warm samples reuse one primed source/output pair. Each edit sample primes a baseline output, changes one generated-Rust-affecting but result-preserving source line, then rebuilds. Direct rustc compiles the exact emitted Rust with the same successful-build flags.\n",
         env::consts::OS,
         env::consts::ARCH,
         check.median_ms,
@@ -320,7 +321,7 @@ fn write_report(out_dir: &Path, input: &ReportInput<'_>) {
         input.cold_compile_count,
         input.warm_compile_count,
         input.edit_compile_count,
-        input.direct.len(),
+        input.direct_compile_count,
     );
     fs::write(out_dir.join("report.md"), markdown).expect("Markdown report should be written");
 
@@ -343,7 +344,7 @@ fn write_report(out_dir: &Path, input: &ReportInput<'_>) {
         input.cold_compile_count,
         input.warm_compile_count,
         input.edit_compile_count,
-        input.direct.len(),
+        input.direct_compile_count,
     );
     fs::write(out_dir.join("report.json"), json).expect("JSON report should be written");
 
@@ -383,8 +384,14 @@ fn write_report(out_dir: &Path, input: &ReportInput<'_>) {
         .expect("rustc version evidence should be written");
 }
 
-fn direct_rustc_command(rustc: &OsStr, generated: &Path, output: &Path) -> Command {
-    let mut command = Command::new(rustc);
+fn direct_rustc_command(
+    wrapper: &Path,
+    rustc: &OsStr,
+    counter: &Path,
+    generated: &Path,
+    output: &Path,
+) -> Command {
+    let mut command = Command::new(wrapper);
     command
         .arg(generated)
         .arg(format!("--edition={RUST_EDITION}"))
@@ -394,7 +401,9 @@ fn direct_rustc_command(rustc: &OsStr, generated: &Path, output: &Path) -> Comma
         .arg("-C")
         .arg(format!("codegen-units={RUST_CODEGEN_UNITS}"))
         .arg("-o")
-        .arg(output);
+        .arg(output)
+        .env("EVO_TEST_REAL_RUSTC", rustc)
+        .env("EVO_TEST_RUSTC_COUNT", counter);
     command
 }
 
@@ -430,6 +439,7 @@ fn report_files_record_samples_and_compile_counts() {
             cold_compile_count: 2,
             warm_compile_count: 2,
             edit_compile_count: 2,
+            direct_compile_count: 2,
             generated_rust: b"fn main() {}\n",
             fixture_source: b"print 7\n",
             fixture_stdin: b"",
@@ -440,6 +450,7 @@ fn report_files_record_samples_and_compile_counts() {
 
     let json = fs::read_to_string(dir.join("report.json")).expect("JSON report should read");
     assert!(json.contains("\"cold_rustc_compile_count\": 2"));
+    assert!(json.contains("\"direct_rustc_compile_count\": 2"));
     assert!(json.contains("\"rustc_host\": \"test-host\""));
 
     let csv = fs::read_to_string(dir.join("raw-samples.csv")).expect("CSV report should read");
@@ -629,17 +640,26 @@ fn build_latency_baseline_reports_cold_warm_edit_and_rustc_attribution() {
     }
 
     let direct_prime_output = dir.join(format!("direct-prime{}", env::consts::EXE_SUFFIX));
-    let direct_prime = direct_rustc_command(&rustc, &generated_path, &direct_prime_output)
-        .output()
-        .expect("direct rustc prime should execute");
+    let direct_prime = direct_rustc_command(
+        &wrapper,
+        &rustc,
+        &counter,
+        &generated_path,
+        &direct_prime_output,
+    )
+    .output()
+    .expect("direct rustc prime should execute");
     assert_success(&direct_prime, "direct rustc prime");
     run_binary(&direct_prime_output, &fixture_stdin, &expected_stdout);
 
+    let direct_compile_start = compile_count(&counter);
     let mut direct_samples = Vec::with_capacity(BUILD_SAMPLES);
     for index in 0..BUILD_SAMPLES {
         let output_path = dir.join(format!("direct-{index}{}", env::consts::EXE_SUFFIX));
         let (compile, elapsed) = timed_output(&mut direct_rustc_command(
+            &wrapper,
             &rustc,
+            &counter,
             &generated_path,
             &output_path,
         ));
@@ -647,10 +667,12 @@ fn build_latency_baseline_reports_cold_warm_edit_and_rustc_attribution() {
         run_binary(&output_path, &fixture_stdin, &expected_stdout);
         direct_samples.push(elapsed);
     }
+    let direct_compile_count = compile_count(&counter) - direct_compile_start;
 
     assert_eq!(cold_compile_count, BUILD_SAMPLES as u64);
     assert_eq!(warm_compile_count, BUILD_SAMPLES as u64);
     assert_eq!(edit_compile_count, BUILD_SAMPLES as u64);
+    assert_eq!(direct_compile_count, BUILD_SAMPLES as u64);
 
     let out_dir = env::var_os("EVO_BUILD_LATENCY_OUT")
         .map(PathBuf::from)
@@ -667,6 +689,7 @@ fn build_latency_baseline_reports_cold_warm_edit_and_rustc_attribution() {
             cold_compile_count,
             warm_compile_count,
             edit_compile_count,
+            direct_compile_count,
             generated_rust: &generated.stdout,
             fixture_source: &fixture_source,
             fixture_stdin: &fixture_stdin,
@@ -686,6 +709,7 @@ fn build_latency_baseline_reports_cold_warm_edit_and_rustc_attribution() {
     println!("cold_rustc_compile_count={cold_compile_count}");
     println!("warm_rustc_compile_count={warm_compile_count}");
     println!("edit_rustc_compile_count={edit_compile_count}");
+    println!("direct_rustc_compile_count={direct_compile_count}");
 
     let _ = fs::remove_dir_all(dir);
 }
