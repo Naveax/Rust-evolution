@@ -214,8 +214,7 @@ Hard acceptance is exact warm rustc compile count zero plus correct native outpu
     fs::write(out_dir.join("raw-samples.csv"), csv).expect("CSV report should write");
     fs::write(out_dir.join("generated.rs"), generated_rust)
         .expect("generated Rust evidence should write");
-    fs::write(out_dir.join("rustc-vV.txt"), rustc_version)
-        .expect("rustc identity should write");
+    fs::write(out_dir.join("rustc-vV.txt"), rustc_version).expect("rustc identity should write");
 }
 
 #[test]
@@ -253,12 +252,7 @@ fn verified_build_cache_reports_zero_warm_compiles_and_speedup() {
         fs::write(&counter, "0").expect("cold counter should initialize");
 
         let (build, elapsed) = timed_output(&mut build_command(
-            &source,
-            &output,
-            &cache_dir,
-            &wrapper,
-            &rustc,
-            &counter,
+            &source, &output, &cache_dir, &wrapper, &rustc, &counter,
         ));
         assert_success(&build, "cold build");
         assert_binary_stdout(&output, "42");
@@ -286,7 +280,11 @@ fn verified_build_cache_reports_zero_warm_compiles_and_speedup() {
     .expect("warm prime should execute");
     assert_success(&prime, "warm prime");
     assert_binary_stdout(&warm_output, "42");
-    assert_eq!(compile_count(&warm_counter), 1, "warm prime must compile once");
+    assert_eq!(
+        compile_count(&warm_counter),
+        1,
+        "warm prime must compile once"
+    );
 
     let mut warm_samples = Vec::with_capacity(WARM_SAMPLES);
     for _ in 0..WARM_SAMPLES {
@@ -310,7 +308,10 @@ fn verified_build_cache_reports_zero_warm_compiles_and_speedup() {
     }
 
     let warm_compile_count = compile_count(&warm_counter) - 1;
-    assert_eq!(warm_compile_count, 0, "warm samples must compile zero times");
+    assert_eq!(
+        warm_compile_count, 0,
+        "warm samples must compile zero times"
+    );
 
     let cold_median = median_ms(&cold_samples);
     let warm_median = median_ms(&warm_samples);
