@@ -193,6 +193,34 @@ Policy implications:
 
 Accepted evidence: PR #78 final head `96b8de7570662aa5cf5886f90ea5f0432a2c14fe`, CI #324 / run `34202560065`, artifact `evo-build-latency-ubuntu-latest` id `10046420977` digest `sha256:d3310910395f9c6be50200c261402bfdbb8c7ef617ed18f71b3aa7486a22a2b0`, squash merge `34f0815d0821543586cd3ae73b9b5b616a1396d3`, and post-merge main CI #325 / run `34205500589`.
 
+## D-021 — `evo build` exact artifact reuse is verified tooling state
+
+**Decision:** `evo build` may reuse a previously compiled native artifact for an exact unchanged compilation identity, but only after the current source has completed the normal frontend/lowering/codegen path and the cache entry has been verified against exact identity files.
+
+For v0:
+
+- build reuse uses a separate `build-cache-v0` layout; accepted `run-cache-v0` behavior is not silently changed;
+- normal `evo build <file.evo> [output]` may use verified cache reuse by default;
+- `evo build <file.evo> --no-cache` and `evo build <file.evo> <output> --no-cache` explicitly bypass lookup/publish;
+- exact Evolution source bytes, exact generated Rust bytes and exact compiler/configuration fingerprint are required on hit;
+- the compiler fingerprint includes selected rustc `-vV`, edition, optimization level, codegen units, OS, architecture and executable suffix;
+- a cache hash/key is only a locator and is never accepted as identity proof;
+- a completion marker and regular non-symlink cached native artifact are required;
+- corrupt, incomplete, missing, mismatched or unusable entries fail closed to normal compilation;
+- cache storage unavailability falls back to normal compilation;
+- a verified hit may materialize the native artifact to a different requested output path and may replace an existing output compatibly;
+- publication is best-effort after successful normal compilation; races may compile redundantly rather than consume partial state;
+- v0 keeps bounded local pruning and stale staging cleanup;
+- the accepted #76 build-latency baseline remains explicitly uncached by invoking `--no-cache`;
+- generated Rust bytes and generated-program runtime behavior/cost are independent of cache hits;
+- no remote cache, executable download, daemon/compiler service, incremental-rustc session, linker replacement, package/dependency redesign, VM, GC, or language-semantic change is implied.
+
+**Reason:** #76 measured an unchanged warm build at **96.986 ms** with rustc invoked **5/5** times while the frontend was roughly one millisecond. Exact verified artifact reuse removes the dominant redundant compile/link work without weakening frontend validation or changing generated programs.
+
+Accepted code/evidence-head proof: PR #81 head `9fcab321d3be05b291c2d80f3949f0c975db242a`, CI #337 / run `34213183199`, three OS jobs SUCCESS. Controlled Ubuntu artifact `evo-build-cache-turnaround-ubuntu-latest`, id `10050970173`, digest `sha256:bf949ee935a2512bd9b74726155b5f67d57a46a122af41c7377f86e3f2a2fa8e`, recorded cold median **137.783 ms**, warm cached median **18.341 ms**, warm rustc compile count **0**, correctness **PASS**, and **5.288x** speedup versus the accepted #76 warm uncached baseline. Generated Rust remained 1240 bytes with SHA-256 `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`.
+
+PR #81 still requires the natural CI of its final durable-docs head before merge. The code/evidence decision above is implementation-backed; merge/post-main evidence should be appended to durable handoff state when available.
+
 ## Changing a decision
 
 A future change should record:

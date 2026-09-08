@@ -4,156 +4,114 @@ This file is intentionally operational. A fresh chat/agent should be able to res
 
 Last verified update: **2026-09-08**
 
-## Verified merged baseline
+## Live baseline at this update
 
-Build latency baseline v0 **#76 is completed** and PR **#78 is merged**.
-
-Latest verified code-bearing `main` baseline:
-
-- `34f0815d0821543586cd3ae73b9b5b616a1396d3`
-- PR #78 squash merge
-- post-merge CI **#325** / run `34205500589`: **SUCCESS** on Ubuntu, Windows and macOS
+- live `main`: `53067b74f64fadab4b41684911401e822972bd26`
+- latest verified code-bearing merged baseline: `34f0815d0821543586cd3ae73b9b5b616a1396d3` from PR #78
+- PR #78 post-merge main CI #325 / run `34205500589`: **SUCCESS**
 - Rust toolchain: **1.98.0**
+- active issue: **#79 verified build artifact reuse v0**
+- active PR: **#81 `feat: reuse verified artifacts for unchanged evo build`**
 
-A later docs-only handoff merge may advance live `main`. Before implementation, verify live `main`, open PRs and queued/in-progress Actions rather than assuming this file can predict its own future squash SHA.
+Always verify live GitHub before acting.
 
-## Accepted #76 evidence
+## Accepted PR #81 code/evidence head
 
-Final PR head:
+Code/evidence head:
 
-- `96b8de7570662aa5cf5886f90ea5f0432a2c14fe`
+- `9fcab321d3be05b291c2d80f3949f0c975db242a`
 
-Final PR CI:
+Exact-head CI:
 
-- CI **#324** / run `34202560065`: **SUCCESS** on Ubuntu, Windows and macOS.
+- CI **#337** / run `34213183199`: **SUCCESS** on Ubuntu, Windows and macOS;
+- Ubuntu: fmt, Clippy, workspace tests, fast edit-run evidence, uncached build-latency baseline, verified build-cache evidence, benchmark smoke, all runtime/performance gates, release build: SUCCESS;
+- Windows/macOS: fmt, Clippy, workspace tests, benchmark smoke, release build: SUCCESS.
 
-Accepted Ubuntu artifact:
+Accepted Ubuntu cache artifact:
 
-- `evo-build-latency-ubuntu-latest`
-- artifact id `10046420977`
-- digest `sha256:d3310910395f9c6be50200c261402bfdbb8c7ef617ed18f71b3aa7486a22a2b0`
-
-Controlled medians:
-
-- `evo check`: **1.207 ms**
-- `evo emit-rust`: **1.210 ms**
-- cold `evo build`: **99.970 ms**
-- unchanged warm `evo build`: **96.986 ms**
-- edited `evo build`: **95.515 ms**
-- direct rustc compile/link: **94.131 ms**
-
-Approximate build-minus-direct-rustc median signal:
-
-- cold: **5.839 ms**
-- warm: **2.856 ms**
-- edit: **1.384 ms**
-
-Rustc compile counts across five measured samples:
-
-- cold: **5/5**
-- unchanged warm: **5/5**
-- edit: **5/5**
-- direct rustc: **5/5**
+- name: `evo-build-cache-turnaround-ubuntu-latest`
+- id: `10050970173`
+- digest: `sha256:bf949ee935a2512bd9b74726155b5f67d57a46a122af41c7377f86e3f2a2fa8e`
+- fixture: `benchmarks/cases/enums-v0/evolution.evo`
+- cold median: **137.783 ms**
+- warm cached median: **18.341 ms**
+- cold-to-warm speedup: **7.512x**
+- accepted #76 warm uncached baseline: **96.986 ms**
+- baseline-to-cached speedup: **5.288x**
+- cold rustc compile count: **5**
+- warm rustc compile count: **0**
+- correctness: **PASS**
 
 Exact retained generated Rust:
 
 - 1240 bytes
 - SHA-256 `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`
-- matches the accepted Enums v0 baseline.
+- matches accepted Enums v0 / #76 evidence.
 
-Retained failed evidence:
+The #76 baseline harness now invokes `evo build ... --no-cache`, so its warm/cold/edit numbers remain explicitly **uncached** after PR #81 makes verified cache reuse the default build behavior.
 
-- CI #323 / run `34202332386`: rustfmt-only first harness head; not rerun.
+## Current PR #81 finalization sequence
 
-## Evidence decision
+PR #81 is still draft at the time these durable docs are being written. The documentation commit itself creates a new exact PR head.
 
-#76 completed with:
+Follow this sequence exactly:
 
-- **Implement:** verified unchanged-build artifact reuse v0;
-- **Research separately:** changed-source incremental-rustc/session reuse.
+1. Read PR #81 live head and find the one natural CI run for that exact docs head.
+2. Do **not** create a duplicate run while that SHA/workflow/input is queued or in progress.
+3. Require all three OS jobs green.
+4. Require Ubuntu's verified build-cache evidence, preserved uncached build-latency baseline, and every existing runtime/performance gate green.
+5. Download the final-head `evo-build-cache-turnaround-ubuntu-latest` artifact and confirm:
+   - `warm_rustc_compile_count = 0`;
+   - `correctness = PASS`;
+   - generated Rust SHA-256 remains `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`;
+   - warm median remains materially below the accepted #76 **96.986 ms** uncached baseline.
+6. Update the #79 acceptance comment if the final docs-head artifact values differ from the code/evidence-head values above.
+7. Update PR #81 body from draft-status language to final accepted evidence.
+8. Mark PR #81 ready for review only after the exact docs head is green.
+9. Squash merge PR #81 with `expected_head_sha` equal to the verified final docs head.
+10. Capture the squash merge SHA.
+11. Track the natural `push` CI on that exact `main` merge SHA; require SUCCESS before treating the new `main` as stable.
+12. Close #79 as completed if the PR did not close it automatically, and update meta issue #40.
+13. Refresh durable handoff state if the squash merge SHA/post-main run cannot be represented accurately before merge.
 
-Do not optimize the frontend for this path first. The measured frontend is ~1.2 ms while direct rustc compile/link is ~94.1 ms. Unchanged warm build still invokes rustc every time.
+Failed earlier SHAs remain evidence; do not rerun them merely for a green color.
 
-Do not claim exact artifact reuse solves changed-source rebuilds. The deterministic edit path remains ~95.5 ms with rustc invoked 5/5 times.
+## Accepted build-cache contract
 
-## Active P0 — #79
+The implemented v0 contract is documented in `docs/BUILD_CACHE.md` and D-021.
 
-Issue **#79 — P0 verified build artifact reuse v0: unchanged evo build without rustc** is open.
+Key invariants:
 
-Parent: #2
+- full frontend validation/lowering/codegen every `evo build` invocation;
+- separate `build-cache-v0` from `run-cache-v0`;
+- exact source + generated Rust + compiler/config identity verification;
+- completion marker and regular non-symlink native artifact;
+- cache key is a locator only;
+- safe output materialization;
+- `--no-cache` bypass;
+- corruption/unavailability fails closed to normal compilation;
+- generated Rust and generated-program runtime semantics/cost unchanged;
+- no daemon, remote executable download, incremental-rustc session, linker replacement, or package-system work in this slice.
 
-Weakness source: #6 Build / Compile.
+## Successor after #79
 
-Roadmap: #1 Phase 3.4 warm build / incremental build.
+After PR #81 merge and post-merge main CI are verified green, the next Build / Compile P0 should be **research-first changed-source incremental compilation**.
 
-### Required design boundary
+Evidence source: #76 edited build median **95.515 ms**, rustc compile count **5/5**.
 
-Keep #79 separate from `run-cache-v0` behavior.
+Bound the next issue around measurement and feasibility before implementation. It should answer:
 
-Preferred v0 shape:
+1. Can a persistent rustc incremental/session directory materially reduce the deterministic edited-source fixture latency?
+2. What exact invalidation identity is required?
+3. Can this stay tooling-only without a mandatory compiler daemon/service?
+4. How are generated-Rust source mapping and rustc diagnostics preserved?
+5. What disk-state cleanup/race/corruption rules are needed?
+6. Does the measured gain justify implementation complexity versus exact cache reuse alone?
 
-- separate `build-cache-v0` layout / adapter;
-- same per-user cache-root policy and `EVO_CACHE_DIR` override;
-- exact Evolution source + generated Rust + compiler/configuration identity verification;
-- completion marker and regular non-symlink native artifact requirement;
-- bounded local pruning;
-- races may compile redundantly rather than consume partial entries;
-- corruption/mismatch/unavailable cache fails closed to normal compilation;
-- frontend validation/lowering/codegen always runs before cache reuse;
-- hit materializes the verified native artifact to the requested build output path;
-- generated Rust and runtime semantics unchanged.
-
-Do **not** silently change the existing #67 `run-cache-v0` layout or behavior to make the implementation look more generic.
-
-### CLI behavior
-
-Required interface:
-
-- normal `evo build <file.evo> [output]` may use verified cache reuse by default;
-- `evo build <file.evo> --no-cache` bypasses cache and uses default output;
-- `evo build <file.evo> <output> --no-cache` bypasses cache and uses explicit output;
-- existing explicit output behavior remains compatible.
-
-## First implementation sequence
-
-Only after this docs-only handoff is merged and its `main` CI is green:
-
-1. Verify live `main`, open PRs and active queued/in-progress Actions.
-2. Create `feature/verified-build-cache-v0` from exact verified `main`.
-3. Add a dedicated `build_cache.rs` with exact identity verification and tests before wiring CLI behavior.
-4. Reuse policy ideas from `run_cache.rs`, but keep layout and externally observable run-cache semantics independent.
-5. Add safe artifact materialization to requested output. Parent directories and replacement behavior must remain compatible with current build semantics.
-6. Update build argument parsing for optional `--no-cache` without breaking explicit output paths.
-7. Wire cache lookup only after `load_program()` has completed successfully.
-8. On miss, compile once with the normal existing rustc path/flags, publish a complete verified cache entry, then materialize output.
-9. Add process-level tests using the rustc-counting wrapper:
-   - cold first build = 1 compile;
-   - unchanged warm build = 0 compile;
-   - `--no-cache` = compile;
-   - changed source/generated/compiler identity = miss;
-   - corruption/incomplete/missing/symlink = miss;
-   - different output paths reuse the same verified cached artifact;
-   - resulting binary output stays correct.
-10. Prove `evo run` cache tests and behavior remain unchanged.
-11. Extend the #76 Ubuntu build-latency evidence to compare accepted baseline against cached warm builds.
-12. Hard acceptance: unchanged warm rustc compile count **0** plus correct output. Timing improvement is supporting evidence, not semantic proof.
-13. Keep normal three-OS fmt/Clippy/workspace tests and every existing Ubuntu turnaround/runtime/performance gate green.
-14. Merge only from the exact final head after one natural final CI run.
-
-## Explicit non-goals
-
-Do not fold these into #79:
-
-- changed-source incremental rustc sessions;
-- compiler daemon/server;
-- remote cache or executable download;
-- linker replacement;
-- Cargo/dependency graph work;
-- package system semantics;
-- runtime-language changes.
+Do **not** fold dependency/package graphs, remote caches, linker replacement, daemon architecture, language runtime changes, or frontend redesign into that first research slice.
 
 ## CI rule
 
 Never create duplicate active Actions for the same SHA/workflow/input.
 
-If a run is queued or in progress, track that run ID and continue independent work. Failed SHAs remain evidence; do not rerun them merely to obtain a friendlier color.
+If a run is queued or in progress, track that run ID and continue independent work. Failed SHAs remain retained evidence.
