@@ -83,58 +83,52 @@ fn compile_rustc_wrapper(dir: &Path, rustc: &OsStr) -> PathBuf {
     binary
 }
 
-fn build_command(
-    source: &Path,
-    output: Option<&Path>,
-    cache_dir: &Path,
-    wrapper: &Path,
-    rustc: &OsStr,
-    counter: &Path,
-    fingerprint_salt: Option<&str>,
-    no_cache: bool,
-) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_evo"));
-    command
-        .arg("build")
-        .arg(source)
-        .env("EVO_CACHE_DIR", cache_dir)
-        .env("RUSTC", wrapper)
-        .env("EVO_TEST_REAL_RUSTC", rustc)
-        .env("EVO_TEST_RUSTC_COUNT", counter);
-    if let Some(output) = output {
-        command.arg(output);
-    }
-    if no_cache {
-        command.arg("--no-cache");
-    }
-    if let Some(salt) = fingerprint_salt {
-        command.env("EVO_TEST_FINGERPRINT_SALT", salt);
-    }
-    command
+struct BuildHarness<'a> {
+    cache_dir: &'a Path,
+    wrapper: &'a Path,
+    rustc: &'a OsStr,
+    counter: &'a Path,
 }
 
-fn run_build(
-    source: &Path,
-    output: Option<&Path>,
-    cache_dir: &Path,
-    wrapper: &Path,
-    rustc: &OsStr,
-    counter: &Path,
-    fingerprint_salt: Option<&str>,
-    no_cache: bool,
-) -> Output {
-    build_command(
-        source,
-        output,
-        cache_dir,
-        wrapper,
-        rustc,
-        counter,
-        fingerprint_salt,
-        no_cache,
-    )
-    .output()
-    .expect("evo build should execute")
+impl BuildHarness<'_> {
+    fn command(
+        &self,
+        source: &Path,
+        output: Option<&Path>,
+        fingerprint_salt: Option<&str>,
+        no_cache: bool,
+    ) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_evo"));
+        command
+            .arg("build")
+            .arg(source)
+            .env("EVO_CACHE_DIR", self.cache_dir)
+            .env("RUSTC", self.wrapper)
+            .env("EVO_TEST_REAL_RUSTC", self.rustc)
+            .env("EVO_TEST_RUSTC_COUNT", self.counter);
+        if let Some(output) = output {
+            command.arg(output);
+        }
+        if no_cache {
+            command.arg("--no-cache");
+        }
+        if let Some(salt) = fingerprint_salt {
+            command.env("EVO_TEST_FINGERPRINT_SALT", salt);
+        }
+        command
+    }
+
+    fn run(
+        &self,
+        source: &Path,
+        output: Option<&Path>,
+        fingerprint_salt: Option<&str>,
+        no_cache: bool,
+    ) -> Output {
+        self.command(source, output, fingerprint_salt, no_cache)
+            .output()
+            .expect("evo build should execute")
+    }
 }
 
 fn compile_count(counter: &Path) -> u64 {
@@ -203,32 +197,20 @@ fn unchanged_build_reuses_verified_artifact_and_invalidates_safely() {
 
     let rustc = real_rustc();
     let wrapper = compile_rustc_wrapper(&dir, &rustc);
+    let harness = BuildHarness {
+        cache_dir: &cache_dir,
+        wrapper: &wrapper,
+        rustc: &rustc,
+        counter: &counter,
+    };
 
-    let cold = run_build(
-        &source,
-        Some(&output_a),
-        &cache_dir,
-        &wrapper,
-        &rustc,
-        &counter,
-        None,
-        false,
-    );
+    let cold = harness.run(&source, Some(&output_a), None, false);
     assert_build_success(&cold);
     assert_binary_stdout(&output_a, "2");
     assert_eq!(compile_count(&counter), 1, "cold build must compile once");
 
     fs::write(&output_a, b"not-a-binary").expect("existing output should be replaceable");
-    let warm = run_build(
-        &source,
-        Some(&output_a),
-        &cache_dir,
-        &wrapper,
-        &rustc,
-        &counter,
-        None,
-        false,
-    );
+    let warm = harness.run(&source, Some(&output_a), None, false);
     assert_build_success(&warm);
     assert_binary_stdout(&output_a, "2");
     assert_eq!(
@@ -237,16 +219,7 @@ fn unchanged_build_reuses_verified_artifact_and_invalidates_safely() {
         "unchanged warm build must materialize without compiling"
     );
 
-    let different_output = run_build(
-        &source,
-        Some(&output_b),
-        &cache_dir,
-        &wrapper,
-        &rustc,
-        &counter,
-        None,
-        false,
-    );
+    let different_output = harness.run(&source, Some(&output_b), None, false);
     assert_build_success(&different_output);
     assert_binary_stdout(&output_b, "2");
     assert_eq!(
@@ -258,16 +231,7 @@ fn unchanged_build_reuses_verified_artifact_and_invalidates_safely() {
     let entry = first_cache_entry(&cache_dir);
     fs::write(entry.join("compiler.txt"), "corrupt")
         .expect("cache identity should be corruptible for the regression test");
-    let after_corruption = run_build(
-        &source,
-        Some(&output_b),
-        &cache_dir,
-        &wrapper,
-        &rustc,
-        &counter,
-        None,
-        false,
-    );
+    let after_corruption = harness.run(&source, Some(&output_b), None, false);
     assert_build_success(&after_corruption);
     assert_binary_stdout(&output_b, "2");
     assert_eq!(
@@ -277,16 +241,7 @@ fn unchanged_build_reuses_verified_artifact_and_invalidates_safely() {
     );
 
     fs::write(&source, "print @\n").expect("invalid source should be written");
-    let invalid = run_build(
-        &source,
-        Some(&output_b),
-        &cache_dir,
-        &wrapper,
-        &rustc,
-        &counter,
-        None,
-        false,
-    );
+    let invalid = harness.run(&source, Some(&output_b), None, false);
     assert!(
         !invalid.status.success(),
         "invalid frontend source must fail"
@@ -303,30 +258,12 @@ fn unchanged_build_reuses_verified_artifact_and_invalidates_safely() {
     );
 
     fs::write(&source, "print 3\n").expect("changed source should be written");
-    let changed = run_build(
-        &source,
-        Some(&output_b),
-        &cache_dir,
-        &wrapper,
-        &rustc,
-        &counter,
-        None,
-        false,
-    );
+    let changed = harness.run(&source, Some(&output_b), None, false);
     assert_build_success(&changed);
     assert_binary_stdout(&output_b, "3");
     assert_eq!(compile_count(&counter), 3, "source change must miss cache");
 
-    let fingerprint_changed = run_build(
-        &source,
-        Some(&output_b),
-        &cache_dir,
-        &wrapper,
-        &rustc,
-        &counter,
-        Some("toolchain-b"),
-        false,
-    );
+    let fingerprint_changed = harness.run(&source, Some(&output_b), Some("toolchain-b"), false);
     assert_build_success(&fingerprint_changed);
     assert_binary_stdout(&output_b, "3");
     assert_eq!(
@@ -335,16 +272,7 @@ fn unchanged_build_reuses_verified_artifact_and_invalidates_safely() {
         "compiler fingerprint change must miss cache"
     );
 
-    let fingerprint_warm = run_build(
-        &source,
-        Some(&output_b),
-        &cache_dir,
-        &wrapper,
-        &rustc,
-        &counter,
-        Some("toolchain-b"),
-        false,
-    );
+    let fingerprint_warm = harness.run(&source, Some(&output_b), Some("toolchain-b"), false);
     assert_build_success(&fingerprint_warm);
     assert_eq!(
         compile_count(&counter),
@@ -352,30 +280,12 @@ fn unchanged_build_reuses_verified_artifact_and_invalidates_safely() {
         "unchanged build under new fingerprint must warm-hit"
     );
 
-    let bypass = run_build(
-        &source,
-        Some(&output_b),
-        &cache_dir,
-        &wrapper,
-        &rustc,
-        &counter,
-        Some("toolchain-b"),
-        true,
-    );
+    let bypass = harness.run(&source, Some(&output_b), Some("toolchain-b"), true);
     assert_build_success(&bypass);
     assert_binary_stdout(&output_b, "3");
     assert_eq!(compile_count(&counter), 5, "--no-cache must compile");
 
-    let default_bypass = run_build(
-        &source,
-        None,
-        &cache_dir,
-        &wrapper,
-        &rustc,
-        &counter,
-        Some("toolchain-b"),
-        true,
-    );
+    let default_bypass = harness.run(&source, None, Some("toolchain-b"), true);
     assert_build_success(&default_bypass);
     let default_output = default_output_path(&source);
     assert_binary_stdout(&default_output, "3");
@@ -387,16 +297,13 @@ fn unchanged_build_reuses_verified_artifact_and_invalidates_safely() {
 
     let unavailable_cache = dir.join("cache-is-a-file");
     fs::write(&unavailable_cache, b"not-a-directory").expect("cache sentinel should write");
-    let fallback = run_build(
-        &source,
-        Some(&output_a),
-        &unavailable_cache,
-        &wrapper,
-        &rustc,
-        &counter,
-        Some("toolchain-b"),
-        false,
-    );
+    let fallback_harness = BuildHarness {
+        cache_dir: &unavailable_cache,
+        wrapper: &wrapper,
+        rustc: &rustc,
+        counter: &counter,
+    };
+    let fallback = fallback_harness.run(&source, Some(&output_a), Some("toolchain-b"), false);
     assert_build_success(&fallback);
     assert_binary_stdout(&output_a, "3");
     assert_eq!(
