@@ -9,84 +9,126 @@ This file is the durable project handoff. Fresh sessions should read `AGENTS.md`
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
 - Rust toolchain: **1.98.0**
-- Latest verified code-bearing `main`: `cd6dcd096af20f9f94c4f201e715ae87c848c480`
-- Source: PR **#75** squash merge
-- Post-merge main CI **#320** / run `34198404953`: **SUCCESS** on Ubuntu, Windows and macOS
-- Open feature PRs at this handoff point: none
-- Next atomic P0: **#76 build latency baseline v0**
+- Latest verified code-bearing `main`: `34f0815d0821543586cd3ae73b9b5b616a1396d3`
+- Source: PR **#78** squash merge
+- Post-merge main CI **#325** / run `34205500589`: **SUCCESS** on Ubuntu, Windows and macOS
+- Active successor P0: **#79 verified build artifact reuse v0**
 
-A later docs-only handoff merge may advance `main` beyond the code-bearing SHA above. Always verify live `main` before new implementation work. Documentation still has not defeated causality.
+A later docs-only handoff merge may advance live `main` beyond the code-bearing SHA above. Always verify live `main`, open PRs and active Actions before implementation work.
 
-## Completed P0 — Diagnostic suggestions v0 (#74)
+## Completed P0 — Build latency baseline v0 (#76)
 
-Issue **#74** is completed. PR **#75 — `feat: add deterministic source-native diagnostic suggestions`** is merged.
+Issue **#76** is completed. PR **#78 — `bench: establish build latency attribution baseline`** is merged.
 
-Delivered behavior:
-
-- conservative deterministic one-edit matcher for current ASCII identifiers;
-- supported edit shapes: insertion, deletion, substitution and adjacent transposition;
-- suggestions require one unique best candidate inside the fixed conservative threshold;
-- equal-best ties, distant names, one-character guesses and empty candidate sets stay silent;
-- candidate lookup stays namespace-specific rather than searching one global fuzzy symbol pool;
-- local suggestions are lexical-scope-aware;
-- function suggestions use declared functions only;
-- record type/constructor/constructor-field/field suggestions use record-specific candidates;
-- enum type/constructor/variant/match-variant suggestions use enum-specific candidates;
-- primary diagnostic message/span remain stable; suggestion is bounded additional `help:` text;
-- a dedicated compile-time help sidecar is keyed by exact primary `(message, span)` identity;
-- stale/mismatched help state is dropped and cannot contaminate unrelated diagnostics;
-- move-origin related locations from #69 and textual help can coexist;
-- parser autocorrection, automatic source edits and LSP/code actions remain out of scope;
-- ownership accept/reject semantics are unchanged;
-- no generated-program runtime metadata or cost was introduced.
+The accepted slice is measurement/attribution infrastructure only. It did **not** change `evo build` caching, generated Rust semantics, generated-program runtime behavior, linker choice, package/dependency behavior, or rustc incremental-session behavior.
 
 ### Final exact-head evidence
 
 Final PR head:
 
-- `1f3fdec69f81c8d6742d3fde47d698a3df3f3543`
+- `96b8de7570662aa5cf5886f90ea5f0432a2c14fe`
 
 Final PR CI:
 
-- CI **#319** / run `34197970982`: **SUCCESS** on Ubuntu, Windows and macOS;
-- Ubuntu passed fmt, Clippy, workspace tests, fast edit-run turnaround evidence, benchmark smoke, runtime repeat, control-flow, logical operators, Functions v0, Block locals v0, Records v0, Enums v0 and release build;
+- CI **#324** / run `34202560065`: **SUCCESS** on Ubuntu, Windows and macOS;
+- Ubuntu passed fmt, Clippy, workspace tests, fast edit-run turnaround, the new build-latency evidence step, benchmark smoke, every existing runtime/performance gate and release build;
 - Windows/macOS passed fmt, Clippy, workspace tests, benchmark smoke and release build.
 
-Retained failed/intermediate heads were not rerun merely for color:
+Retained failed evidence:
 
-- CI #314 / run `34191629058`: rustfmt-only failure;
-- CI #316 / run `34192026716`: rustfmt-only failure in the new process test;
-- CI #317 / run `34197292048`: acceptance-test failure proving `MabyInt -> MaybeInt` is outside the one-edit boundary; test corrected to one-edit `MaybInt -> MaybeInt`, matcher threshold intentionally unchanged.
+- CI **#323** / run `34202332386`: rustfmt-only failure on the first harness head; Clippy/tests/evidence did not run and the failed SHA was not rerun.
 
-### Generated-Rust preservation
+### Accepted Ubuntu build-latency artifact
 
-The Ubuntu Enums benchmark artifact from accepted pre-feature main CI #304 was compared with the feature artifact from compiler head `20eb7210336d53827b89b2481e0f9cde38867a00`.
+Artifact:
 
-Exact equality evidence:
+- name: `evo-build-latency-ubuntu-latest`;
+- id: `10046420977`;
+- digest: `sha256:d3310910395f9c6be50200c261402bfdbb8c7ef617ed18f71b3aa7486a22a2b0`;
+- platform: `linux-x86_64`;
+- rustc host: `x86_64-unknown-linux-gnu`;
+- rustc flags: `--edition=2024 --error-format=short -C opt-level=3 -C codegen-units=1`.
 
-- `generated.rs` SHA-256 on both sides: `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`;
-- generated native executable SHA-256 on both sides: `d2b172767e1ca9267173322ca2d2eb3bc9941361c93f3f64056d6c81d05d0431`;
-- generated LLVM IR SHA-256 on both sides: `0c82e4c394ab5edc7f32d21a9f48800ada2ed169c695c04b8d66c677eecc533f`.
+Controlled fixture:
 
-Commits after that compiler head through the final PR head changed only `crates/evo-cli/tests/diagnostic_suggestions.rs`, so compiler/codegen bytes remained unchanged after the comparison point.
+- `benchmarks/cases/enums-v0/evolution.evo`;
+- committed stdin `20000000\n9\n`;
+- committed expected stdout `15099959897\n`;
+- deterministic edit sample changes one `sum = sum + value` expression to `sum = value + sum`, preserving result while changing generated Rust.
 
-## Post-merge verification
+Accepted medians:
 
-Squash merge:
+- `evo check`: **1.207 ms**;
+- `evo emit-rust`: **1.210 ms**;
+- cold `evo build`: **99.970 ms**;
+- unchanged warm `evo build`: **96.986 ms**;
+- edited `evo build`: **95.515 ms**;
+- direct rustc compile/link of exact emitted Rust: **94.131 ms**.
 
-- `cd6dcd096af20f9f94c4f201e715ae87c848c480`
+Approximate build-minus-direct-rustc median signal:
 
-Post-merge main CI:
+- cold: **5.839 ms**;
+- warm unchanged: **2.856 ms**;
+- edit: **1.384 ms**.
 
-- CI **#320** / run `34198404953`: **SUCCESS**;
-- Ubuntu repeated all quality, turnaround, benchmark, runtime/performance and release gates successfully;
-- Windows and macOS quality/test/benchmark-smoke/release jobs passed.
+These subtractions are retained as rough attribution signals only, not causal profiling.
 
-Issue #74 closed automatically as **completed** from the merged PR.
+Rustc compile invocation count across five measured samples per class:
+
+- cold build: **5/5**;
+- unchanged warm build: **5/5**;
+- edited build: **5/5**;
+- direct rustc: **5/5**.
+
+Every measured native artifact executed the committed fixture input and matched committed expected output.
+
+The exact retained generated Rust is **1240 bytes** with SHA-256:
+
+- `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`
+
+This matches the existing accepted Enums v0 generated-Rust baseline.
+
+## Evidence-driven next action
+
+The #76 completion decision is:
+
+- **Implement:** verified unchanged-build native artifact reuse v0;
+- **Research separately:** changed-source incremental-rustc/session reuse.
+
+Reason: unchanged warm `evo build` still invokes rustc on every sample. Direct rustc accounts for roughly **94.1 ms** of a roughly **97.0 ms** median unchanged build, while frontend/check/codegen is roughly **1.2 ms**. Optimizing the frontend first would be excellent craftsmanship applied to the wrong bottleneck, a traditional industry pastime.
+
+The deterministic edited build also invokes rustc on every sample and remains roughly **95.5 ms**, so exact artifact reuse intentionally does not claim to solve changed-source rebuild latency.
+
+## Active P0 — #79 verified build artifact reuse v0
+
+Issue **#79 — `P0 verified build artifact reuse v0: unchanged evo build without rustc`** is open.
+
+Bounded goal:
+
+- keep full frontend validation/lowering/codegen on every `evo build` invocation;
+- use a separate verified local `build-cache-v0` rather than silently changing `run-cache-v0` semantics;
+- require exact Evolution source, generated Rust and compiler/configuration identity on hit;
+- reject incomplete, corrupt, missing or symlink cache artifacts;
+- materialize a verified cached native artifact to the requested build output path;
+- add explicit `--no-cache` bypass;
+- on unchanged verified warm builds, require **0 rustc compile invocations** and correct output;
+- changed source/generated Rust/compiler identity must miss and compile normally;
+- cache unavailability/corruption must fail closed to recompilation;
+- `evo run` cache behavior remains unchanged;
+- generated Rust and generated-program runtime behavior remain unchanged.
+
+Explicit non-goals for #79:
+
+- changed-source incremental rustc sessions;
+- daemon/compiler service;
+- remote cache or executable download;
+- linker replacement;
+- dependency/package system work;
+- generated-program runtime changes.
 
 ## Current implemented language / diagnostics state
 
-`docs/LANGUAGE_SPEC_V0.md` remains the implemented-language source of truth. No syntax or accepted-program semantics changed in #74.
+`docs/LANGUAGE_SPEC_V0.md` remains the implemented-language source of truth. #76 changed tooling measurement only, not language syntax or accepted-program semantics.
 
 Current accepted core includes:
 
@@ -105,82 +147,43 @@ Current accepted core includes:
 - generated-line source maps and rustc remapping;
 - native `check`, `emit-rust`, `build`, `run`, `fmt` workflows;
 - verified persistent `evo run` compile caching;
+- controlled build-latency evidence infrastructure;
 - differential correctness/performance infrastructure and retained artifacts.
 
 The current `string` value semantics remain **static/literal**. Do not silently treat the type as a general owned runtime string.
 
 ## Prior accepted P0s
 
+### Diagnostic suggestions v0 (#74)
+
+- PR #75 final head `1f3fdec69f81c8d6742d3fde47d698a3df3f3543`;
+- CI #319 / run `34197970982`: SUCCESS;
+- squash merge `cd6dcd096af20f9f94c4f201e715ae87c848c480`;
+- post-merge CI #320 / run `34198404953`: SUCCESS;
+- generated Rust/native/LLVM identity remained unchanged for the accepted Enums evidence.
+
 ### Move diagnostics v0 (#69)
 
 - PR #71 final head `74f6a5955d46bd9620045bd39e9703383ae30679`;
-- PR CI #301 / run `34141025715`: SUCCESS;
+- CI #301 / run `34141025715`: SUCCESS;
 - squash merge `795461c53f896c2223443cdb022f340a5032a0bd`;
-- post-merge CI #302 / run `34158551578`: SUCCESS;
-- deterministic source-native move provenance is compile-time-only diagnostics metadata;
-- accepted generated Rust remained identical to the accepted Enums baseline.
+- post-merge CI #302 / run `34158551578`: SUCCESS.
 
 ### Fast edit-run v0 (#67)
 
 - PR #68 final head `b26a84819e8a89f27220ebd2eb16d4d91d513094`;
-- PR CI #288 / run `34123896927`: SUCCESS;
-- feature merge `17206a702b497731bd5174a0e011225711492d3e`;
+- CI #288 / run `34123896927`: SUCCESS;
 - controlled cold median **69.258 ms**;
 - warm median **14.972 ms**;
-- observed warm speedup **4.626x**;
-- measured warm rustc compile count **0**.
+- warm rustc compile count **0**.
 
-The `evo run` cache remains tooling state only and does not change generated-program semantics.
-
-Records v0 and Enums v0 remain the accepted ZERO-cost nominal data baselines with direct static Rust lowering and explicit by-value ownership.
-
-## Active P0 — #76 build latency baseline v0
-
-Issue **#76 — `P0 build latency baseline v0: cold, warm and edit compile attribution`** is open.
-
-Roadmap / weakness source:
-
-- parent: #2;
-- weakness source: #6 Build / Compile;
-- roadmap: #1 Phase 3.4 — Cold build baseline, Warm build baseline, Incremental build.
-
-### Verified current build-path root cause
-
-Current `evo build`:
-
-1. performs normal frontend validation/lowering/codegen through `load_program`;
-2. calls `compile_rust()` directly;
-3. creates a fresh temporary directory and writes generated `main.rs`;
-4. invokes the selected rustc with the existing edition/optimization/codegen-unit flags;
-5. links directly to the requested output path;
-6. removes the temporary directory.
-
-The verified persistent cache from #67 is only used by `run_generated()` for `evo run`. `evo build` deliberately does not consult it.
-
-Therefore unchanged `evo build` currently follows a full rustc compile/link path by control flow. #76 still measures actual invocation counts and latency rather than turning code inspection into fake benchmark data.
-
-### #76 boundary
-
-This slice is measurement/attribution only. It must not introduce build caching, rustc incremental sessions, a daemon, remote cache, linker replacement, dependency/package semantics, or generated-program runtime changes.
-
-Controlled Ubuntu evidence must measure at minimum:
-
-- frontend/check latency;
-- emit latency;
-- cold build latency;
-- unchanged warm build latency;
-- deterministic small-edit build latency;
-- direct rustc compile/link latency for the exact generated Rust with matching flags;
-- rustc invocation counts for cold, warm and edited builds;
-- raw samples plus machine-readable and human-readable reports.
-
-The completion output must classify the next build/compile action from evidence as Implement / Research / No-action rather than assuming a cache is automatically the answer.
+`evo run` cache state remains tooling-only and independent from generated-program semantics.
 
 ## ZERO-cost boundary
 
-Current accepted Core-language slices must not silently introduce hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
+Current Core-language slices must not silently introduce hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
 
-Diagnostics and build-measurement metadata are compiler/tooling state. They must not alter accepted generated-program behavior.
+Diagnostics, caches and build-measurement metadata are compiler/tooling state. They must not alter accepted generated-program behavior.
 
 ## Durable continuation infrastructure
 
