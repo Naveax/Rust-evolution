@@ -373,6 +373,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn complete_entry(cache: &BuildCache, root: &Path) -> PathBuf {
         let entry = root.join(format!("entry-{}-test", cache.key));
         fs::create_dir_all(&entry).expect("entry should be created");
