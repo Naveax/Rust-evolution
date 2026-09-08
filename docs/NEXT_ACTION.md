@@ -4,131 +4,153 @@ This file is intentionally operational. A fresh chat/agent should be able to res
 
 Last verified update: **2026-09-08**
 
-## Verified merged feature baseline
+## Verified merged baseline
 
-Diagnostic suggestions v0 **#74 is completed** and PR **#75 is merged**.
+Build latency baseline v0 **#76 is completed** and PR **#78 is merged**.
 
 Latest verified code-bearing `main` baseline:
 
-- `cd6dcd096af20f9f94c4f201e715ae87c848c480`
-- PR #75 squash merge
-- post-merge CI **#320** / run `34198404953`: **SUCCESS** on Ubuntu, Windows and macOS
+- `34f0815d0821543586cd3ae73b9b5b616a1396d3`
+- PR #78 squash merge
+- post-merge CI **#325** / run `34205500589`: **SUCCESS** on Ubuntu, Windows and macOS
 - Rust toolchain: **1.98.0**
 
-A later docs-only handoff merge may advance live `main`. Before implementation, verify live `main`, open PRs and active Actions rather than assuming this document can contain its own future merge SHA.
+A later docs-only handoff merge may advance live `main`. Before implementation, verify live `main`, open PRs and queued/in-progress Actions rather than assuming this file can predict its own future squash SHA.
 
-## Final diagnostic-suggestions evidence
+## Accepted #76 evidence
 
 Final PR head:
 
-- `1f3fdec69f81c8d6742d3fde47d698a3df3f3543`
+- `96b8de7570662aa5cf5886f90ea5f0432a2c14fe`
 
 Final PR CI:
 
-- CI **#319** / run `34197970982`: **SUCCESS** on Ubuntu, Windows and macOS.
+- CI **#324** / run `34202560065`: **SUCCESS** on Ubuntu, Windows and macOS.
 
-Accepted behavior:
+Accepted Ubuntu artifact:
 
-- deterministic conservative one-edit matcher for current ASCII identifiers;
-- insertion/deletion/substitution/adjacent-transposition support;
-- exactly one close unique-best candidate is required;
-- tied, distant, one-character and empty-candidate cases remain silent;
-- local candidate lookup respects lexical visibility;
-- function, record and enum suggestions remain in their correct semantic namespaces;
-- primary diagnostic text/span remain stable and suggestion is bounded extra `help:` text;
-- textual help and #69 move-origin related source locations can coexist;
-- stale suggestion state cannot leak to an unrelated diagnostic;
-- parser autocorrect, automatic source edits and LSP/code actions remain out of scope;
-- ownership semantics and accepted generated-program behavior remain unchanged.
+- `evo-build-latency-ubuntu-latest`
+- artifact id `10046420977`
+- digest `sha256:d3310910395f9c6be50200c261402bfdbb8c7ef617ed18f71b3aa7486a22a2b0`
 
-Retained failed/intermediate evidence was not rerun merely for color:
+Controlled medians:
 
-- #314 / `34191629058`: rustfmt-only failure;
-- #316 / `34192026716`: rustfmt-only process-test failure;
-- #317 / `34197292048`: acceptance-test failure demonstrating `MabyInt -> MaybeInt` exceeds the fixed one-edit boundary. The test was corrected to `MaybInt -> MaybeInt`; the matcher threshold was not loosened.
+- `evo check`: **1.207 ms**
+- `evo emit-rust`: **1.210 ms**
+- cold `evo build`: **99.970 ms**
+- unchanged warm `evo build`: **96.986 ms**
+- edited `evo build`: **95.515 ms**
+- direct rustc compile/link: **94.131 ms**
 
-Generated-output preservation evidence:
+Approximate build-minus-direct-rustc median signal:
 
-- baseline and feature `generated.rs` SHA-256: `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`;
-- baseline and feature native executable SHA-256: `d2b172767e1ca9267173322ca2d2eb3bc9941361c93f3f64056d6c81d05d0431`;
-- baseline and feature LLVM IR SHA-256: `0c82e4c394ab5edc7f32d21a9f48800ada2ed169c695c04b8d66c677eecc533f`.
+- cold: **5.839 ms**
+- warm: **2.856 ms**
+- edit: **1.384 ms**
 
-## Active P0
+Rustc compile counts across five measured samples:
 
-Issue **#76 — P0 build latency baseline v0: cold, warm and edit compile attribution** is open.
+- cold: **5/5**
+- unchanged warm: **5/5**
+- edit: **5/5**
+- direct rustc: **5/5**
+
+Exact retained generated Rust:
+
+- 1240 bytes
+- SHA-256 `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`
+- matches the accepted Enums v0 baseline.
+
+Retained failed evidence:
+
+- CI #323 / run `34202332386`: rustfmt-only first harness head; not rerun.
+
+## Evidence decision
+
+#76 completed with:
+
+- **Implement:** verified unchanged-build artifact reuse v0;
+- **Research separately:** changed-source incremental-rustc/session reuse.
+
+Do not optimize the frontend for this path first. The measured frontend is ~1.2 ms while direct rustc compile/link is ~94.1 ms. Unchanged warm build still invokes rustc every time.
+
+Do not claim exact artifact reuse solves changed-source rebuilds. The deterministic edit path remains ~95.5 ms with rustc invoked 5/5 times.
+
+## Active P0 — #79
+
+Issue **#79 — P0 verified build artifact reuse v0: unchanged evo build without rustc** is open.
 
 Parent: #2
 
 Weakness source: #6 Build / Compile.
 
-Roadmap: #1 Phase 3.4 — cold build baseline, warm build baseline, incremental build.
+Roadmap: #1 Phase 3.4 warm build / incremental build.
 
-### Verified root cause / feasibility
+### Required design boundary
 
-Current `evo build` uses the normal frontend/load path and then calls `compile_rust()` directly.
+Keep #79 separate from `run-cache-v0` behavior.
 
-`compile_rust_with_rustc()`:
+Preferred v0 shape:
 
-- creates a fresh temporary compile directory;
-- writes generated `main.rs`;
-- invokes selected rustc with the existing edition/optimization/codegen-unit flags;
-- writes the native binary to the requested output;
-- removes the temporary directory.
+- separate `build-cache-v0` layout / adapter;
+- same per-user cache-root policy and `EVO_CACHE_DIR` override;
+- exact Evolution source + generated Rust + compiler/configuration identity verification;
+- completion marker and regular non-symlink native artifact requirement;
+- bounded local pruning;
+- races may compile redundantly rather than consume partial entries;
+- corruption/mismatch/unavailable cache fails closed to normal compilation;
+- frontend validation/lowering/codegen always runs before cache reuse;
+- hit materializes the verified native artifact to the requested build output path;
+- generated Rust and runtime semantics unchanged.
 
-The persistent verified compile cache from #67 exists only in `run_generated()` for `evo run`. `evo build` does not consult it.
+Do **not** silently change the existing #67 `run-cache-v0` layout or behavior to make the implementation look more generic.
 
-Thus unchanged `evo build` currently follows a full rustc compile/link control path. #76 must still prove actual invocation counts and timings under controlled evidence instead of treating static inspection as a latency measurement.
+### CLI behavior
 
-Existing `crates/evo-cli/tests/fast_edit_run_turnaround.rs` already contains useful bounded test infrastructure:
+Required interface:
 
-- rustc wrapper construction;
-- compile-invocation counting;
-- `Instant` timing;
-- median computation;
-- raw sample JSON/CSV/Markdown reporting;
-- controlled Ubuntu ignored-test CI pattern.
+- normal `evo build <file.evo> [output]` may use verified cache reuse by default;
+- `evo build <file.evo> --no-cache` bypasses cache and uses default output;
+- `evo build <file.evo> <output> --no-cache` bypasses cache and uses explicit output;
+- existing explicit output behavior remains compatible.
 
-Reuse or factor this infrastructure where doing so keeps the patch smaller and clearer. Do not add a dependency merely to avoid a few obvious standard-library helpers.
+## First implementation sequence
 
-## #76 first implementation slice
+Only after this docs-only handoff is merged and its `main` CI is green:
 
-After this docs-only handoff is merged and its `main` CI is green:
+1. Verify live `main`, open PRs and active queued/in-progress Actions.
+2. Create `feature/verified-build-cache-v0` from exact verified `main`.
+3. Add a dedicated `build_cache.rs` with exact identity verification and tests before wiring CLI behavior.
+4. Reuse policy ideas from `run_cache.rs`, but keep layout and externally observable run-cache semantics independent.
+5. Add safe artifact materialization to requested output. Parent directories and replacement behavior must remain compatible with current build semantics.
+6. Update build argument parsing for optional `--no-cache` without breaking explicit output paths.
+7. Wire cache lookup only after `load_program()` has completed successfully.
+8. On miss, compile once with the normal existing rustc path/flags, publish a complete verified cache entry, then materialize output.
+9. Add process-level tests using the rustc-counting wrapper:
+   - cold first build = 1 compile;
+   - unchanged warm build = 0 compile;
+   - `--no-cache` = compile;
+   - changed source/generated/compiler identity = miss;
+   - corruption/incomplete/missing/symlink = miss;
+   - different output paths reuse the same verified cached artifact;
+   - resulting binary output stays correct.
+10. Prove `evo run` cache tests and behavior remain unchanged.
+11. Extend the #76 Ubuntu build-latency evidence to compare accepted baseline against cached warm builds.
+12. Hard acceptance: unchanged warm rustc compile count **0** plus correct output. Timing improvement is supporting evidence, not semantic proof.
+13. Keep normal three-OS fmt/Clippy/workspace tests and every existing Ubuntu turnaround/runtime/performance gate green.
+14. Merge only from the exact final head after one natural final CI run.
 
-1. Verify live `main`, open PRs and queued/in-progress Actions.
-2. Create `bench/build-latency-baseline-v0` from exact verified `main`.
-3. Do **not** change `evo build` caching or semantics.
-4. Add a controlled ignored integration test/harness under `evo-cli` that can:
-   - time `evo check`;
-   - time `evo emit-rust`;
-   - time cold `evo build`;
-   - time unchanged repeated `evo build`;
-   - make one deterministic small source edit and time rebuilt output;
-   - compile the exact emitted Rust directly with rustc using the same flags;
-   - count rustc compile invocations for each build class;
-   - verify resulting binary output.
-5. Use one representative accepted fixture with functions/control flow/nominal data. Prefer reusing an existing stable Enums-v0-like representative source rather than inventing a new language surface.
-6. Record toolchain, target, flags, git SHA, raw samples, median, min/max and p95/max as defined in #76.
-7. Emit machine-readable JSON/CSV and human-readable Markdown into a stable artifact directory.
-8. Add one Ubuntu-only CI evidence step and artifact upload only after the harness is coherent.
-9. Keep normal three-OS workspace quality/tests and all existing Ubuntu runtime/performance gates unchanged.
-10. From the resulting evidence classify the next build intervention as **Implement / Research / No-action**.
+## Explicit non-goals
 
-## Acceptance boundary
+Do not fold these into #79:
 
-#76 is measurement/attribution only.
-
-Do not fold in:
-
-- `evo build` cache reuse;
-- rustc incremental-session integration;
-- a daemon/compiler server;
-- remote cache;
+- changed-source incremental rustc sessions;
+- compiler daemon/server;
+- remote cache or executable download;
 - linker replacement;
-- package/dependency semantics;
-- proc-macro/workspace-scale optimization;
+- Cargo/dependency graph work;
+- package system semantics;
 - runtime-language changes.
-
-No generated Rust semantic change is expected. Generated-program runtime cost remains **ZERO**.
 
 ## CI rule
 
