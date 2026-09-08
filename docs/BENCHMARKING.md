@@ -160,6 +160,47 @@ Fast edit-run v0 passes this tooling gate only when:
 
 The first accepted evidence is recorded in `docs/FAST_EDIT_RUN_CACHE.md`. The exact speedup is evidence for that runner/run, not a cross-machine performance guarantee.
 
+## Build-latency attribution evidence
+
+Build/compiler latency is also a tooling metric and remains separate from generated-program runtime parity. A faster `evo build` does not buy any exception from the runtime ZERO-cost contract.
+
+Build latency baseline v0 is measured by `crates/evo-cli/tests/build_latency_baseline.rs` on the controlled Ubuntu CI runner.
+
+The evidence procedure uses the committed `benchmarks/cases/enums-v0` fixture and records:
+
+1. repeated `evo check` samples;
+2. repeated `evo emit-rust` samples;
+3. cold `evo build` samples with fresh output paths;
+4. unchanged warm `evo build` samples after a prime build;
+5. deterministic edited-source rebuild samples where generated Rust changes but expected program output remains the same;
+6. direct rustc compile/link samples for the exact emitted Rust with the same successful-build flags;
+7. rustc compile invocation counts for every native compilation class;
+8. native output correctness for every measured build;
+9. raw CSV, JSON, Markdown, generated Rust, source fixture, stdin, expected stdout and verbose rustc identity as the artifact.
+
+The accepted #76 baseline on PR #78 / CI #324 recorded medians:
+
+- `evo check`: **1.207 ms**;
+- `evo emit-rust`: **1.210 ms**;
+- cold `evo build`: **99.970 ms**;
+- unchanged warm `evo build`: **96.986 ms**;
+- edited `evo build`: **95.515 ms**;
+- direct rustc compile/link: **94.131 ms**.
+
+All cold/warm/edit build classes invoked rustc in **5/5** measured samples. The exact retained generated Rust was 1240 bytes with SHA-256 `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`, matching the accepted Enums baseline.
+
+Interpretation rules:
+
+- correctness and invocation counts are hard evidence; wall-clock timing is supporting evidence;
+- `evo build median - direct rustc median` is a rough attribution signal only, because separately sampled medians are not causal profiling;
+- timing samples with scheduler outliers remain visible rather than being deleted to make the chart friendlier;
+- frontend/check/codegen latency and rustc/link latency must be reported separately where possible;
+- an unchanged-build cache must prove **zero rustc compile invocations** on verified hits, not merely a lower median;
+- changed-source incremental compilation is a distinct problem from exact artifact reuse and requires separate evidence/design;
+- build caching, like run caching, is tooling state and must not alter accepted generated Rust or generated-program runtime behavior.
+
+Accepted artifact: `evo-build-latency-ubuntu-latest`, id `10046420977`, digest `sha256:d3310910395f9c6be50200c261402bfdbb8c7ef617ed18f71b3aa7486a22a2b0`.
+
 ## Initial benchmark corpus
 
 ### Core language
@@ -227,6 +268,7 @@ The first accepted evidence is recorded in `docs/FAST_EDIT_RUN_CACHE.md`. The ex
 - A smoke case is not a performance claim.
 - A noisy CI result is not a PASS merely because its median happened to be favorable.
 - Developer-turnaround evidence must stay separate from generated-program runtime parity evidence.
+- Build-latency evidence must stay separate from generated-program runtime parity evidence.
 
 ## CI design
 
