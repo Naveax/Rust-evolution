@@ -1,5 +1,7 @@
 pub use evo_lowering::LowerError;
 
+#[path = "../src/diagnostic_suggestions.rs"]
+mod diagnostic_suggestions;
 #[path = "../src/record_constructor.rs"]
 mod record_constructor;
 #[path = "../src/record_environment.rs"]
