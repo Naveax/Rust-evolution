@@ -164,6 +164,35 @@ For the accepted v0 policy:
 
 Accepted evidence: PR #75 final head `1f3fdec69f81c8d6742d3fde47d698a3df3f3543`, CI #319 / run `34197970982`, squash merge `cd6dcd096af20f9f94c4f201e715ae87c848c480`, and post-merge main CI #320 / run `34198404953`.
 
+## D-020 — Build latency optimization follows measured attribution
+
+**Decision:** For the current single-file native build path, optimize the dominant measured compile/link cost before spending effort on the already-small frontend path. The first implementation target after the accepted #76 baseline is verified unchanged-build native artifact reuse. Changed-source incremental compilation remains a separate research problem.
+
+Accepted #76 evidence on the controlled Ubuntu runner:
+
+- `evo check` median: **1.207 ms**;
+- `evo emit-rust` median: **1.210 ms**;
+- cold `evo build` median: **99.970 ms**;
+- unchanged warm `evo build` median: **96.986 ms**;
+- edited `evo build` median: **95.515 ms**;
+- direct rustc compile/link median: **94.131 ms**;
+- cold/warm/edit rustc invocation count: **5/5** in every class.
+
+Policy implications:
+
+- subtraction of separately sampled build and rustc medians is a rough attribution signal only, not causal profiling;
+- exact invocation counts plus correctness are stronger evidence than one favorable timing sample;
+- verified unchanged-build reuse must still run normal frontend validation/lowering/codegen before any cache hit is accepted;
+- a build cache hit must verify exact Evolution source, generated Rust and compiler/configuration identity rather than trusting a lookup hash alone;
+- build artifact reuse is tooling state and must not alter generated Rust or generated-program runtime behavior;
+- the accepted #67 `run-cache-v0` behavior must not be silently changed merely to share implementation machinery;
+- changed-source incremental-rustc/session work is not implied by exact artifact reuse and requires separate design/evidence;
+- no daemon, remote executable download, linker replacement, package/dependency redesign or runtime-language change follows from this decision.
+
+**Reason:** #76 shows that direct rustc compile/link consumes essentially the entire unchanged-build latency budget while frontend work is around one millisecond. The evidence therefore justifies native artifact reuse for exact unchanged compilation identity, not speculative frontend micro-optimization. The edited-build result also shows why exact reuse and incremental compilation are distinct problems.
+
+Accepted evidence: PR #78 final head `96b8de7570662aa5cf5886f90ea5f0432a2c14fe`, CI #324 / run `34202560065`, artifact `evo-build-latency-ubuntu-latest` id `10046420977` digest `sha256:d3310910395f9c6be50200c261402bfdbb8c7ef617ed18f71b3aa7486a22a2b0`, squash merge `34f0815d0821543586cd3ae73b9b5b616a1396d3`, and post-merge main CI #325 / run `34205500589`.
+
 ## Changing a decision
 
 A future change should record:
