@@ -191,8 +191,12 @@ fn unchanged_build_reuses_verified_artifact_and_invalidates_safely() {
     let cache_dir = dir.join("cache");
     let counter = dir.join("rustc-count.txt");
     let source = dir.join("program.evo");
-    let output_a = dir.join("out-a").join(format!("program{}", env::consts::EXE_SUFFIX));
-    let output_b = dir.join("out-b").join(format!("program{}", env::consts::EXE_SUFFIX));
+    let output_a = dir
+        .join("out-a")
+        .join(format!("program{}", env::consts::EXE_SUFFIX));
+    let output_b = dir
+        .join("out-b")
+        .join(format!("program{}", env::consts::EXE_SUFFIX));
     fs::create_dir_all(&dir).expect("test directory should be created");
     fs::write(&counter, "0").expect("counter should be initialized");
     fs::write(&source, "print 2\n").expect("source should be written");
@@ -283,7 +287,10 @@ fn unchanged_build_reuses_verified_artifact_and_invalidates_safely() {
         None,
         false,
     );
-    assert!(!invalid.status.success(), "invalid frontend source must fail");
+    assert!(
+        !invalid.status.success(),
+        "invalid frontend source must fail"
+    );
     assert!(
         String::from_utf8_lossy(&invalid.stderr).contains("unexpected character"),
         "{}",
