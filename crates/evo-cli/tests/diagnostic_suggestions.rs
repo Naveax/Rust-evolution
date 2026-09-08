@@ -25,7 +25,10 @@ fn check_failure(label: &str, source_text: &str) -> String {
     let stderr = String::from_utf8(output.stderr).expect("diagnostic output should be UTF-8");
     let _ = fs::remove_dir_all(&dir);
 
-    assert!(!output.status.success(), "source unexpectedly succeeded: {source_text}");
+    assert!(
+        !output.status.success(),
+        "source unexpectedly succeeded: {source_text}"
+    );
     assert!(!stderr.contains("main.rs"), "{stderr}");
     assert!(!stderr.contains("rustc failed"), "{stderr}");
     stderr
