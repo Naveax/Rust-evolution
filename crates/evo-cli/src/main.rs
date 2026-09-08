@@ -1,5 +1,7 @@
+mod build_cache;
 mod run_cache;
 
+use build_cache::BuildCache;
 use evo_codegen_rust::{GeneratedRust, try_generate_lowered_rust_with_map};
 use evo_diagnostics::render_error;
 use evo_formatter::format_source;
@@ -72,12 +74,9 @@ fn run_cli() -> Result<(), String> {
             format_file(&source_path, check)
         }
         "build" => {
-            let output = args
-                .next()
-                .map_or_else(|| default_output_path(&source_path), PathBuf::from);
-            reject_extra_args(args)?;
+            let (output, use_cache) = parse_build_arguments(&source_path, args)?;
             let program = load_program(&source_path)?;
-            compile_rust(&program, &source_path, &output)?;
+            build_generated(&program, &source_path, &output, use_cache)?;
             println!("{}", output.display());
             Ok(())
         }
@@ -96,8 +95,31 @@ fn run_cli() -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: evo <check|emit-rust|fmt|build|run> <file.evo> [build-output|--check|--no-cache]"
+    "usage: evo <check|emit-rust|fmt|build|run> <file.evo> [build-output] [--check|--no-cache]"
         .to_owned()
+}
+
+fn parse_build_arguments(
+    source_path: &Path,
+    mut args: impl Iterator<Item = String>,
+) -> Result<(PathBuf, bool), String> {
+    let Some(first) = args.next() else {
+        return Ok((default_output_path(source_path), true));
+    };
+
+    if first == "--no-cache" {
+        reject_extra_args(args)?;
+        return Ok((default_output_path(source_path), false));
+    }
+
+    let output = PathBuf::from(first);
+    let use_cache = match args.next() {
+        None => true,
+        Some(value) if value == "--no-cache" => false,
+        Some(_) => return Err(usage()),
+    };
+    reject_extra_args(args)?;
+    Ok((output, use_cache))
 }
 
 fn reject_extra_args(mut args: impl Iterator<Item = String>) -> Result<(), String> {
@@ -187,6 +209,35 @@ fn compiler_fingerprint(rustc: &OsString) -> Option<String> {
         env::consts::ARCH,
         env::consts::EXE_SUFFIX,
     ))
+}
+
+fn build_generated(
+    program: &LoadedProgram,
+    source_path: &Path,
+    output: &Path,
+    use_cache: bool,
+) -> Result<(), String> {
+    if use_cache {
+        let rustc = selected_rustc();
+        if let Some(fingerprint) = compiler_fingerprint(&rustc)
+            && let Ok(cache) =
+                BuildCache::new(&program.source, &program.generated.source, &fingerprint)
+        {
+            if let Some(artifact) = cache.lookup()
+                && cache.materialize(&artifact, output).is_ok()
+            {
+                return Ok(());
+            }
+
+            compile_rust_with_rustc(program, source_path, output, &rustc)?;
+            if let Ok(staging) = cache.prepare_staging() {
+                let _ = cache.publish_output(staging, output);
+            }
+            return Ok(());
+        }
+    }
+
+    compile_rust(program, source_path, output)
 }
 
 fn compile_rust(program: &LoadedProgram, source_path: &Path, output: &Path) -> Result<(), String> {
@@ -394,9 +445,44 @@ fn default_output_path(source: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{LoadedProgram, parse_rustc_short_error, render_rustc_failure};
+    use super::{
+        LoadedProgram, parse_build_arguments, parse_rustc_short_error, render_rustc_failure,
+    };
     use evo_codegen_rust::GeneratedRust;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn parses_build_cache_arguments() {
+        let source = Path::new("sample.evo");
+
+        assert_eq!(
+            parse_build_arguments(source, Vec::<String>::new().into_iter()).unwrap(),
+            (PathBuf::from("sample"), true)
+        );
+        assert_eq!(
+            parse_build_arguments(source, vec!["--no-cache".to_owned()].into_iter()).unwrap(),
+            (PathBuf::from("sample"), false)
+        );
+        assert_eq!(
+            parse_build_arguments(source, vec!["out.bin".to_owned()].into_iter()).unwrap(),
+            (PathBuf::from("out.bin"), true)
+        );
+        assert_eq!(
+            parse_build_arguments(
+                source,
+                vec!["out.bin".to_owned(), "--no-cache".to_owned()].into_iter(),
+            )
+            .unwrap(),
+            (PathBuf::from("out.bin"), false)
+        );
+        assert!(
+            parse_build_arguments(
+                source,
+                vec!["out.bin".to_owned(), "unexpected".to_owned()].into_iter(),
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn parses_unix_rustc_short_error() {
