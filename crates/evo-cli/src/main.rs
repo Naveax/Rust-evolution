@@ -446,7 +446,8 @@ fn default_output_path(source: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        LoadedProgram, parse_build_arguments, parse_rustc_short_error, render_rustc_failure,
+        LoadedProgram, default_output_path, parse_build_arguments, parse_rustc_short_error,
+        render_rustc_failure,
     };
     use evo_codegen_rust::GeneratedRust;
     use std::path::{Path, PathBuf};
@@ -454,14 +455,15 @@ mod tests {
     #[test]
     fn parses_build_cache_arguments() {
         let source = Path::new("sample.evo");
+        let default_output = default_output_path(source);
 
         assert_eq!(
             parse_build_arguments(source, Vec::<String>::new().into_iter()).unwrap(),
-            (PathBuf::from("sample"), true)
+            (default_output.clone(), true)
         );
         assert_eq!(
             parse_build_arguments(source, vec!["--no-cache".to_owned()].into_iter()).unwrap(),
-            (PathBuf::from("sample"), false)
+            (default_output, false)
         );
         assert_eq!(
             parse_build_arguments(source, vec!["out.bin".to_owned()].into_iter()).unwrap(),
