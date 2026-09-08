@@ -1,8 +1,9 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{self, Command, Output};
+use std::process::{self, Command, Output, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const COLD_SAMPLES: usize = 5;
@@ -18,6 +19,14 @@ fn temp_dir(label: &str) -> PathBuf {
         "evo-build-cache-turnaround-{label}-{}-{nanos}",
         process::id()
     ))
+}
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn fixture_dir() -> PathBuf {
+    repo_root().join("benchmarks/cases/enums-v0")
 }
 
 fn real_rustc() -> OsString {
@@ -126,12 +135,24 @@ fn compile_count(counter: &Path) -> u64 {
         .expect("counter should contain an integer")
 }
 
-fn assert_binary_stdout(binary: &Path, expected: &str) {
-    let output = Command::new(binary)
-        .output()
+fn assert_binary_output(binary: &Path, stdin: &[u8], expected_stdout: &[u8]) {
+    let mut child = Command::new(binary)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .expect("built binary should execute");
-    assert!(output.status.success(), "built binary should succeed");
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), expected);
+    child
+        .stdin
+        .take()
+        .expect("stdin pipe should exist")
+        .write_all(stdin)
+        .expect("fixture stdin should write");
+    let output = child
+        .wait_with_output()
+        .expect("built binary should finish");
+    assert_success(&output, "built binary");
+    assert_eq!(output.stdout, expected_stdout);
 }
 
 fn median_ms(samples: &[Duration]) -> f64 {
@@ -151,18 +172,22 @@ fn samples_json(samples: &[Duration]) -> String {
         .join(", ")
 }
 
-fn write_report(
-    out_dir: &Path,
-    cold: &[Duration],
-    warm: &[Duration],
+struct ReportInput<'a> {
+    cold: &'a [Duration],
+    warm: &'a [Duration],
     cold_compile_count: u64,
     warm_compile_count: u64,
-    generated_rust: &[u8],
-    rustc_version: &str,
-) {
+    generated_rust: &'a [u8],
+    fixture_source: &'a [u8],
+    fixture_stdin: &'a [u8],
+    expected_stdout: &'a [u8],
+    rustc_version: &'a str,
+}
+
+fn write_report(out_dir: &Path, input: &ReportInput<'_>) {
     fs::create_dir_all(out_dir).expect("evidence directory should be created");
-    let cold_median = median_ms(cold);
-    let warm_median = median_ms(warm);
+    let cold_median = median_ms(input.cold);
+    let warm_median = median_ms(input.warm);
     let speedup = cold_median / warm_median;
     let baseline_speedup = ACCEPTED_UNCACHED_WARM_BASELINE_MS / warm_median;
     let git_sha = env::var("EVO_GIT_SHA")
@@ -173,38 +198,43 @@ fn write_report(
         "# Verified build cache turnaround v0\n\n\
 - git_sha: `{git_sha}`\n\
 - platform: `{}-{}`\n\
+- fixture: `benchmarks/cases/enums-v0/evolution.evo`\n\
 - cold_median_ms: `{cold_median:.3}`\n\
 - warm_cached_median_ms: `{warm_median:.3}`\n\
 - cold_to_warm_speedup: `{speedup:.3}x`\n\
 - accepted_uncached_warm_baseline_ms: `{ACCEPTED_UNCACHED_WARM_BASELINE_MS:.3}`\n\
 - accepted_baseline_to_cached_speedup: `{baseline_speedup:.3}x`\n\
-- cold_rustc_compile_count: `{cold_compile_count}`\n\
-- warm_rustc_compile_count: `{warm_compile_count}`\n\
+- cold_rustc_compile_count: `{}`\n\
+- warm_rustc_compile_count: `{}`\n\
 - correctness: `PASS`\n\n\
 Hard acceptance is exact warm rustc compile count zero plus correct native output. Timing is supporting evidence.\n",
         env::consts::OS,
         env::consts::ARCH,
+        input.cold_compile_count,
+        input.warm_compile_count,
     );
     fs::write(out_dir.join("report.md"), markdown).expect("Markdown report should write");
 
     let json = format!(
-        "{{\n  \"git_sha\": \"{git_sha}\",\n  \"platform\": \"{}-{}\",\n  \"cold_samples_ms\": [{}],\n  \"warm_cached_samples_ms\": [{}],\n  \"cold_median_ms\": {cold_median:.3},\n  \"warm_cached_median_ms\": {warm_median:.3},\n  \"cold_to_warm_speedup\": {speedup:.6},\n  \"accepted_uncached_warm_baseline_ms\": {ACCEPTED_UNCACHED_WARM_BASELINE_MS:.3},\n  \"accepted_baseline_to_cached_speedup\": {baseline_speedup:.6},\n  \"cold_rustc_compile_count\": {cold_compile_count},\n  \"warm_rustc_compile_count\": {warm_compile_count},\n  \"correctness\": \"PASS\"\n}}\n",
+        "{{\n  \"git_sha\": \"{git_sha}\",\n  \"platform\": \"{}-{}\",\n  \"fixture\": \"benchmarks/cases/enums-v0/evolution.evo\",\n  \"cold_samples_ms\": [{}],\n  \"warm_cached_samples_ms\": [{}],\n  \"cold_median_ms\": {cold_median:.3},\n  \"warm_cached_median_ms\": {warm_median:.3},\n  \"cold_to_warm_speedup\": {speedup:.6},\n  \"accepted_uncached_warm_baseline_ms\": {ACCEPTED_UNCACHED_WARM_BASELINE_MS:.3},\n  \"accepted_baseline_to_cached_speedup\": {baseline_speedup:.6},\n  \"cold_rustc_compile_count\": {},\n  \"warm_rustc_compile_count\": {},\n  \"correctness\": \"PASS\"\n}}\n",
         env::consts::OS,
         env::consts::ARCH,
-        samples_json(cold),
-        samples_json(warm),
+        samples_json(input.cold),
+        samples_json(input.warm),
+        input.cold_compile_count,
+        input.warm_compile_count,
     );
     fs::write(out_dir.join("report.json"), json).expect("JSON report should write");
 
     let mut csv = String::from("kind,index,elapsed_ms\n");
-    for (index, sample) in cold.iter().enumerate() {
+    for (index, sample) in input.cold.iter().enumerate() {
         csv.push_str(&format!(
             "cold,{},{}\n",
             index + 1,
             sample.as_secs_f64() * 1_000.0
         ));
     }
-    for (index, sample) in warm.iter().enumerate() {
+    for (index, sample) in input.warm.iter().enumerate() {
         csv.push_str(&format!(
             "warm-cached,{},{}\n",
             index + 1,
@@ -212,9 +242,16 @@ Hard acceptance is exact warm rustc compile count zero plus correct native outpu
         ));
     }
     fs::write(out_dir.join("raw-samples.csv"), csv).expect("CSV report should write");
-    fs::write(out_dir.join("generated.rs"), generated_rust)
+    fs::write(out_dir.join("generated.rs"), input.generated_rust)
         .expect("generated Rust evidence should write");
-    fs::write(out_dir.join("rustc-vV.txt"), rustc_version).expect("rustc identity should write");
+    fs::write(out_dir.join("evolution.evo"), input.fixture_source)
+        .expect("fixture source evidence should write");
+    fs::write(out_dir.join("stdin.bin"), input.fixture_stdin)
+        .expect("fixture stdin evidence should write");
+    fs::write(out_dir.join("expected.stdout"), input.expected_stdout)
+        .expect("expected output evidence should write");
+    fs::write(out_dir.join("rustc-vV.txt"), input.rustc_version)
+        .expect("rustc identity should write");
 }
 
 #[test]
@@ -222,8 +259,18 @@ Hard acceptance is exact warm rustc compile count zero plus correct native outpu
 fn verified_build_cache_reports_zero_warm_compiles_and_speedup() {
     let dir = temp_dir("evidence");
     fs::create_dir_all(&dir).expect("evidence test directory should be created");
+
+    let fixture = fixture_dir();
+    let fixture_source =
+        fs::read(fixture.join("evolution.evo")).expect("fixture source should read");
+    let fixture_stdin = fs::read(fixture.join("stdin.bin")).expect("fixture stdin should read");
+    let expected_stdout =
+        fs::read(fixture.join("expected.stdout")).expect("expected stdout should read");
+    let reference_rust =
+        fs::read(fixture.join("reference.rs")).expect("fixture reference Rust should read");
+
     let source = dir.join("program.evo");
-    fs::write(&source, "print 42\n").expect("source should be written");
+    fs::write(&source, &fixture_source).expect("fixture source should be written");
     let rustc = real_rustc();
     let wrapper = compile_rustc_wrapper(&dir, &rustc);
 
@@ -240,6 +287,10 @@ fn verified_build_cache_reports_zero_warm_compiles_and_speedup() {
         .output()
         .expect("emit-rust should execute");
     assert_success(&generated, "emit-rust");
+    assert_eq!(
+        generated.stdout, reference_rust,
+        "cache evidence must retain accepted Enums generated Rust"
+    );
 
     let mut cold_samples = Vec::with_capacity(COLD_SAMPLES);
     let mut cold_compile_count = 0;
@@ -255,7 +306,7 @@ fn verified_build_cache_reports_zero_warm_compiles_and_speedup() {
             &source, &output, &cache_dir, &wrapper, &rustc, &counter,
         ));
         assert_success(&build, "cold build");
-        assert_binary_stdout(&output, "42");
+        assert_binary_output(&output, &fixture_stdin, &expected_stdout);
         assert_eq!(compile_count(&counter), 1, "cold sample must compile once");
         cold_compile_count += 1;
         cold_samples.push(elapsed);
@@ -279,7 +330,7 @@ fn verified_build_cache_reports_zero_warm_compiles_and_speedup() {
     .output()
     .expect("warm prime should execute");
     assert_success(&prime, "warm prime");
-    assert_binary_stdout(&warm_output, "42");
+    assert_binary_output(&warm_output, &fixture_stdin, &expected_stdout);
     assert_eq!(
         compile_count(&warm_counter),
         1,
@@ -298,7 +349,7 @@ fn verified_build_cache_reports_zero_warm_compiles_and_speedup() {
             &warm_counter,
         ));
         assert_success(&build, "warm cached build");
-        assert_binary_stdout(&warm_output, "42");
+        assert_binary_output(&warm_output, &fixture_stdin, &expected_stdout);
         assert_eq!(
             compile_count(&warm_counter),
             before,
@@ -329,12 +380,17 @@ fn verified_build_cache_reports_zero_warm_compiles_and_speedup() {
         .unwrap_or_else(|| dir.join("report"));
     write_report(
         &out_dir,
-        &cold_samples,
-        &warm_samples,
-        cold_compile_count,
-        warm_compile_count,
-        &generated.stdout,
-        &rustc_version,
+        &ReportInput {
+            cold: &cold_samples,
+            warm: &warm_samples,
+            cold_compile_count,
+            warm_compile_count,
+            generated_rust: &generated.stdout,
+            fixture_source: &fixture_source,
+            fixture_stdin: &fixture_stdin,
+            expected_stdout: &expected_stdout,
+            rustc_version: &rustc_version,
+        },
     );
 
     println!("cold_build_median_ms={cold_median:.3}");
