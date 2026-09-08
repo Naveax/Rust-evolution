@@ -99,8 +99,8 @@ fn enum_constructor_variant_match_and_nominal_typos_render_help() {
     );
     assert_help(
         "nominal-signature",
-        "enum MaybeInt\nNone\nSome int\nend\nfn use(value MabyInt) int\nreturn 0\nend\n",
-        "unknown nominal type \"MabyInt\" in function signature",
+        "enum MaybeInt\nNone\nSome int\nend\nfn use(value MaybInt) int\nreturn 0\nend\n",
+        "unknown nominal type \"MaybInt\" in function signature",
         "MaybeInt",
     );
 }
