@@ -1,8 +1,6 @@
 use evo_diagnostics::{best_suggestion, clear_help, set_help};
 use evo_lexer::Span;
-use evo_parser::{
-    Expr, ExprKind, Program, RecordFieldType, Stmt, StmtKind, TypeName,
-};
+use evo_parser::{Expr, ExprKind, Program, RecordFieldType, Stmt, StmtKind, TypeName};
 use std::collections::{HashMap, HashSet};
 
 type Scope = HashMap<String, Option<String>>;
@@ -119,7 +117,9 @@ impl SuggestionCatalog {
     }
 
     fn has_function(&self, name: &str) -> bool {
-        self.function_names.iter().any(|candidate| candidate == name)
+        self.function_names
+            .iter()
+            .any(|candidate| candidate == name)
     }
 
     fn register_declaration_suggestions(&self, program: &Program) {
@@ -131,24 +131,14 @@ impl SuggestionCatalog {
                             "unknown record type {name:?} for field {:?} in record {:?}",
                             field.name, record.name
                         );
-                        register(
-                            &record_message,
-                            field.span,
-                            name,
-                            self.record_names(),
-                        );
+                        register(&record_message, field.span, name, self.record_names());
                     }
                     if !self.has_record(name) && !self.has_enum(name) {
                         let nominal_message = format!(
                             "unknown nominal type {name:?} for field {:?} in record {:?}",
                             field.name, record.name
                         );
-                        register(
-                            &nominal_message,
-                            field.span,
-                            name,
-                            self.nominal_names(),
-                        );
+                        register(&nominal_message, field.span, name, self.nominal_names());
                     }
                 }
             }
@@ -261,7 +251,12 @@ impl SuggestionCatalog {
         }
     }
 
-    fn walk_child(&self, statements: &[Stmt], scopes: &mut Vec<Scope>, binding: Option<(String, Option<String>)>) {
+    fn walk_child(
+        &self,
+        statements: &[Stmt],
+        scopes: &mut Vec<Scope>,
+        binding: Option<(String, Option<String>)>,
+    ) {
         scopes.push(HashMap::new());
         if let Some((name, record_hint)) = binding {
             scopes
@@ -282,7 +277,8 @@ impl SuggestionCatalog {
                 if let Some(record_hint) = visible(scopes, name) {
                     return record_hint.clone();
                 }
-                let message = format!("use of local {name:?} before definition or outside its scope");
+                let message =
+                    format!("use of local {name:?} before definition or outside its scope");
                 register(&message, expr.span, name, visible_names(scopes));
                 None
             }

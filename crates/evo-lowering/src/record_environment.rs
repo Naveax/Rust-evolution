@@ -1,6 +1,5 @@
 use crate::{
-    LowerError,
-    diagnostic_suggestions::register_name_suggestion,
+    LowerError, diagnostic_suggestions::register_name_suggestion,
     source_suggestions::register_program_suggestions,
 };
 use evo_lexer::Span;

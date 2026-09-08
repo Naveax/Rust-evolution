@@ -51,7 +51,9 @@ pub(crate) fn take_help(message: &str, span: Span) -> Option<String> {
         let mut pending = pending.borrow_mut();
         let selected = pending
             .iter()
-            .find(|candidate| candidate.primary_message == message && candidate.primary_span == span)
+            .find(|candidate| {
+                candidate.primary_message == message && candidate.primary_span == span
+            })
             .map(|candidate| candidate.help.clone());
         pending.clear();
         selected
