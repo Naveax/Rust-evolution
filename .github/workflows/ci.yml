@@ -76,6 +76,22 @@ jobs:
           path: target/evo-build-latency/
           if-no-files-found: error
 
+      - name: Verified build cache turnaround evidence
+        id: build_cache_turnaround
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_BUILD_CACHE_OUT: ${{ github.workspace }}/target/evo-build-cache-turnaround
+        run: cargo test -p evo-cli --test build_cache_turnaround verified_build_cache_reports_zero_warm_compiles_and_speedup -- --ignored --exact --nocapture
+
+      - name: Upload verified build cache turnaround evidence
+        if: matrix.os == 'ubuntu-latest' && always() && steps.build_cache_turnaround.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-build-cache-turnaround-ubuntu-latest
+          path: target/evo-build-cache-turnaround/
+          if-no-files-found: error
+
       - name: Benchmark harness smoke
         run: cargo run -p evo-bench -- run benchmarks/cases/arithmetic-smoke --out target/evo-bench-smoke --report-only
 

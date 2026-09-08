@@ -126,6 +126,7 @@ fn build_command(
         .arg("build")
         .arg(source)
         .arg(output)
+        .arg("--no-cache")
         .env("RUSTC", wrapper)
         .env("EVO_TEST_REAL_RUSTC", rustc)
         .env("EVO_TEST_RUSTC_COUNT", counter);
