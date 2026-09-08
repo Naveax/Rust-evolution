@@ -1,4 +1,8 @@
-use crate::{LowerError, diagnostic_suggestions::register_name_suggestion};
+use crate::{
+    LowerError,
+    diagnostic_suggestions::register_name_suggestion,
+    source_suggestions::register_program_suggestions,
+};
 use evo_lexer::Span;
 use evo_parser::{
     Program as SyntaxProgram, RecordFieldType as SyntaxRecordFieldType, TypeName as SyntaxTypeName,
@@ -77,6 +81,7 @@ mod enums_impl {
     fn collect_validated_enum_state(
         program: &SyntaxProgram,
     ) -> Result<(EnumEnvironment, program_ir::EnumProgramIr), LowerError> {
+        super::register_program_suggestions(program);
         validate_enum_declarations(program)?;
         let environment = collect_enum_environment(program)?;
         let matches = match_validation::collect_match_environment(program, &environment)?;
@@ -318,6 +323,7 @@ pub(crate) fn collect_record_environment(
 }
 
 pub(crate) fn validate_record_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
+    register_program_suggestions(program);
     reject_enum_declarations(program)?;
     register_record_declaration_suggestions(program);
     records_impl::validate_record_declarations(program)

@@ -1,4 +1,5 @@
 mod diagnostic_suggestions;
+mod source_suggestions;
 
 include!("lib.rs");
 
