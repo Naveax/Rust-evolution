@@ -4,6 +4,8 @@ pub use evo_lowering::LowerError;
 mod diagnostic_suggestions;
 #[path = "../src/record_constructor.rs"]
 mod record_constructor;
+// This integration harness intentionally includes only a subset of the production lowering graph.
+#[allow(dead_code)]
 #[path = "../src/record_environment.rs"]
 mod record_environment;
 
