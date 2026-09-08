@@ -70,6 +70,18 @@ fn close_local_function_and_record_names_render_source_native_help() {
         "Point",
     );
     assert_help(
+        "record-type",
+        "record Point\ncount int\nend\nrecord Holder\nvalue Piont\nend\n",
+        "unknown record type \"Piont\" for field \"value\" in record \"Holder\"",
+        "Point",
+    );
+    assert_help(
+        "constructor-field",
+        "record Point\ncount int\nend\nvalue = Point(coutn = 1)\n",
+        "unknown constructor field \"coutn\" for record \"Point\"",
+        "count",
+    );
+    assert_help(
         "record-field",
         "record Point\ncount int\nend\nvalue = Point(count = 1)\nprint value.coutn\n",
         "unknown field \"coutn\" on record \"Point\"",
