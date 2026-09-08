@@ -1,5 +1,11 @@
-use crate::LowerError;
-use evo_parser::Program as SyntaxProgram;
+use crate::{
+    LowerError, diagnostic_suggestions::register_name_suggestion,
+    source_suggestions::register_program_suggestions,
+};
+use evo_lexer::Span;
+use evo_parser::{
+    Program as SyntaxProgram, RecordFieldType as SyntaxRecordFieldType, TypeName as SyntaxTypeName,
+};
 use std::ops::Deref;
 
 mod enums_impl {
@@ -74,6 +80,7 @@ mod enums_impl {
     fn collect_validated_enum_state(
         program: &SyntaxProgram,
     ) -> Result<(EnumEnvironment, program_ir::EnumProgramIr), LowerError> {
+        super::register_program_suggestions(program);
         validate_enum_declarations(program)?;
         let environment = collect_enum_environment(program)?;
         let matches = match_validation::collect_match_environment(program, &environment)?;
@@ -179,6 +186,8 @@ pub(crate) use records_impl::{
 #[derive(Debug, Clone)]
 pub(crate) struct TypeEnvironment {
     records: RecordStorage,
+    record_names: Vec<String>,
+    function_names: Vec<String>,
 }
 
 // Transitional compatibility name for Records v0 callers. New nominal-type work
@@ -193,6 +202,95 @@ impl Deref for TypeEnvironment {
     }
 }
 
+impl TypeEnvironment {
+    pub(crate) fn record_names(&self) -> impl Iterator<Item = &str> {
+        self.record_names.iter().map(String::as_str)
+    }
+
+    pub(crate) fn function_names(&self) -> impl Iterator<Item = &str> {
+        self.function_names.iter().map(String::as_str)
+    }
+
+    pub(crate) fn has_function(&self, name: &str) -> bool {
+        self.function_names
+            .iter()
+            .any(|candidate| candidate == name)
+    }
+
+    pub(crate) fn resolve_type_name(
+        &self,
+        type_name: &SyntaxTypeName,
+        span: Span,
+    ) -> Result<SemanticType, LowerError> {
+        let result = self.records.resolve_type_name(type_name, span);
+        if let (Err(error), SyntaxTypeName::Named(name)) = (&result, type_name) {
+            register_name_suggestion(&error.message, error.span, name, self.record_names());
+        }
+        result
+    }
+
+    pub(crate) fn validate_constructor(
+        &self,
+        name: &str,
+        fields: &[ConstructorFieldInput],
+        constructor_span: Span,
+    ) -> Result<SemanticType, LowerError> {
+        let result = self
+            .records
+            .validate_constructor(name, fields, constructor_span);
+        if let Err(error) = &result {
+            if let Some(schema) = self.records.schema(name) {
+                for field in fields {
+                    let expected_message = format!(
+                        "unknown constructor field {:?} for record {:?}",
+                        field.name, name
+                    );
+                    if error.message == expected_message {
+                        register_name_suggestion(
+                            &error.message,
+                            error.span,
+                            &field.name,
+                            schema
+                                .fields
+                                .iter()
+                                .map(|candidate| candidate.name.as_str()),
+                        );
+                        break;
+                    }
+                }
+            } else {
+                register_name_suggestion(&error.message, error.span, name, self.record_names());
+            }
+        }
+        result
+    }
+
+    pub(crate) fn field_type(
+        &self,
+        base_type: &SemanticType,
+        field_name: &str,
+        access_span: Span,
+    ) -> Result<SemanticType, LowerError> {
+        let result = self.records.field_type(base_type, field_name, access_span);
+        if let Err(error) = &result
+            && let SemanticType::Record(record_name) = base_type
+            && let Some(schema) = self.records.schema(record_name)
+        {
+            let expected_message =
+                format!("unknown field {field_name:?} on record {record_name:?}");
+            if error.message == expected_message {
+                register_name_suggestion(
+                    &error.message,
+                    error.span,
+                    field_name,
+                    schema.fields.iter().map(|field| field.name.as_str()),
+                );
+            }
+        }
+        result
+    }
+}
+
 pub(crate) fn collect_executable_enum_program_ir(
     program: &SyntaxProgram,
 ) -> Result<ExecutableEnumProgramIr, LowerError> {
@@ -203,13 +301,52 @@ pub(crate) fn collect_record_environment(
     program: &SyntaxProgram,
 ) -> Result<RecordEnvironment, LowerError> {
     reject_enum_declarations(program)?;
+    register_record_declaration_suggestions(program);
+
     let records = records_impl::collect_record_environment(program)?;
-    Ok(TypeEnvironment { records })
+    let record_names = program
+        .records
+        .iter()
+        .map(|record| record.name.clone())
+        .collect();
+    let function_names = program
+        .functions
+        .iter()
+        .map(|function| function.name.clone())
+        .collect();
+    Ok(TypeEnvironment {
+        records,
+        record_names,
+        function_names,
+    })
 }
 
 pub(crate) fn validate_record_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
+    register_program_suggestions(program);
     reject_enum_declarations(program)?;
+    register_record_declaration_suggestions(program);
     records_impl::validate_record_declarations(program)
+}
+
+fn register_record_declaration_suggestions(program: &SyntaxProgram) {
+    let record_names: Vec<&str> = program
+        .records
+        .iter()
+        .map(|record| record.name.as_str())
+        .collect();
+    for record in &program.records {
+        for field in &record.fields {
+            if let SyntaxRecordFieldType::Named(name) = &field.type_name
+                && !record_names.contains(&name.as_str())
+            {
+                let message = format!(
+                    "unknown record type {name:?} for field {:?} in record {:?}",
+                    field.name, record.name
+                );
+                register_name_suggestion(&message, field.span, name, record_names.iter().copied());
+            }
+        }
+    }
 }
 
 fn reject_enum_declarations(program: &SyntaxProgram) -> Result<(), LowerError> {
@@ -291,7 +428,7 @@ mod tests {
             "enum Flag\nOff\nOn\nend\nvalue = Flag.On()\nmatch value\ncase Flag.On\nprint 1\nend\n",
         );
         let error = validate_record_declarations(&program)
-            .expect_err("non-exhaustive match should precede unsupported codegen gate");
+            .expect_err("non-exhaustive match should precede unsupported enum execution");
         assert!(error.message.contains("missing variant(s): Off"));
         assert_eq!(error.span.line, 6);
     }

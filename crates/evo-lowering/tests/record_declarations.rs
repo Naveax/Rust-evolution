@@ -1,5 +1,12 @@
 pub use evo_lowering::LowerError;
 
+#[path = "../src/diagnostic_suggestions.rs"]
+mod diagnostic_suggestions;
+#[allow(dead_code)]
+#[path = "../src/source_suggestions.rs"]
+mod source_suggestions;
+// This integration harness intentionally includes only a subset of the production lowering graph.
+#[allow(dead_code)]
 #[path = "../src/record_environment.rs"]
 mod record_environment;
 #[path = "../src/record_ownership.rs"]

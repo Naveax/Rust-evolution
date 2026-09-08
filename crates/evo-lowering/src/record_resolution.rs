@@ -1,5 +1,6 @@
 use crate::{
     LowerError,
+    diagnostic_suggestions::register_name_suggestion,
     record_environment::{ConstructorFieldInput, RecordEnvironment, SemanticType},
 };
 use evo_lexer::Span;
@@ -17,6 +18,10 @@ pub(crate) fn resolve_call_name(
     span: Span,
 ) -> Result<CallNameResolution, LowerError> {
     let Some(schema) = records.schema(name) else {
+        if !records.has_function(name) {
+            let message = format!("unknown function {name:?}");
+            register_name_suggestion(&message, span, name, records.function_names());
+        }
         return Ok(CallNameResolution::Function);
     };
 
