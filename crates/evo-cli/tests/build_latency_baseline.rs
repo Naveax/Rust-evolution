@@ -166,7 +166,9 @@ fn run_binary(binary: &Path, stdin: &[u8], expected_stdout: &[u8]) {
         .expect("stdin pipe should exist")
         .write_all(stdin)
         .expect("fixture stdin should write");
-    let output = child.wait_with_output().expect("built binary should finish");
+    let output = child
+        .wait_with_output()
+        .expect("built binary should finish");
     assert_success(&output, "built binary");
     assert_eq!(output.stdout, expected_stdout);
 }
@@ -352,12 +354,7 @@ fn write_report(out_dir: &Path, input: &ReportInput<'_>) {
     csv.push_str(&csv_rows("check", input.check, 0, "frontend-only"));
     csv.push_str(&csv_rows("emit-rust", input.emit, 0, "frontend-codegen"));
     csv.push_str(&csv_rows("cold-build", input.cold, 1, "fresh-output"));
-    csv.push_str(&csv_rows(
-        "warm-build",
-        input.warm,
-        1,
-        "same-source-output",
-    ));
+    csv.push_str(&csv_rows("warm-build", input.warm, 1, "same-source-output"));
     csv.push_str(&csv_rows(
         "edit-build",
         input.edit,
@@ -507,7 +504,8 @@ fn build_latency_baseline_reports_cold_warm_edit_and_rustc_attribution() {
     fs::create_dir_all(&dir).expect("test directory should be created");
 
     let fixture = fixture_dir();
-    let fixture_source = fs::read(fixture.join("evolution.evo")).expect("fixture source should read");
+    let fixture_source =
+        fs::read(fixture.join("evolution.evo")).expect("fixture source should read");
     let fixture_stdin = fs::read(fixture.join("stdin.bin")).expect("fixture stdin should read");
     let expected_stdout =
         fs::read(fixture.join("expected.stdout")).expect("fixture expected stdout should read");
@@ -541,7 +539,10 @@ fn build_latency_baseline_reports_cold_warm_edit_and_rustc_attribution() {
 
         let (emit, elapsed) = timed_output(&mut evo_command("emit-rust", &source));
         assert_success(&emit, "evo emit-rust");
-        assert!(!emit.stdout.is_empty(), "emit-rust must produce Rust source");
+        assert!(
+            !emit.stdout.is_empty(),
+            "emit-rust must produce Rust source"
+        );
         emit_samples.push(elapsed);
     }
 
@@ -603,7 +604,8 @@ fn build_latency_baseline_reports_cold_warm_edit_and_rustc_attribution() {
         warm_samples.push(elapsed);
     }
 
-    let baseline_source = String::from_utf8(fixture_source.clone()).expect("fixture should be UTF-8");
+    let baseline_source =
+        String::from_utf8(fixture_source.clone()).expect("fixture should be UTF-8");
     assert!(baseline_source.matches(EDIT_FROM).count() >= 2);
     let edited_source = baseline_source.replacen(EDIT_FROM, EDIT_TO, 1);
     assert_ne!(baseline_source, edited_source);
