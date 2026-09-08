@@ -2,179 +2,136 @@
 
 This file is intentionally operational. A fresh chat/agent should be able to resume from here without prior conversation history.
 
-Last verified update: **2026-09-07**
+Last verified update: **2026-09-08**
 
 ## Verified merged feature baseline
 
-Move diagnostics v0 **#69 is completed** and PR **#71 is merged**.
+Diagnostic suggestions v0 **#74 is completed** and PR **#75 is merged**.
 
 Latest verified code-bearing `main` baseline:
 
-- `795461c53f896c2223443cdb022f340a5032a0bd`
-- PR #71 squash merge
-- post-merge CI **#302** / run `34158551578`: **SUCCESS**
+- `cd6dcd096af20f9f94c4f201e715ae87c848c480`
+- PR #75 squash merge
+- post-merge CI **#320** / run `34198404953`: **SUCCESS** on Ubuntu, Windows and macOS
 - Rust toolchain: **1.98.0**
 
-A later docs-only handoff merge may advance the live `main` SHA. Before starting code, read live `main` and active Actions rather than asking this document to predict its own future hash.
+A later docs-only handoff merge may advance live `main`. Before implementation, verify live `main`, open PRs and active Actions rather than assuming this document can contain its own future merge SHA.
 
-## Final move-diagnostics evidence
+## Final diagnostic-suggestions evidence
 
 Final PR head:
 
-- `74f6a5955d46bd9620045bd39e9703383ae30679`
+- `1f3fdec69f81c8d6742d3fde47d698a3df3f3543`
 
 Final PR CI:
 
-- CI **#301** / run `34141025715`: **SUCCESS** on Ubuntu, Windows and macOS.
+- CI **#319** / run `34197970982`: **SUCCESS** on Ubuntu, Windows and macOS.
 
-Final Ubuntu Enums preservation artifact:
+Accepted behavior:
 
-- artifact `evo-bench-enums-ubuntu-latest`;
-- id `10027015101`;
-- digest `sha256:4d27ca15beb78e9edd50cefaab314f9071d5e6f2bfdff4e49aebf4215407e2ac`;
-- `generated.rs`: **1240 bytes**;
-- SHA-256 `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`;
-- exactly matches the accepted pre-#69 Enums baseline;
-- correctness PASS;
-- normalized LLVM IR equal;
-- exact executable equality;
-- both binaries 2,267,072 bytes;
-- final `byte-identical-binary-parity` PASS.
-
-Post-merge main CI:
-
-- CI **#302** / run `34158551578`: **SUCCESS**;
-- Ubuntu repeated turnaround, benchmark smoke, all existing runtime/performance gates and release build;
-- Windows/macOS quality/test/benchmark-smoke/release jobs passed.
+- deterministic conservative one-edit matcher for current ASCII identifiers;
+- insertion/deletion/substitution/adjacent-transposition support;
+- exactly one close unique-best candidate is required;
+- tied, distant, one-character and empty-candidate cases remain silent;
+- local candidate lookup respects lexical visibility;
+- function, record and enum suggestions remain in their correct semantic namespaces;
+- primary diagnostic text/span remain stable and suggestion is bounded extra `help:` text;
+- textual help and #69 move-origin related source locations can coexist;
+- stale suggestion state cannot leak to an unrelated diagnostic;
+- parser autocorrect, automatic source edits and LSP/code actions remain out of scope;
+- ownership semantics and accepted generated-program behavior remain unchanged.
 
 Retained failed/intermediate evidence was not rerun merely for color:
 
-- #292 / `34131329043` and #295 / `34132081700`: obsolete pre-concurrency-policy evidence;
-- #298 / `34139263767`: rustfmt-only failure;
-- #299 / `34140117995`: Clippy dead-code failure from Records' private include of shared move-state reason variants;
-- #300 / `34140487296`: Windows-only checkout-CRLF reference-fixture failure; generated Rust stayed LF.
+- #314 / `34191629058`: rustfmt-only failure;
+- #316 / `34192026716`: rustfmt-only process-test failure;
+- #317 / `34197292048`: acceptance-test failure demonstrating `MabyInt -> MaybeInt` exceeds the fixed one-edit boundary. The test was corrected to `MaybInt -> MaybeInt`; the matcher threshold was not loosened.
 
-## Current accepted ownership diagnostics
+Generated-output preservation evidence:
 
-For existing by-value Records/Enums ownership semantics:
+- baseline and feature `generated.rs` SHA-256: `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`;
+- baseline and feature native executable SHA-256: `d2b172767e1ca9267173322ca2d2eb3bc9941361c93f3f64056d6c81d05d0431`;
+- baseline and feature LLVM IR SHA-256: `0c82e4c394ab5edc7f32d21a9f48800ada2ed169c695c04b8d66c677eecc533f`.
 
-- invalid reuse is the primary Evolution-source error location;
-- one bounded related Evolution-source location may identify the move origin;
-- direct consumption and existing enum argument/return/owned-match contexts retain source-native provenance;
-- continuing branch provenance selection is deterministic by source order;
-- terminal paths do not poison continuing ownership state;
-- repeat-body move errors identify the responsible body source;
-- exact same-type reinitialization clears stale move provenance;
-- lexical scope exit removes provenance with the binding;
-- ordinary missing-binding/type-mismatch errors do not inherit fake move notes;
-- diagnostics metadata remains compile-time only;
-- accepted generated Rust and generated-program runtime behavior remain unchanged.
+## Active P0
 
-## Next bounded P0 to atomize
-
-No successor issue has been opened yet. There are no open feature PRs at this handoff point.
-
-Current researched candidate:
-
-**P0 diagnostic suggestions v0: deterministic nearest-symbol hints for source-native unknown-name errors**
+Issue **#76 — P0 build latency baseline v0: cold, warm and edit compile attribution** is open.
 
 Parent: #2
 
-Weakness source: #6 complex error messages / refactoring cost / learning ergonomics.
+Weakness source: #6 Build / Compile.
 
-Roadmap: #1 Phase 3.2 — Suggested fixes.
+Roadmap: #1 Phase 3.4 — cold build baseline, warm build baseline, incremental build.
 
-### Verified root-cause / feasibility
+### Verified root cause / feasibility
 
-Current lowering already emits source-native semantic errors at distinct resolution sites for:
+Current `evo build` uses the normal frontend/load path and then calls `compile_rust()` directly.
 
-- local use before definition/outside visible lexical scope;
-- unknown named function;
-- unknown record/nominal type;
-- unknown record constructor;
-- unknown record field / constructor field;
-- unknown enum constructor;
-- unknown enum variant;
-- unknown enum/record payload type.
+`compile_rust_with_rustc()`:
 
-Candidate sets already exist in the relevant lexical scope or record/enum/function environments. A bounded suggestion layer therefore does not require grammar redesign, runtime reflection, a global symbol registry, or generated-code changes.
+- creates a fresh temporary compile directory;
+- writes generated `main.rs`;
+- invokes selected rustc with the existing edition/optimization/codegen-unit flags;
+- writes the native binary to the requested output;
+- removes the temporary directory.
 
-Current identifiers are ASCII, so v0 can use deterministic bounded edit distance without expanding Unicode identifier semantics.
+The persistent verified compile cache from #67 exists only in `run_generated()` for `evo run`. `evo build` does not consult it.
 
-### Proposed acceptance boundary
+Thus unchanged `evo build` currently follows a full rustc compile/link control path. #76 must still prove actual invocation counts and timings under controlled evidence instead of treating static inspection as a latency measurement.
 
-Atomize a focused issue before creating a feature branch. The issue should require at minimum:
+Existing `crates/evo-cli/tests/fast_edit_run_turnaround.rs` already contains useful bounded test infrastructure:
 
-1. context-specific candidate sets only;
-2. a conservative deterministic distance/threshold policy;
-3. exactly one suggestion only when there is a unique best candidate within the threshold;
-4. tied candidates => no suggestion;
-5. distant candidates => no suggestion;
-6. invisible lexical-scope locals => no suggestion;
-7. names from the wrong namespace => no suggestion;
-8. accepted/invalid program classification unchanged except richer diagnostic text;
-9. no parser recovery/autocorrection;
-10. no LSP/completion protocol work;
-11. no runtime metadata/cost;
-12. accepted generated Rust unchanged;
-13. cross-platform deterministic diagnostic text tests;
-14. normal three-OS CI and all existing Ubuntu runtime/performance gates green.
+- rustc wrapper construction;
+- compile-invocation counting;
+- `Instant` timing;
+- median computation;
+- raw sample JSON/CSV/Markdown reporting;
+- controlled Ubuntu ignored-test CI pattern.
 
-Suggested edit cases for the deterministic matcher:
+Reuse or factor this infrastructure where doing so keeps the patch smaller and clearer. Do not add a dependency merely to avoid a few obvious standard-library helpers.
 
-- one-character substitution;
-- insertion;
-- deletion;
-- adjacent transposition if explicitly supported by the chosen metric;
-- same-distance ambiguity;
-- threshold boundary;
-- empty candidate set;
-- case-sensitive distinction under current identifier rules.
+## #76 first implementation slice
 
-Suggested semantic cases:
+After this docs-only handoff is merged and its `main` CI is green:
 
-- visible local typo;
-- hidden/out-of-scope local is not suggested;
-- function typo does not suggest record/enum names;
-- record constructor typo uses nominal constructor candidates only;
-- record field typo uses only the resolved record schema's fields;
-- enum variant typo uses only the resolved enum's variants;
-- nominal type typo uses the correct nominal type namespace;
-- no suggestion is attached to unrelated type/ownership/parser errors.
+1. Verify live `main`, open PRs and queued/in-progress Actions.
+2. Create `bench/build-latency-baseline-v0` from exact verified `main`.
+3. Do **not** change `evo build` caching or semantics.
+4. Add a controlled ignored integration test/harness under `evo-cli` that can:
+   - time `evo check`;
+   - time `evo emit-rust`;
+   - time cold `evo build`;
+   - time unchanged repeated `evo build`;
+   - make one deterministic small source edit and time rebuilt output;
+   - compile the exact emitted Rust directly with rustc using the same flags;
+   - count rustc compile invocations for each build class;
+   - verify resulting binary output.
+5. Use one representative accepted fixture with functions/control flow/nominal data. Prefer reusing an existing stable Enums-v0-like representative source rather than inventing a new language surface.
+6. Record toolchain, target, flags, git SHA, raw samples, median, min/max and p95/max as defined in #76.
+7. Emit machine-readable JSON/CSV and human-readable Markdown into a stable artifact directory.
+8. Add one Ubuntu-only CI evidence step and artifact upload only after the harness is coherent.
+9. Keep normal three-OS workspace quality/tests and all existing Ubuntu runtime/performance gates unchanged.
+10. From the resulting evidence classify the next build intervention as **Implement / Research / No-action**.
 
-### Diagnostics API boundary
+## Acceptance boundary
 
-Do not reuse the move-origin related-location sidecar to carry textual spelling suggestions. #69's related location means “this source span caused the move”. A spelling hint has different semantics and often no second source span.
+#76 is measurement/attribution only.
 
-Prefer a small dedicated compile-time text-help/suggestion representation or another equally bounded design. Keep `render_error` compatibility where possible and prove ordinary diagnostics remain byte-stable when no suggestion exists.
+Do not fold in:
 
-## First next action
+- `evo build` cache reuse;
+- rustc incremental-session integration;
+- a daemon/compiler server;
+- remote cache;
+- linker replacement;
+- package/dependency semantics;
+- proc-macro/workspace-scale optimization;
+- runtime-language changes.
 
-1. Verify live `main`, open PRs/issues and active CI after the docs-only handoff merge.
-2. Atomize the diagnostic-suggestions P0 issue with the boundaries above.
-3. Inspect exact current unknown-symbol error sites/tests on that verified baseline.
-4. Create a focused feature branch only after the issue exists.
-5. Implement the matcher/helper first with deterministic unit tests.
-6. Integrate one semantic namespace at a time; do not widen grammar or runtime semantics.
-7. Add process-level diagnostic regressions and generated-Rust preservation evidence.
-8. Use one natural exact-head CI run and merge only after all gates pass.
-
-## Larger candidates explicitly deferred
-
-Do not fold these into the diagnostic-suggestions slice:
-
-- Result/Option propagation syntax;
-- owned/runtime strings;
-- Vec/collections;
-- general error-handling semantics;
-- borrowing/references/lifetime inference;
-- global IDE/LSP completion;
-- parser autocorrection.
-
-Each has broader language/runtime prerequisites and deserves its own measured issue rather than hiding behind a spelling helper.
+No generated Rust semantic change is expected. Generated-program runtime cost remains **ZERO**.
 
 ## CI rule
 
 Never create duplicate active Actions for the same SHA/workflow/input.
 
-If a run is queued or in progress, track that run ID and continue independent work. Failed SHAs are retained evidence; do not rerun them merely to obtain a friendlier color.
+If a run is queued or in progress, track that run ID and continue independent work. Failed SHAs remain evidence; do not rerun them merely to obtain a friendlier color.
