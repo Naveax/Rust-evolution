@@ -380,8 +380,7 @@ mod tests {
         fs::write(entry.join("generated.rs"), b"generated").expect("generated should be written");
         fs::write(entry.join("compiler.txt"), b"compiler").expect("compiler should be written");
         fs::write(entry.join("complete"), COMPLETE_MARKER).expect("marker should be written");
-        fs::write(entry.join(super::binary_name()), b"binary")
-            .expect("binary should be written");
+        fs::write(entry.join(super::binary_name()), b"binary").expect("binary should be written");
         entry
     }
 
@@ -412,8 +411,7 @@ mod tests {
         fs::write(entry.join("source.evo"), b"source").expect("source should be written");
         fs::write(entry.join("generated.rs"), b"generated").expect("generated should be written");
         fs::write(entry.join("compiler.txt"), b"compiler").expect("compiler should be written");
-        fs::write(entry.join(super::binary_name()), b"binary")
-            .expect("binary should be written");
+        fs::write(entry.join(super::binary_name()), b"binary").expect("binary should be written");
 
         assert!(cache.lookup().is_none(), "incomplete entry must miss");
         fs::write(entry.join("complete"), COMPLETE_MARKER).expect("marker should be written");
