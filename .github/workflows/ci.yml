@@ -60,6 +60,22 @@ jobs:
           path: target/evo-fast-edit-run-turnaround/
           if-no-files-found: error
 
+      - name: Build latency baseline evidence
+        id: build_latency_baseline
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_BUILD_LATENCY_OUT: ${{ github.workspace }}/target/evo-build-latency
+        run: cargo test -p evo-cli --test build_latency_baseline build_latency_baseline_reports_cold_warm_edit_and_rustc_attribution -- --ignored --exact --nocapture
+
+      - name: Upload build latency baseline evidence
+        if: matrix.os == 'ubuntu-latest' && always() && steps.build_latency_baseline.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-build-latency-ubuntu-latest
+          path: target/evo-build-latency/
+          if-no-files-found: error
+
       - name: Benchmark harness smoke
         run: cargo run -p evo-bench -- run benchmarks/cases/arithmetic-smoke --out target/evo-bench-smoke --report-only
 
