@@ -260,8 +260,7 @@ fn incremental_runtime_candidate_is_measured_across_committed_corpus() {
             fs::read(fixture.join("evolution.evo")).expect("corpus Evolution source should read");
         let reference_source =
             fs::read(fixture.join("reference.rs")).expect("corpus reference Rust should read");
-        let fixture_stdin =
-            fs::read(fixture.join("stdin.bin")).expect("corpus stdin should read");
+        let fixture_stdin = fs::read(fixture.join("stdin.bin")).expect("corpus stdin should read");
         let expected_stdout =
             fs::read(fixture.join("expected.stdout")).expect("corpus expected stdout should read");
 
@@ -312,7 +311,10 @@ fn incremental_runtime_candidate_is_measured_across_committed_corpus() {
         );
         run_binary(&candidate_binary, &fixture_stdin, &expected_stdout);
         let state = incremental_dir_stats(&session);
-        assert!(state.files > 0, "corpus candidate must persist incremental state");
+        assert!(
+            state.files > 0,
+            "corpus candidate must persist incremental state"
+        );
 
         for index in 0..CORPUS_WARMUPS {
             run_corpus_round(
