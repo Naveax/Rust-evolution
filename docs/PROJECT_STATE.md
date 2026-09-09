@@ -1,6 +1,6 @@
 # Rust Evolution — Project State
 
-Last verified update: **2026-09-08**
+Last verified update: **2026-09-09**
 
 This file is the durable project handoff. Fresh sessions should read `AGENTS.md`, this file, `docs/NEXT_ACTION.md`, `docs/LANGUAGE_SPEC_V0.md`, and the active issue/PR/Actions before changing code.
 
@@ -9,119 +9,172 @@ This file is the durable project handoff. Fresh sessions should read `AGENTS.md`
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
 - Rust toolchain: **1.98.0**
-- Latest verified code-bearing `main`: `07e85b3a60739f2d1f25caed0fcb622dd8894861`
-- Source: PR **#81** squash merge
-- Final PR head: `4288ddcfccf07fcab60d27e9677685b213005ae2`
-- Final PR CI **#338** / run `34214947823`: **SUCCESS** on Ubuntu, Windows and macOS
-- Post-merge main CI **#339** / run `34215424678`: **SUCCESS** on Ubuntu, Windows and macOS
-- Completed P0: **#79 verified build artifact reuse v0**
-- Active successor P0 research: **#82 changed-source incremental build v0**
+- Latest verified `main` before active PR #84: `1b7f355a92b27283d32731b68e3f86d5c99c264b`
+- That SHA is the docs-handoff merge from PR #83; no production compiler behavior changed versus the preceding accepted build-cache main.
+- Post-merge main CI #341 / run `34349824008`: **SUCCESS** on Ubuntu, Windows and macOS.
+- Completed P0 build-cache feature: **#79 / PR #81**.
+- Active research completion PR: **#84**, tracking **#82 changed-source incremental build v0**.
+- Successor gated research issue: **#85 link-time baseline v0**.
 
-Always verify live GitHub before acting. A later docs-only merge may advance `main` beyond the code-bearing SHA above without changing compiler behavior.
+Always verify live GitHub before acting. The active PR may advance beyond the accepted evidence SHA below due documentation synchronization.
 
-## Completed P0 — Verified build artifact reuse v0 (#79)
+## Accepted unchanged-build behavior — #79
 
-Issue **#79** is completed. PR **#81 — `feat: reuse verified artifacts for unchanged evo build`** is merged.
+PR #81 implemented verified persistent native artifact reuse for exact unchanged `evo build` inputs.
 
-Accepted behavior:
+Accepted behavior remains:
 
-- `evo build` keeps full lexer/parser/lowering/codegen on every invocation before cache lookup;
-- verified unchanged-build reuse uses a separate local `build-cache-v0` tooling cache;
-- exact Evolution source, generated Rust and compiler/configuration identity are verified on hit;
-- a key/hash locates candidates but is not proof of identity;
-- completion marker and regular non-symlink cached native artifact are required;
-- verified hits materialize to the requested output path without rustc compilation;
+- full lexer/parser/lowering/codegen runs before build-cache lookup;
+- build reuse uses separate local `build-cache-v0` tooling state;
+- exact Evolution source, generated Rust and compiler/configuration identity are verified;
+- completion marker and regular non-symlink native artifact are required;
+- verified hits materialize the requested output without rustc compilation;
 - different output paths may reuse the same verified artifact;
-- `evo build <file> --no-cache` and `evo build <file> <output> --no-cache` bypass lookup/publication;
-- corrupt, incomplete, missing, mismatched or unusable cache state fails closed to normal compilation;
-- unavailable cache storage falls back to normal compilation;
-- publication is best-effort after a successful normal compile;
-- bounded pruning/stale staging cleanup remain tooling-only;
-- accepted `run-cache-v0` behavior remains independent;
-- generated Rust and generated-program runtime semantics/cost remain unchanged.
+- explicit `--no-cache` bypasses lookup/publication;
+- corrupt/incomplete/mismatched/unavailable cache state fails closed to normal compilation;
+- `run-cache-v0` remains independent;
+- generated Rust and generated-program runtime semantics remain unchanged.
 
-The #76 build-latency harness now invokes `evo build ... --no-cache`, preserving its original uncached attribution semantics after build-cache reuse became the normal build path.
+Durable contract: `docs/BUILD_CACHE.md` and D-021.
 
-See `docs/BUILD_CACHE.md` and D-021.
+## Accepted build-latency predecessor — #76
 
-### Final controlled Ubuntu evidence
-
-Final PR artifact:
-
-- name: `evo-build-cache-turnaround-ubuntu-latest`;
-- id: `10051449726`;
-- digest: `sha256:cf7295bf371695347300bee325e3a5a4b5a96bbf4c8789625904d66bd4c538e9`;
-- source head: `4288ddcfccf07fcab60d27e9677685b213005ae2`;
-- platform: `linux-x86_64`;
-- fixture: `benchmarks/cases/enums-v0/evolution.evo`.
-
-Measured values:
-
-- cold median: **128.454 ms** across 5 samples;
-- unchanged warm cached median: **17.177 ms** across 9 samples;
-- cold-to-warm speedup: **7.478x**;
-- accepted #76 uncached warm baseline: **96.986 ms**;
-- accepted-baseline-to-cached speedup: **5.646x**;
-- cold rustc compile count: **5**;
-- warm rustc compile count: **0**;
-- correctness: **PASS**.
-
-Hard acceptance is exact warm rustc compile count **0** plus correct native output. Timing is supporting evidence.
-
-Generated Rust remained exactly **1240 bytes**, SHA-256:
-
-`61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`
-
-This matches the accepted Enums v0 / #76 baseline.
-
-### CI acceptance
-
-Final PR CI #338:
-
-- Ubuntu: fmt, Clippy, workspace tests, fast edit-run evidence, preserved uncached build-latency evidence, verified build-cache evidence, benchmark smoke, every existing runtime/performance gate, release build: SUCCESS;
-- Windows/macOS: fmt, Clippy, workspace tests, benchmark smoke, release build: SUCCESS.
-
-Post-merge main CI #339 repeated the same required platform/gate coverage successfully on merge SHA `07e85b3a60739f2d1f25caed0fcb622dd8894861`.
-
-## Completed measurement predecessor — Build latency baseline v0 (#76)
-
-The accepted #76 controlled Ubuntu values remain the comparison baseline:
+The accepted controlled single-file baseline established:
 
 - `evo check`: **1.207 ms**;
 - `evo emit-rust`: **1.210 ms**;
 - cold uncached `evo build`: **99.970 ms**;
 - unchanged warm uncached `evo build`: **96.986 ms**;
 - deterministic edited uncached build: **95.515 ms**;
-- direct rustc compile/link: **94.131 ms**;
-- cold/warm/edit/direct rustc count: **5/5** in each measured class.
+- direct rustc compile+link: **94.131 ms**;
+- rustc invoked for every measured cold/warm/edit/direct build.
 
-Artifact: `evo-build-latency-ubuntu-latest`, id `10046420977`, digest `sha256:d3310910395f9c6be50200c261402bfdbb8c7ef617ed18f71b3aa7486a22a2b0`.
+The frontend is therefore not the dominant uncached native-build cost.
 
-## Active P0 research — #82 changed-source incremental build v0
+## #82 changed-source incremental build research — final decision
 
-Issue **#82 — `P0 research changed-source incremental build v0: measure rustc session reuse`** is open.
+Issue **#82** researched persistent rustc incremental/session state before any production implementation was allowed.
+
+Durable report: `docs/INCREMENTAL_BUILD_RESEARCH.md`.
+
+Research PR: **#84 — `research: measure changed-source rustc incremental reuse`**.
+
+Accepted final evidence head before documentation sync:
+
+- `bbdec7f5f6ec4668849212f49bc07c49196024e2`
+- CI #355 / run `34356624339`: **SUCCESS** on Ubuntu, Windows and macOS
+- Ubuntu preserved every existing turnaround, build-cache and runtime/performance gate
+- artifact `evo-incremental-build-research-ubuntu-latest`
+- artifact id `10106092707`
+- digest `sha256:217d9849e7e88f8ee05ebd408c0c9b2afaea57f3925f42d099b040dba7eb3a9c`
+
+### Slice 1 — current CGU1 strategy
+
+Edited medians:
+
+- stable direct rustc, no incremental: **110.763 ms**;
+- stable direct rustc, persistent incremental, CGU1: **121.040 ms**.
+
+Result: CGU1 incremental state was about **9.28% slower** than its matching control.
+
+### Slice 2 — CGU256 matching control
+
+Edited medians:
+
+- CGU256, no incremental: **107.522 ms**;
+- CGU256, persistent incremental: **97.167 ms**.
+
+Result: **1.107x** matching-control speedup, about **9.63% lower median**. This was enough to justify runtime-quality research but not production adoption.
+
+### Slice 3/4 — runtime/codegen identity
+
+On the Enums-v0 fixture, CGU256 + `-C incremental` produced a stable roughly **19% runtime improvement** versus the matching non-incremental CGU256 binary.
+
+Isolation proved this was not stale edit-history reuse:
+
+- baseline/edited no-incremental binaries were byte-identical;
+- incremental prime/edited-reuse binaries were byte-identical;
+- incremental-mode binary differed from no-incremental output at roughly **3,618,404 byte positions**.
+
+Therefore enabling `-C incremental` itself changed optimized codegen identity.
+
+### Slice 5 — committed runtime corpus
+
+Seven committed performance cases were measured with exact-output correctness PASS, 3 warmups and 21 samples per arm.
+
+| Case | Candidate/reference | Candidate/current | Verdict |
+| --- | ---: | ---: | --- |
+| runtime-repeat-v0 | 0.999231 | 0.998121 | PASS |
+| control-flow-branch-v0 | 1.001843 | 1.001111 | FAIL |
+| logical-operators-v0 | 1.019303 | 1.018570 | FAIL |
+| function-call-v0 | 0.999582 | 0.999869 | PASS |
+| block-locals-v0 | 1.000019 | 0.999306 | FAIL |
+| records-v0 | 0.999854 | 1.000877 | FAIL |
+| enums-v0 | 0.805402 | 0.804054 | PASS |
+
+Aggregate decision: **REJECT**.
+
+The favorable Enums effect did not generalize. `logical-operators-v0` was the clearest regression at about **1.93% slower than reference** and **1.86% slower than current Evolution**.
+
+## #82 production decision
+
+**REJECT / DEFER production rustc incremental state under the current architecture and Rust 1.98.0 configuration.**
+
+Why:
+
+1. the production-equivalent CGU1 strategy regresses changed-source compile latency;
+2. the CGU256 configuration can improve compile latency but changes optimized codegen identity;
+3. the runtime effect is workload-dependent;
+4. the broader committed corpus violates the non-negotiable runtime parity-or-better contract.
+
+The project does not trade generated-program runtime regressions for compiler convenience.
+
+Because the runtime gate fails first, #82 intentionally stops before a production persistent-state design for invalidation, corruption fallback, races/cleanup or diagnostic/source-map integration.
+
+## Production behavior after #82 research
+
+No production behavior is changed by PR #84.
+
+The following remain unchanged:
+
+- Evolution language syntax and accepted-program semantics;
+- ownership/type rules;
+- production generated Rust;
+- production rustc flags (`edition=2024`, `opt-level=3`, `codegen-units=1`);
+- `build-cache-v0`;
+- `run-cache-v0`;
+- source mappings;
+- rustc diagnostic remapping;
+- runtime thresholds;
+- linker choice;
+- package/dependency behavior.
+
+Direct-rustc arms in #82 are measurement-only and do not replace the production compile/remap path.
+
+## Successor P0 — #85 link-time baseline v0
+
+Issue **#85 — `P0 research link-time baseline v0: split rustc backend/codegen from linker cost`** is open but gated.
 
 Why it is next:
 
-- #79 removes rustc from exact unchanged warm builds;
-- #76's deterministic generated-Rust-changing edit still costs **95.515 ms** and invokes rustc **5/5** times;
-- direct rustc compile/link is **94.131 ms**, so the remaining changed-source bottleneck is still compiler/link work rather than the roughly one-millisecond frontend.
+- the frontend is already known to be small relative to native compile+link;
+- exact unchanged build is solved by #79;
+- the tested persistent incremental configurations are rejected/deferred by #82;
+- direct rustc evidence still combines compile/codegen and final link work, so the link share is unknown.
 
-#82 is **research-first**, not an implementation promise.
+Dependency-build/proc-macro roadmap items remain deferred until Evolution has a real user-program package/dependency graph. The current compiler still emits one `main.rs` and invokes rustc directly.
 
-Required research boundaries:
+#85 must not start until:
 
-- reuse the accepted Enums v0 fixture and deterministic result-preserving edit;
-- measure the pinned Rust 1.98.0 mechanisms/flags actually used, not remembered folklore;
-- isolate fresh workdir/source-path effects from reusable rustc incremental/session state;
-- record prime/edit samples, correctness, rustc counts, generated Rust, state size/growth, raw data and exact toolchain identity;
-- preserve diagnostics/source mapping and existing build/run cache contracts;
-- no mandatory daemon/compiler service, remote cache/download, linker replacement, package/dependency redesign, multi-crate semantics, frontend redesign, hot reload or language/runtime change;
-- finish with **IMPLEMENT** only if improvement is stable/material and the state/invalidation model is bounded and safe; otherwise retain a **REJECT/DEFER** result.
+1. PR #84 final documentation head passes exact-head CI;
+2. PR #84 is squash-merged with expected-head protection;
+3. the natural post-merge `main` CI is SUCCESS;
+4. #82 is closed as completed research with its negative decision retained;
+5. live main/open PR/issue/Action state is re-read and no duplicate work exists.
 
 ## Current implemented language / diagnostics state
 
-`docs/LANGUAGE_SPEC_V0.md` remains the implemented-language source of truth. Build/run caches and incremental-build research are tooling, not language semantics.
+`docs/LANGUAGE_SPEC_V0.md` remains the implemented-language source of truth. Build/run caches and build-performance research are tooling, not language semantics.
 
 Current accepted core includes:
 
@@ -143,13 +196,13 @@ Current accepted core includes:
 - controlled build-latency/turnaround evidence infrastructure;
 - differential correctness/performance infrastructure and retained artifacts.
 
-The current `string` value semantics remain **static/literal**. Do not silently treat the type as a general owned runtime string.
+The current `string` value semantics remain static/literal. Do not silently treat the type as a general owned runtime string.
 
 ## ZERO-cost boundary
 
-Current Core-language slices must not silently introduce hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
+Current core-language slices must not silently introduce hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
 
-Diagnostics, caches, incremental-build experiments and measurement metadata are compiler/tooling state. They must not alter accepted generated-program behavior.
+Diagnostics, caches and build-performance measurement metadata are compiler/tooling state. They must not alter accepted generated-program behavior.
 
 ## Durable continuation infrastructure
 
