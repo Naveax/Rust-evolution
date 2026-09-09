@@ -322,16 +322,15 @@ fn incremental_runtime_identity_isolates_flag_from_edit_reuse() {
     let rustc = real_rustc();
     let version = rustc_version(&rustc);
     let generated = dir.join("main.rs");
-    let baseline_control_binary =
-        dir.join(format!("baseline-control{}", env::consts::EXE_SUFFIX));
+    let baseline_control_binary = dir.join(format!("baseline-control{}", env::consts::EXE_SUFFIX));
     let edited_control_binary = dir.join(format!("edited-control{}", env::consts::EXE_SUFFIX));
     let incremental_prime_binary =
         dir.join(format!("incremental-prime{}", env::consts::EXE_SUFFIX));
-    let incremental_edit_binary =
-        dir.join(format!("incremental-edit{}", env::consts::EXE_SUFFIX));
+    let incremental_edit_binary = dir.join(format!("incremental-edit{}", env::consts::EXE_SUFFIX));
     let session = dir.join("session");
 
-    fs::write(&generated, &baseline_generated.stdout).expect("baseline generated Rust should stage");
+    fs::write(&generated, &baseline_generated.stdout)
+        .expect("baseline generated Rust should stage");
     compile_runtime_binary(
         &rustc,
         &generated,
@@ -454,10 +453,7 @@ fn incremental_runtime_identity_isolates_flag_from_edit_reuse() {
         "identity_baseline_control_ms={:.3}",
         baseline_control.median_ms
     );
-    println!(
-        "identity_edited_control_ms={:.3}",
-        edited_control.median_ms
-    );
+    println!("identity_edited_control_ms={:.3}", edited_control.median_ms);
     println!(
         "identity_incremental_prime_ms={:.3}",
         incremental_prime.median_ms
