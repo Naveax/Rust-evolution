@@ -33,6 +33,13 @@ struct RuntimeQualityReportInput<'a> {
     rustc_version: &'a str,
 }
 
+struct RuntimeSampleSinks<'a> {
+    reference: &'a mut Vec<Duration>,
+    current: &'a mut Vec<Duration>,
+    cgu256_control: &'a mut Vec<Duration>,
+    candidate: &'a mut Vec<Duration>,
+}
+
 fn runtime_compile_command(
     rustc: &OsStr,
     source: &Path,
@@ -144,12 +151,7 @@ fn run_runtime_round(
     current_binary: &Path,
     cgu256_control_binary: &Path,
     candidate_binary: &Path,
-    mut samples: Option<(
-        &mut Vec<Duration>,
-        &mut Vec<Duration>,
-        &mut Vec<Duration>,
-        &mut Vec<Duration>,
-    )>,
+    mut samples: Option<RuntimeSampleSinks<'_>>,
 ) {
     for arm in runtime_order(index) {
         let binary = match arm {
@@ -162,10 +164,10 @@ fn run_runtime_round(
         let elapsed = timed_runtime(binary, stdin);
         if let Some(values) = samples.as_mut() {
             match arm {
-                0 => values.0.push(elapsed),
-                1 => values.1.push(elapsed),
-                2 => values.2.push(elapsed),
-                3 => values.3.push(elapsed),
+                0 => values.reference.push(elapsed),
+                1 => values.current.push(elapsed),
+                2 => values.cgu256_control.push(elapsed),
+                3 => values.candidate.push(elapsed),
                 _ => unreachable!("runtime arm must be known"),
             }
         }
@@ -543,12 +545,12 @@ fn incremental_candidate_runtime_quality_is_measured_against_current_and_referen
             &current_binary,
             &cgu256_control_binary,
             &candidate_binary,
-            Some((
-                &mut reference_samples,
-                &mut current_samples,
-                &mut cgu256_control_samples,
-                &mut candidate_samples,
-            )),
+            Some(RuntimeSampleSinks {
+                reference: &mut reference_samples,
+                current: &mut current_samples,
+                cgu256_control: &mut cgu256_control_samples,
+                candidate: &mut candidate_samples,
+            }),
         );
     }
 
