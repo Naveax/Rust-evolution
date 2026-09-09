@@ -152,28 +152,22 @@ fn run_runtime_round(
     )>,
 ) {
     for arm in runtime_order(index) {
-        let (binary, target) = match arm {
-            0 => (
-                reference_binary,
-                samples.as_mut().map(|values| &mut *values.0),
-            ),
-            1 => (
-                current_binary,
-                samples.as_mut().map(|values| &mut *values.1),
-            ),
-            2 => (
-                cgu256_control_binary,
-                samples.as_mut().map(|values| &mut *values.2),
-            ),
-            3 => (
-                candidate_binary,
-                samples.as_mut().map(|values| &mut *values.3),
-            ),
+        let binary = match arm {
+            0 => reference_binary,
+            1 => current_binary,
+            2 => cgu256_control_binary,
+            3 => candidate_binary,
             _ => unreachable!("runtime arm must be known"),
         };
         let elapsed = timed_runtime(binary, stdin);
-        if let Some(target) = target {
-            target.push(elapsed);
+        if let Some(values) = samples.as_mut() {
+            match arm {
+                0 => values.0.push(elapsed),
+                1 => values.1.push(elapsed),
+                2 => values.2.push(elapsed),
+                3 => values.3.push(elapsed),
+                _ => unreachable!("runtime arm must be known"),
+            }
         }
     }
 }
@@ -200,8 +194,13 @@ fn runtime_verdict(
 
 fn push_runtime_csv_rows(csv: &mut String, arm: &str, samples: &[Duration]) {
     for (index, sample) in samples.iter().enumerate() {
-        writeln!(csv, "{arm},{},{:.3}", index + 1, sample.as_secs_f64() * 1_000.0)
-            .expect("writing runtime-quality CSV to String should not fail");
+        writeln!(
+            csv,
+            "{arm},{},{:.3}",
+            index + 1,
+            sample.as_secs_f64() * 1_000.0
+        )
+        .expect("writing runtime-quality CSV to String should not fail");
     }
 }
 
@@ -405,11 +404,7 @@ The reference arm uses the committed accepted Rust fixture. The current and cand
         "evolution-cgu256-no-incremental",
         input.cgu256_control,
     );
-    push_runtime_csv_rows(
-        &mut csv,
-        "evolution-cgu256-incremental",
-        input.candidate,
-    );
+    push_runtime_csv_rows(&mut csv, "evolution-cgu256-incremental", input.candidate);
     fs::write(out_dir.join("raw-samples.csv"), csv)
         .expect("runtime-quality CSV report should be written");
     fs::write(out_dir.join("rustc-vV.txt"), input.rustc_version)
@@ -459,10 +454,8 @@ fn incremental_candidate_runtime_quality_is_measured_against_current_and_referen
     let source = dir.join("main.rs");
     let reference_binary = dir.join(format!("reference{}", env::consts::EXE_SUFFIX));
     let current_binary = dir.join(format!("current{}", env::consts::EXE_SUFFIX));
-    let cgu256_control_binary =
-        dir.join(format!("cgu256-control{}", env::consts::EXE_SUFFIX));
-    let candidate_prime_binary =
-        dir.join(format!("candidate-prime{}", env::consts::EXE_SUFFIX));
+    let cgu256_control_binary = dir.join(format!("cgu256-control{}", env::consts::EXE_SUFFIX));
+    let candidate_prime_binary = dir.join(format!("candidate-prime{}", env::consts::EXE_SUFFIX));
     let candidate_binary = dir.join(format!("candidate{}", env::consts::EXE_SUFFIX));
     let session = dir.join("candidate-session");
 
@@ -509,7 +502,10 @@ fn incremental_candidate_runtime_quality_is_measured_against_current_and_referen
     );
     run_binary(&candidate_prime_binary, &fixture_stdin, &expected_stdout);
     let state_after_prime = incremental_dir_stats(&session);
-    assert!(state_after_prime.files > 0, "candidate prime must persist state");
+    assert!(
+        state_after_prime.files > 0,
+        "candidate prime must persist state"
+    );
 
     fs::write(&source, &edited_generated.stdout).expect("candidate edited Rust should stage");
     compile_runtime_binary(
@@ -594,10 +590,7 @@ fn incremental_candidate_runtime_quality_is_measured_against_current_and_referen
     let candidate = runtime_quality_stats(&candidate_samples);
     println!("runtime_reference_cgu1_ms={:.3}", reference.median_ms);
     println!("runtime_current_cgu1_ms={:.3}", current.median_ms);
-    println!(
-        "runtime_cgu256_control_ms={:.3}",
-        cgu256_control.median_ms
-    );
+    println!("runtime_cgu256_control_ms={:.3}", cgu256_control.median_ms);
     println!("runtime_candidate_ms={:.3}", candidate.median_ms);
     println!(
         "runtime_candidate_to_reference={:.6}",
