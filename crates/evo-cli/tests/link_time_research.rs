@@ -201,18 +201,8 @@ fn write_link_research_report(
         let wrapper_overhead = instrumented.median_ms - full.median_ms;
         let invocation_range = format!(
             "{}-{}",
-            result
-                .linker_invocations
-                .iter()
-                .copied()
-                .min()
-                .unwrap_or(0),
-            result
-                .linker_invocations
-                .iter()
-                .copied()
-                .max()
-                .unwrap_or(0)
+            result.linker_invocations.iter().copied().min().unwrap_or(0),
+            result.linker_invocations.iter().copied().max().unwrap_or(0)
         );
         writeln!(
             markdown,
@@ -320,8 +310,11 @@ fn write_link_research_report(
         fs::create_dir_all(&case_dir).expect("case evidence directory should be created");
         fs::write(case_dir.join("generated.rs"), &result.generated_rust)
             .expect("generated Rust evidence should be written");
-        fs::write(case_dir.join("rustc-print-link-args.txt"), &result.link_args_probe)
-            .expect("rustc link args evidence should be written");
+        fs::write(
+            case_dir.join("rustc-print-link-args.txt"),
+            &result.link_args_probe,
+        )
+        .expect("rustc link args evidence should be written");
         fs::write(
             case_dir.join("wrapper-link-args.txt"),
             &result.wrapper_link_args,
@@ -333,7 +326,11 @@ fn write_link_research_report(
 #[test]
 #[ignore = "run explicitly on the controlled Ubuntu link-attribution runner"]
 fn link_time_research_attributes_object_and_real_link_driver_cost() {
-    assert_eq!(env::consts::OS, "linux", "link attribution slice is Ubuntu-only");
+    assert_eq!(
+        env::consts::OS,
+        "linux",
+        "link attribution slice is Ubuntu-only"
+    );
 
     let dir = temp_dir("link-time-research");
     fs::create_dir_all(&dir).expect("link research directory should be created");
@@ -373,7 +370,10 @@ fn link_time_research_attributes_object_and_real_link_driver_cost() {
             .output()
             .expect("emit-rust should execute");
         assert_success(&emitted, "emit-rust for link research");
-        assert!(!emitted.stdout.is_empty(), "generated Rust should not be empty");
+        assert!(
+            !emitted.stdout.is_empty(),
+            "generated Rust should not be empty"
+        );
         let generated = case_dir.join("main.rs");
         fs::write(&generated, &emitted.stdout).expect("generated Rust should stage");
 
