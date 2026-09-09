@@ -1,0 +1,50 @@
+name: Link-time research
+
+on:
+  pull_request:
+    paths:
+      - crates/evo-cli/tests/link_time_research.rs
+      - .github/workflows/link-time-research.yml
+  push:
+    branches:
+      - main
+    paths:
+      - crates/evo-cli/tests/link_time_research.rs
+      - .github/workflows/link-time-research.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: ubuntu-latest / Rust 1.98.0
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal
+
+      - name: Show toolchain
+        run: rustc -Vv
+
+      - name: Link-time attribution evidence
+        id: link_time_research
+        env:
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_LINK_TIME_RESEARCH_OUT: ${{ github.workspace }}/target/evo-link-time-research
+        run: cargo test -p evo-cli --test link_time_research link_time_research_attributes_object_and_real_link_driver_cost -- --ignored --exact --nocapture
+
+      - name: Upload link-time attribution evidence
+        if: always() && steps.link_time_research.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-link-time-research-ubuntu-latest
+          path: target/evo-link-time-research/
+          if-no-files-found: error
