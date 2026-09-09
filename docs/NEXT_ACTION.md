@@ -2,146 +2,96 @@
 
 This file is intentionally operational. A fresh chat/agent should be able to resume from here without prior conversation history.
 
-Last verified update: **2026-09-08**
+Last verified update: **2026-09-09**
 
-## Verified merged baseline
+## Current PR / exact evidence
 
-Verified build artifact reuse v0 **#79 is completed** and PR **#81 is merged**.
+Active research PR: **#84 — `research: measure changed-source rustc incremental reuse`**.
 
-Latest verified code-bearing `main`:
+Current research branch: `research/incremental-build-v0`.
 
-- `07e85b3a60739f2d1f25caed0fcb622dd8894861`
-- PR #81 final head `4288ddcfccf07fcab60d27e9677685b213005ae2`
-- final PR CI **#338** / run `34214947823`: **SUCCESS** on Ubuntu, Windows and macOS
-- post-merge main CI **#339** / run `34215424678`: **SUCCESS** on Ubuntu, Windows and macOS
+Accepted code/evidence head before the final documentation sync:
+
+- `bbdec7f5f6ec4668849212f49bc07c49196024e2`
+- CI **#355** / run `34356624339`: **SUCCESS** on Ubuntu, Windows and macOS
+- Ubuntu incremental research artifact: `evo-incremental-build-research-ubuntu-latest`
+- artifact id: `10106092707`
+- digest: `sha256:217d9849e7e88f8ee05ebd408c0c9b2afaea57f3925f42d099b040dba7eb3a9c`
 - Rust toolchain: **1.98.0**
 
-A later docs-only handoff merge may advance live `main` beyond the code-bearing SHA above. Always verify live GitHub, open PRs and active Actions before implementation/research work.
+The current PR contains research/CI/docs only. It does not change production compiler, cache, language, generated-Rust, source-map, diagnostic-remapping or runtime behavior.
 
-## Accepted #79 build-cache evidence
+## #82 final decision
 
-Final Ubuntu artifact:
+Issue **#82 — changed-source incremental build v0** has completed its research decision:
 
-- `evo-build-cache-turnaround-ubuntu-latest`
-- artifact id `10051449726`
-- digest `sha256:cf7295bf371695347300bee325e3a5a4b5a96bbf4c8789625904d66bd4c538e9`
-- fixture `benchmarks/cases/enums-v0/evolution.evo`
+**REJECT / DEFER production rustc incremental state under the current architecture/toolchain configuration.**
 
-Controlled final-head values:
+Durable evidence: `docs/INCREMENTAL_BUILD_RESEARCH.md`.
 
-- cold median: **128.454 ms**
-- unchanged warm cached median: **17.177 ms**
-- cold-to-warm speedup: **7.478x**
-- accepted #76 warm uncached baseline: **96.986 ms**
-- accepted-baseline-to-cached speedup: **5.646x**
-- cold rustc compile count: **5**
-- warm rustc compile count: **0**
-- correctness: **PASS**
+Key findings:
 
-Exact retained generated Rust:
+1. Current production-equivalent CGU1 + persistent rustc incremental state made the deterministic edited compile path about **9.28% slower** than its matching no-incremental control.
+2. CGU256 + persistent incremental state improved the matching edited compile median from **107.522 ms** to **97.167 ms**, a **1.107x** matching-control speedup.
+3. `-C incremental` itself changed optimized binary/codegen identity on the controlled Enums fixture; the difference was not stale edit-history reuse.
+4. The favorable Enums runtime effect did not generalize across the committed runtime corpus.
+5. Final 7-case corpus aggregate decision was **REJECT**. The clearest regression was `logical-operators-v0`: candidate/reference `1.019303`, candidate/current `1.018570`.
+6. The project runtime invariant does not allow compile-time wins to purchase repeatable generated-program runtime regressions.
 
-- 1240 bytes
-- SHA-256 `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`
-- matches accepted Enums v0 / #76 evidence.
+Because the runtime gate already fails, #82 does not proceed into production invalidation, corruption fallback, race/cleanup or diagnostic/source-map integration design.
 
-Hard acceptance is zero warm rustc compilation plus correct native output. Timing is supporting evidence.
+## Immediate sequence
 
-The #76 build-latency harness now invokes `evo build ... --no-cache`, preserving its original uncached baseline semantics after cached build became the default path.
+1. Keep PR #84 on the documentation-synchronized final head and track its one natural exact-head CI run. Do not create a duplicate Action for the same SHA/workflow/input.
+2. Require final PR #84 CI to be green on Ubuntu, Windows and macOS.
+3. Squash-merge PR #84 with expected-head protection only after exact-head CI is green.
+4. Track the one natural post-merge `main` CI run; do not start the successor branch before it is green.
+5. Close #82 as **completed research with REJECT/DEFER decision** after the merge and post-merge validation are accepted.
+6. Then start **#85 — P0 research link-time baseline v0: split rustc backend/codegen from linker cost** from the exact verified `main` SHA.
 
-## Active P0 research — #82
+## Successor P0 — #85 link-time attribution
 
-Issue **#82 — P0 research changed-source incremental build v0: measure rustc session reuse** is open.
+Why #85 is next:
 
-Parent: #2
+- #76 already showed the frontend is roughly ~1 ms while native rustc compile+link dominates uncached builds;
+- #79 solves exact unchanged builds by verified artifact reuse;
+- #82 rejects the tested persistent rustc incremental configurations because the viable compile-time candidate violates runtime parity;
+- the current direct-rustc evidence still measures **compile/codegen + link together**, so the final-link share is unknown.
 
-Weakness source: #6 Build / Compile.
+Dependency-build and proc-macro roadmap items are not yet directly measurable for Evolution user programs because the current user-program compiler path is still one generated `main.rs` passed directly to rustc with no Evolution package/dependency graph.
 
-Roadmap: #1 Phase 3.4 warm build / incremental build.
+## #85 start gate
 
-Evidence source:
+Do **not** create a #85 branch until all of these are true:
 
-- exact unchanged builds are now solved by #79: warm cached **17.177 ms**, rustc count **0**;
-- #76 deterministic generated-Rust-changing edit remains **95.515 ms** with rustc invoked **5/5** times;
-- direct rustc compile/link baseline is **94.131 ms**.
+- PR #84 merged;
+- #82 final decision recorded;
+- live `main` SHA re-read from GitHub;
+- natural post-merge main CI is SUCCESS;
+- no duplicate open issue/branch/PR covers the same link-time experiment;
+- no active same-SHA/workflow Action is duplicated.
 
-#82 is research/measurement first. It is **not** permission to ship production incremental-build state merely because rustc has an option with an encouraging name.
+## First #85 research sequence
 
-## Start gate for #82 branch work
+1. Re-read #85 and the current production rustc invocation from `crates/evo-cli/src/main.rs`.
+2. Use pinned Rust 1.98.0 evidence, not remembered compiler flags.
+3. Build a measurement-only harness that separates, where defensible:
+   - normal production-equivalent native compile + link;
+   - object/pre-link emission under equivalent optimization/codegen settings;
+   - explicit final-link work using the actual observed linker/toolchain path.
+4. Record exact commands, linker identity, source SHA, target/host, object/native sizes and raw timing samples.
+5. Require final native output correctness before accepting timing evidence.
+6. Use more than one committed program shape if the phase split appears workload-sensitive.
+7. End with FOLLOW-UP EXPERIMENT only if link cost is material and intervention risk is bounded; otherwise record NO ACTION / DEFER.
+8. Do not change the default linker in the measurement issue.
 
-This docs-only handoff must first be merged and its natural post-merge `main` CI must be green.
+## Production contracts that remain unchanged
 
-Only then:
-
-1. Verify live `main`, #82, open PRs and all queued/in-progress Actions.
-2. Confirm there is no duplicate research/incremental issue or active branch/PR covering the same experiment.
-3. Create a focused research branch from the exact verified `main` SHA.
-4. Do not alter production `build-cache-v0` behavior as part of the first experiment.
-
-## First #82 research sequence
-
-1. Inspect the pinned Rust **1.98.0** toolchain directly and record the exact supported rustc incremental/session mechanisms and flags. Do not infer them from memory or another rustc release.
-2. Reuse the accepted #76 Enums v0 fixture and deterministic result-preserving edit:
-   - fixture: `benchmarks/cases/enums-v0/evolution.evo`;
-   - stdin: `20000000\n9\n`;
-   - expected stdout: `15099959897\n`;
-   - edit one `sum = sum + value` to `sum = value + sum`;
-   - require generated Rust to change while native output remains correct.
-3. Build a research-only harness that isolates experiment arms rather than changing several variables at once:
-   - current fresh-workdir / no persistent compiler-session baseline;
-   - stable generated-source/work path without reusable incremental state, if needed to isolate path effects;
-   - persistent rustc incremental/session state with otherwise equivalent successful-build flags.
-4. Preserve the existing frontend path and measure it separately where relevant. Do not skip validation/lowering/codegen to manufacture a favorable rebuild number.
-5. Record exact rustc command lines/flags and `rustc -vV` for every arm.
-6. Count rustc compile invocations independently of timing.
-7. Execute every measured native artifact with the committed fixture input and require exact expected output before accepting timing evidence.
-8. Retain baseline and edited generated Rust artifacts so source-map/diagnostic compatibility can be reviewed.
-9. Record persistent state evidence when applicable:
-   - directory size;
-   - high-level file count/growth;
-   - reuse across edits;
-   - corruption/mismatch behavior where safely testable;
-   - cleanup/invalidation requirements.
-10. Emit raw samples CSV, JSON and Markdown evidence. Keep unfavorable/outlier samples visible.
-11. Compare edited rebuild medians against the accepted #76 **95.515 ms** edit baseline and against an appropriate direct-rustc arm.
-12. Review diagnostics/source mapping explicitly. A latency win that breaks source-native rustc remapping is not an accepted win.
-13. Keep normal three-OS fmt/Clippy/workspace validation and every existing Ubuntu turnaround/runtime/performance gate green for any research PR that changes repository code.
-
-## #82 decision gate
-
-The research may finish either way.
-
-### IMPLEMENT
-
-Atomize a separate production implementation issue only if evidence shows:
-
-- stable, material changed-source improvement;
-- correct native output;
-- a bounded compiler-state/invalidation identity;
-- safe corruption/mismatch fallback;
-- acceptable race/cleanup behavior;
-- preserved diagnostics/source mapping;
-- no mandatory daemon/service requirement;
-- complexity justified by measured gain.
-
-### REJECT / DEFER
-
-Record the negative result and stop if the gain is weak/unstable, toolchain-fragile, requires disproportionate persistent state, needs a mandatory daemon/compiler service, or breaks diagnostics/source mapping.
-
-A roadmap checkbox is not a performance result.
-
-## Explicit non-goals for #82
-
-Do not fold these into the research slice:
-
-- compiler daemon/server architecture;
-- remote cache or executable download;
-- linker replacement;
-- Cargo/dependency graph or package-system work;
-- multi-crate incremental semantics;
-- frontend redesign/micro-optimization;
-- hot reload/runtime code replacement;
-- Evolution language/runtime changes;
-- changes to accepted `build-cache-v0` or `run-cache-v0` contracts unless a later implementation issue explicitly proves and scopes them.
+- `build-cache-v0` exact artifact reuse remains accepted.
+- `run-cache-v0` remains independent.
+- production rustc flags remain edition 2024, opt-level 3, codegen-units 1 unless a later separately proven change lands.
+- generated Rust/source maps/diagnostic remapping remain unchanged.
+- the #4 runtime parity-or-better invariant remains non-negotiable.
 
 ## CI rule
 
