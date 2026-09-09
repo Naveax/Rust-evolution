@@ -86,6 +86,7 @@ jobs:
           cargo test -p evo-cli --test incremental_build_research incremental_build_research_isolates_stable_path_and_persistent_rustc_state -- --ignored --exact --nocapture
           cargo test -p evo-cli --test incremental_codegen_units_research incremental_codegen_unit_granularity_compares_matching_256_cgu_control -- --ignored --exact --nocapture
           cargo test -p evo-cli --test incremental_runtime_quality_research incremental_candidate_runtime_quality_is_measured_against_current_and_reference -- --ignored --exact --nocapture
+          cargo test -p evo-cli --test incremental_runtime_identity_research incremental_runtime_identity_isolates_flag_from_edit_reuse -- --ignored --exact --nocapture
 
       - name: Upload incremental build research evidence
         if: matrix.os == 'ubuntu-latest' && always() && steps.incremental_build_research.outcome != 'skipped'
