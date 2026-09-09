@@ -76,6 +76,22 @@ jobs:
           path: target/evo-build-latency/
           if-no-files-found: error
 
+      - name: Incremental build research evidence
+        id: incremental_build_research
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_INCREMENTAL_RESEARCH_OUT: ${{ github.workspace }}/target/evo-incremental-build-research
+        run: cargo test -p evo-cli --test incremental_build_research incremental_build_research_isolates_stable_path_and_persistent_rustc_state -- --ignored --exact --nocapture
+
+      - name: Upload incremental build research evidence
+        if: matrix.os == 'ubuntu-latest' && always() && steps.incremental_build_research.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-incremental-build-research-ubuntu-latest
+          path: target/evo-incremental-build-research/
+          if-no-files-found: error
+
       - name: Verified build cache turnaround evidence
         id: build_cache_turnaround
         if: matrix.os == 'ubuntu-latest'
