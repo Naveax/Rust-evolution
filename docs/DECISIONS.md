@@ -217,9 +217,21 @@ For v0:
 
 **Reason:** #76 measured an unchanged warm build at **96.986 ms** with rustc invoked **5/5** times while the frontend was roughly one millisecond. Exact verified artifact reuse removes the dominant redundant compile/link work without weakening frontend validation or changing generated programs.
 
-Accepted code/evidence-head proof: PR #81 head `9fcab321d3be05b291c2d80f3949f0c975db242a`, CI #337 / run `34213183199`, three OS jobs SUCCESS. Controlled Ubuntu artifact `evo-build-cache-turnaround-ubuntu-latest`, id `10050970173`, digest `sha256:bf949ee935a2512bd9b74726155b5f67d57a46a122af41c7377f86e3f2a2fa8e`, recorded cold median **137.783 ms**, warm cached median **18.341 ms**, warm rustc compile count **0**, correctness **PASS**, and **5.288x** speedup versus the accepted #76 warm uncached baseline. Generated Rust remained 1240 bytes with SHA-256 `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`.
+Accepted final proof:
 
-PR #81 still requires the natural CI of its final durable-docs head before merge. The code/evidence decision above is implementation-backed; merge/post-main evidence should be appended to durable handoff state when available.
+- PR #81 final head `4288ddcfccf07fcab60d27e9677685b213005ae2`;
+- final PR CI #338 / run `34214947823`: **SUCCESS** on Ubuntu, Windows and macOS;
+- controlled Ubuntu artifact `evo-build-cache-turnaround-ubuntu-latest`, id `10051449726`, digest `sha256:cf7295bf371695347300bee325e3a5a4b5a96bbf4c8789625904d66bd4c538e9`;
+- cold median **128.454 ms**;
+- warm cached median **17.177 ms**;
+- warm rustc compile count **0**;
+- correctness **PASS**;
+- **5.646x** speedup versus the accepted #76 warm uncached baseline;
+- generated Rust remained 1240 bytes with SHA-256 `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`;
+- squash merge `07e85b3a60739f2d1f25caed0fcb622dd8894861`;
+- post-merge main CI #339 / run `34215424678`: **SUCCESS** on Ubuntu, Windows and macOS, including all existing Ubuntu turnaround/runtime/performance gates.
+
+Changed-source incremental-rustc/session reuse remains a distinct problem. Issue #82 is the research-first successor and does not alter this accepted exact-artifact cache contract unless later evidence justifies a separately scoped implementation decision.
 
 ## Changing a decision
 

@@ -9,167 +9,147 @@ This file is the durable project handoff. Fresh sessions should read `AGENTS.md`
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
 - Rust toolchain: **1.98.0**
-- Live `main` at this update: `53067b74f64fadab4b41684911401e822972bd26`
-- Latest verified code-bearing merged baseline: `34f0815d0821543586cd3ae73b9b5b616a1396d3` from PR **#78**
-- PR #78 post-merge main CI **#325** / run `34205500589`: **SUCCESS** on Ubuntu, Windows and macOS
-- Active P0: **#79 verified build artifact reuse v0** / PR **#81**
+- Latest verified code-bearing `main`: `07e85b3a60739f2d1f25caed0fcb622dd8894861`
+- Source: PR **#81** squash merge
+- Final PR head: `4288ddcfccf07fcab60d27e9677685b213005ae2`
+- Final PR CI **#338** / run `34214947823`: **SUCCESS** on Ubuntu, Windows and macOS
+- Post-merge main CI **#339** / run `34215424678`: **SUCCESS** on Ubuntu, Windows and macOS
+- Completed P0: **#79 verified build artifact reuse v0**
+- Active successor P0 research: **#82 changed-source incremental build v0**
 
-Always re-read live GitHub before acting. Docs record the last verified state; they do not get to predict a future squash SHA, despite software documentation's occasional aspirations toward prophecy.
+Always verify live GitHub before acting. A later docs-only merge may advance `main` beyond the code-bearing SHA above without changing compiler behavior.
 
-## Active P0 — Verified build artifact reuse v0 (#79)
+## Completed P0 — Verified build artifact reuse v0 (#79)
 
-PR **#81 — `feat: reuse verified artifacts for unchanged evo build`** has a fully accepted **code/evidence head**:
+Issue **#79** is completed. PR **#81 — `feat: reuse verified artifacts for unchanged evo build`** is merged.
 
-- head: `9fcab321d3be05b291c2d80f3949f0c975db242a`;
-- CI **#337** / run `34213183199`: **SUCCESS** on Ubuntu, Windows and macOS;
-- Ubuntu passed fmt, Clippy, workspace tests, fast edit-run evidence, preserved uncached build-latency evidence, verified build-cache evidence, benchmark smoke, every existing runtime/performance gate, and release build;
-- Windows/macOS passed fmt, Clippy, workspace tests, benchmark smoke, and release build.
+Accepted behavior:
 
-PR #81 is still **draft** at this documentation update. Durable docs create a new PR head; that exact docs head must pass one natural three-OS CI run before the PR can be marked ready and merged.
-
-### Accepted build-cache behavior
-
-`evo build` now has a separate local `build-cache-v0` tooling cache. The accepted behavior on the code/evidence head is:
-
-- full lexer/parser/lowering/codegen still runs on every build before cache lookup;
-- a verified hit requires exact Evolution source, exact generated Rust, exact compiler/configuration identity, a completion marker, and a regular non-symlink cached native artifact;
-- the cache key is only a locator, not proof of identity;
-- a hit materializes the verified native artifact to the requested output path;
-- normal `evo build <file.evo> [output]` may reuse the cache by default;
-- `evo build <file.evo> --no-cache` bypasses cache and uses the default output;
-- `evo build <file.evo> <output> --no-cache` bypasses cache with an explicit output;
-- source or compiler-fingerprint changes miss and compile normally;
-- corrupt identity, missing binary, incomplete/unusable cache state, and symlink cached binaries where supported fail closed to recompilation;
+- `evo build` keeps full lexer/parser/lowering/codegen on every invocation before cache lookup;
+- verified unchanged-build reuse uses a separate local `build-cache-v0` tooling cache;
+- exact Evolution source, generated Rust and compiler/configuration identity are verified on hit;
+- a key/hash locates candidates but is not proof of identity;
+- completion marker and regular non-symlink cached native artifact are required;
+- verified hits materialize to the requested output path without rustc compilation;
+- different output paths may reuse the same verified artifact;
+- `evo build <file> --no-cache` and `evo build <file> <output> --no-cache` bypass lookup/publication;
+- corrupt, incomplete, missing, mismatched or unusable cache state fails closed to normal compilation;
 - unavailable cache storage falls back to normal compilation;
-- different requested output paths can reuse the same verified cached artifact;
-- existing output replacement behavior remains compatible;
-- cache publication is best-effort after a successful normal compile;
-- `run-cache-v0` behavior is not changed by PR #81.
+- publication is best-effort after a successful normal compile;
+- bounded pruning/stale staging cleanup remain tooling-only;
+- accepted `run-cache-v0` behavior remains independent;
+- generated Rust and generated-program runtime semantics/cost remain unchanged.
 
-The accepted #76 baseline harness now calls `evo build ... --no-cache` so its historical uncached measurement semantics remain intact after cached build becomes the default.
+The #76 build-latency harness now invokes `evo build ... --no-cache`, preserving its original uncached attribution semantics after build-cache reuse became the normal build path.
 
-See `docs/BUILD_CACHE.md` for the exact cache contract and accepted evidence.
+See `docs/BUILD_CACHE.md` and D-021.
 
-### Final controlled Ubuntu artifact
+### Final controlled Ubuntu evidence
 
-Artifact:
+Final PR artifact:
 
 - name: `evo-build-cache-turnaround-ubuntu-latest`;
-- id: `10050970173`;
-- digest: `sha256:bf949ee935a2512bd9b74726155b5f67d57a46a122af41c7377f86e3f2a2fa8e`;
-- source head: `9fcab321d3be05b291c2d80f3949f0c975db242a`;
+- id: `10051449726`;
+- digest: `sha256:cf7295bf371695347300bee325e3a5a4b5a96bbf4c8789625904d66bd4c538e9`;
+- source head: `4288ddcfccf07fcab60d27e9677685b213005ae2`;
 - platform: `linux-x86_64`;
 - fixture: `benchmarks/cases/enums-v0/evolution.evo`.
 
 Measured values:
 
-- cold median: **137.783 ms** across 5 samples;
-- unchanged warm cached median: **18.341 ms** across 9 samples;
-- cold-to-warm speedup: **7.512x**;
+- cold median: **128.454 ms** across 5 samples;
+- unchanged warm cached median: **17.177 ms** across 9 samples;
+- cold-to-warm speedup: **7.478x**;
 - accepted #76 uncached warm baseline: **96.986 ms**;
-- accepted-baseline-to-cached speedup: **5.288x**;
+- accepted-baseline-to-cached speedup: **5.646x**;
 - cold rustc compile count: **5**;
 - warm rustc compile count: **0**;
 - correctness: **PASS**.
 
-Hard acceptance is the exact **0 warm rustc compile count plus correct native output**. Timing is supporting evidence, not a semantic proof.
+Hard acceptance is exact warm rustc compile count **0** plus correct native output. Timing is supporting evidence.
 
-The retained generated Rust is still **1240 bytes** with SHA-256:
+Generated Rust remained exactly **1240 bytes**, SHA-256:
 
-- `61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`
+`61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83`
 
-That exactly matches the accepted Enums v0 / #76 generated-Rust baseline.
+This matches the accepted Enums v0 / #76 baseline.
 
-## Completed P0 — Build latency baseline v0 (#76)
+### CI acceptance
 
-Issue **#76** is completed; PR **#78** is merged.
+Final PR CI #338:
 
-Accepted Ubuntu medians:
+- Ubuntu: fmt, Clippy, workspace tests, fast edit-run evidence, preserved uncached build-latency evidence, verified build-cache evidence, benchmark smoke, every existing runtime/performance gate, release build: SUCCESS;
+- Windows/macOS: fmt, Clippy, workspace tests, benchmark smoke, release build: SUCCESS.
+
+Post-merge main CI #339 repeated the same required platform/gate coverage successfully on merge SHA `07e85b3a60739f2d1f25caed0fcb622dd8894861`.
+
+## Completed measurement predecessor — Build latency baseline v0 (#76)
+
+The accepted #76 controlled Ubuntu values remain the comparison baseline:
 
 - `evo check`: **1.207 ms**;
 - `evo emit-rust`: **1.210 ms**;
 - cold uncached `evo build`: **99.970 ms**;
 - unchanged warm uncached `evo build`: **96.986 ms**;
-- edited uncached `evo build`: **95.515 ms**;
-- direct rustc compile/link: **94.131 ms**.
+- deterministic edited uncached build: **95.515 ms**;
+- direct rustc compile/link: **94.131 ms**;
+- cold/warm/edit/direct rustc count: **5/5** in each measured class.
 
-Rustc compile invocation count across five measured samples was **5/5** for cold, unchanged warm, edit, and direct-rustc classes. The baseline demonstrated that direct rustc compile/link dominated unchanged build latency and justified #79 exact artifact reuse.
+Artifact: `evo-build-latency-ubuntu-latest`, id `10046420977`, digest `sha256:d3310910395f9c6be50200c261402bfdbb8c7ef617ed18f71b3aa7486a22a2b0`.
 
-Accepted artifact: `evo-build-latency-ubuntu-latest`, id `10046420977`, digest `sha256:d3310910395f9c6be50200c261402bfdbb8c7ef617ed18f71b3aa7486a22a2b0`.
+## Active P0 research — #82 changed-source incremental build v0
 
-## Next performance problem after #79
+Issue **#82 — `P0 research changed-source incremental build v0: measure rustc session reuse`** is open.
 
-Exact artifact reuse intentionally solves only **unchanged** builds. #76's deterministic edited-source path remained about **95.515 ms** and invoked rustc **5/5** times.
+Why it is next:
 
-After #79 is merged and post-merge `main` CI is green, the next build/compile work should be a bounded **changed-source incremental-rustc/session research slice**, not an assumption that the exact cache somehow became incremental compilation by positive thinking.
+- #79 removes rustc from exact unchanged warm builds;
+- #76's deterministic generated-Rust-changing edit still costs **95.515 ms** and invokes rustc **5/5** times;
+- direct rustc compile/link is **94.131 ms**, so the remaining changed-source bottleneck is still compiler/link work rather than the roughly one-millisecond frontend.
 
-Research must determine whether a persistent rustc/incremental session can reduce edited-source latency while preserving:
+#82 is **research-first**, not an implementation promise.
 
-- exact generated Rust semantics;
-- direct native backend behavior;
-- diagnostics/source mapping;
-- no mandatory daemon/runtime layer;
-- explicit tooling-only cost boundaries;
-- existing runtime performance gates.
+Required research boundaries:
 
-Do not create a broad compiler-service architecture before measurement proves it is needed.
+- reuse the accepted Enums v0 fixture and deterministic result-preserving edit;
+- measure the pinned Rust 1.98.0 mechanisms/flags actually used, not remembered folklore;
+- isolate fresh workdir/source-path effects from reusable rustc incremental/session state;
+- record prime/edit samples, correctness, rustc counts, generated Rust, state size/growth, raw data and exact toolchain identity;
+- preserve diagnostics/source mapping and existing build/run cache contracts;
+- no mandatory daemon/compiler service, remote cache/download, linker replacement, package/dependency redesign, multi-crate semantics, frontend redesign, hot reload or language/runtime change;
+- finish with **IMPLEMENT** only if improvement is stable/material and the state/invalidation model is bounded and safe; otherwise retain a **REJECT/DEFER** result.
 
 ## Current implemented language / diagnostics state
 
-`docs/LANGUAGE_SPEC_V0.md` remains the implemented-language source of truth. Build/run caches are tooling, not language semantics.
+`docs/LANGUAGE_SPEC_V0.md` remains the implemented-language source of truth. Build/run caches and incremental-build research are tooling, not language semantics.
 
 Current accepted core includes:
 
 - integer, boolean and current static/literal string values;
 - inferred mutability and lexical block locals;
 - arithmetic, comparisons and strict short-circuit logical operators;
-- `input_int`;
-- `repeat`, `if/else`;
+- `input_int`, `repeat`, `if/else`;
 - typed named functions with forward calls and recursion;
 - nominal Records v0 with by-value ownership;
 - nominal Enums v0 with unit/single-payload variants and exhaustive statement-only matching;
 - explicit same-type reinitialization after moves;
-- deterministic source-native move-origin related diagnostics;
+- deterministic source-native move-origin diagnostics;
 - deterministic bounded spelling help for supported unknown-symbol diagnostics;
 - direct static Rust lowering;
 - generated-line source maps and rustc remapping;
 - native `check`, `emit-rust`, `build`, `run`, `fmt` workflows;
 - verified persistent `evo run` compile caching;
-- verified persistent unchanged-`evo build` artifact reuse on PR #81's accepted code/evidence head;
-- controlled build-latency and turnaround evidence infrastructure;
+- verified persistent exact unchanged-`evo build` artifact reuse;
+- controlled build-latency/turnaround evidence infrastructure;
 - differential correctness/performance infrastructure and retained artifacts.
 
 The current `string` value semantics remain **static/literal**. Do not silently treat the type as a general owned runtime string.
-
-## Prior accepted P0 evidence
-
-### Diagnostic suggestions v0 (#74)
-
-- PR #75 final head `1f3fdec69f81c8d6742d3fde47d698a3df3f3543`;
-- CI #319 / run `34197970982`: SUCCESS;
-- squash merge `cd6dcd096af20f9f94c4f201e715ae87c848c480`;
-- post-merge CI #320 / run `34198404953`: SUCCESS.
-
-### Move diagnostics v0 (#69)
-
-- PR #71 final head `74f6a5955d46bd9620045bd39e9703383ae30679`;
-- CI #301 / run `34141025715`: SUCCESS;
-- squash merge `795461c53f896c2223443cdb022f340a5032a0bd`;
-- post-merge CI #302 / run `34158551578`: SUCCESS.
-
-### Fast edit-run v0 (#67)
-
-- PR #68 final head `b26a84819e8a89f27220ebd2eb16d4d91d513094`;
-- CI #288 / run `34123896927`: SUCCESS;
-- controlled cold median **69.258 ms**;
-- warm median **14.972 ms**;
-- warm rustc compile count **0**.
 
 ## ZERO-cost boundary
 
 Current Core-language slices must not silently introduce hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch.
 
-Diagnostics, caches and build-measurement metadata are compiler/tooling state. They must not alter accepted generated-program behavior.
+Diagnostics, caches, incremental-build experiments and measurement metadata are compiler/tooling state. They must not alter accepted generated-program behavior.
 
 ## Durable continuation infrastructure
 

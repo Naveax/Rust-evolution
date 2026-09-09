@@ -54,7 +54,7 @@ Build reuse uses:
 build-cache-v0
 ```
 
-The accepted `run-cache-v0` behavior is intentionally independent. PR #81 does not modify `crates/evo-cli/src/run_cache.rs`.
+The accepted `run-cache-v0` behavior is intentionally independent. PR #81 did not modify `crates/evo-cli/src/run_cache.rs`.
 
 Sharing a cache root does not make the two layouts semantically interchangeable.
 
@@ -135,7 +135,7 @@ On a miss:
 2. prepare a separate cache staging directory with exact identity files;
 3. copy the successful native output into staging;
 4. write the completion marker;
-5. atomically rename staging to a completed entry where the platform/filesystem permits the normal rename operation;
+5. rename staging to a completed entry;
 6. prune old entries best-effort.
 
 Cache publication is best-effort. A successful requested build remains successful even if cache publication cannot be completed.
@@ -180,49 +180,55 @@ Before build caching, #76 measured the controlled Enums v0 fixture with these ac
 
 Cold/warm/edit each invoked rustc **5/5** times.
 
-After verified cache reuse became the normal `evo build` path on PR #81, the #76 harness was changed to call `evo build ... --no-cache`. This preserves its original uncached attribution semantics rather than silently turning the historical baseline into a cache benchmark.
+After verified cache reuse became the normal `evo build` path, the #76 harness was changed to call `evo build ... --no-cache`. This preserves its original uncached attribution semantics rather than silently turning the historical baseline into a cache benchmark.
 
-## Accepted code/evidence-head result
+## Accepted final evidence
 
-PR #81 code/evidence head:
+PR #81 final head:
 
 ```text
-9fcab321d3be05b291c2d80f3949f0c975db242a
+4288ddcfccf07fcab60d27e9677685b213005ae2
 ```
 
-CI:
+Final PR CI:
 
-- CI #337 / run `34213183199`
-- Ubuntu: SUCCESS
-- Windows: SUCCESS
-- macOS: SUCCESS
+- CI #338 / run `34214947823`
+- Ubuntu: **SUCCESS**
+- Windows: **SUCCESS**
+- macOS: **SUCCESS**
 
-Controlled Ubuntu artifact:
+Controlled Ubuntu final-head artifact:
 
 - name: `evo-build-cache-turnaround-ubuntu-latest`
-- id: `10050970173`
-- digest: `sha256:bf949ee935a2512bd9b74726155b5f67d57a46a122af41c7377f86e3f2a2fa8e`
+- id: `10051449726`
+- digest: `sha256:cf7295bf371695347300bee325e3a5a4b5a96bbf4c8789625904d66bd4c538e9`
 - platform: `linux-x86_64`
 - fixture: `benchmarks/cases/enums-v0/evolution.evo`
 
 Measured evidence:
 
-- cold samples: `136.238, 137.783, 138.178, 135.997, 140.179` ms
-- cold median: **137.783 ms**
-- warm cached samples: `19.047, 18.122, 18.194, 18.458, 18.262, 18.962, 18.544, 18.341, 18.198` ms
-- warm cached median: **18.341 ms**
-- cold-to-warm speedup: **7.512x**
+- cold median: **128.454 ms** across 5 samples
+- warm cached median: **17.177 ms** across 9 samples
+- cold-to-warm speedup: **7.478x**
 - accepted #76 uncached warm baseline: **96.986 ms**
-- accepted-baseline-to-cached speedup: **5.288x**
+- accepted-baseline-to-cached speedup: **5.646x**
 - cold rustc compile count: **5**
 - warm rustc compile count: **0**
 - correctness: **PASS**
 
 Hard acceptance is exact warm rustc compile count **0** plus correct native output. Timing improvement is supporting evidence only.
 
+PR #81 squash merge:
+
+```text
+07e85b3a60739f2d1f25caed0fcb622dd8894861
+```
+
+Post-merge main CI **#339** / run `34215424678` is **SUCCESS** on Ubuntu, Windows and macOS. Ubuntu repeated the build-cache evidence step, preserved uncached baseline, benchmark smoke, all existing runtime/performance gates and release build successfully on the merge SHA.
+
 ## Generated Rust identity
 
-The controlled artifact retained generated Rust of exactly **1240 bytes** with SHA-256:
+The controlled final-head artifact retained generated Rust of exactly **1240 bytes** with SHA-256:
 
 ```text
 61f5f5c99c47196605ae2e461ee589b72a722c4ed5107c6b5fca353795100d83
@@ -247,8 +253,10 @@ It must not add to generated programs:
 
 No daemon, compiler service, remote cache, executable download, linker replacement, package/dependency redesign, or rustc incremental-session integration is part of v0.
 
-## Deferred changed-source problem
+## Changed-source successor
 
-The #76 deterministic edit path remained approximately **95.515 ms** with rustc invoked **5/5** times. Exact artifact reuse cannot help when compilation identity changes.
+The #76 deterministic edit path remained **95.515 ms** with rustc invoked **5/5** times. Exact artifact reuse cannot help when compilation identity changes.
 
-Changed-source incremental-rustc/session work therefore remains a separate research problem and must obtain its own correctness, invalidation, diagnostics and latency evidence before implementation is accepted.
+Issue **#82 — `P0 research changed-source incremental build v0: measure rustc session reuse`** is therefore the bounded research successor.
+
+#82 is measurement/research first. It must determine whether persistent rustc incremental/session state produces a stable, material edited-source gain while preserving correctness, diagnostics/source mapping, bounded state/invalidation rules and existing cache/runtime contracts. A production incremental-build implementation is not implied unless that evidence succeeds.

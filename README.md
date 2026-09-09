@@ -47,7 +47,7 @@ The current accepted language includes, among other validated slices:
 - rustc diagnostic remapping to Evolution source;
 - native `check`, `emit-rust`, `build`, `run`, and `fmt` workflows;
 - verified persistent native compile caching for unchanged `evo run` inputs, with an explicit `--no-cache` bypass;
-- verified local native artifact reuse for unchanged `evo build` inputs on PR #81's accepted code/evidence head, also with explicit `--no-cache` bypass;
+- verified local native artifact reuse for unchanged `evo build` inputs, also with explicit `--no-cache` bypass;
 - differential correctness/performance harness with raw/JSON/Markdown artifacts, LLVM comparison, binary-size comparison and exact executable parity evidence.
 
 The authoritative implemented language semantics are in `docs/LANGUAGE_SPEC_V0.md`. Build/run cache behavior is tooling, not language semantics; see `docs/FAST_EDIT_RUN_CACHE.md` and `docs/BUILD_CACHE.md`.
@@ -102,7 +102,7 @@ See `docs/FAST_EDIT_RUN_CACHE.md` for locations, invalidation inputs, limits, sa
 
 The cache verifies exact Evolution source, exact generated Rust, compiler/configuration identity, completion state and a regular non-symlink native artifact. Corrupt/unavailable cache state fails closed to normal compilation. `--no-cache` bypasses lookup and publication.
 
-The accepted PR #81 code/evidence head measured **18.341 ms** warm cached median on the controlled Ubuntu Enums v0 fixture versus the accepted #76 **96.986 ms** uncached warm baseline, with exact warm rustc compile count **0** and correctness **PASS**. Timing is supporting evidence; zero compilation plus correct output is the hard gate.
+The accepted final PR #81 evidence measured **17.177 ms** warm cached median on the controlled Ubuntu Enums v0 fixture versus the accepted #76 **96.986 ms** uncached warm baseline, with exact warm rustc compile count **0** and correctness **PASS**. Final PR CI #338 and post-merge main CI #339 were green on Ubuntu, Windows and macOS. Timing is supporting evidence; zero compilation plus correct output is the hard gate.
 
 See `docs/BUILD_CACHE.md` for cache layout, identity, failure behavior, limits and retained evidence.
 
