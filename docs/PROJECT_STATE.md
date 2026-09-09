@@ -9,14 +9,14 @@ This file is the durable project handoff. Fresh sessions should read `AGENTS.md`
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
 - Rust toolchain: **1.98.0**
-- Latest verified `main` before active PR #84: `1b7f355a92b27283d32731b68e3f86d5c99c264b`
-- That SHA is the docs-handoff merge from PR #83; no production compiler behavior changed versus the preceding accepted build-cache main.
-- Post-merge main CI #341 / run `34349824008`: **SUCCESS** on Ubuntu, Windows and macOS.
-- Completed P0 build-cache feature: **#79 / PR #81**.
-- Active research completion PR: **#84**, tracking **#82 changed-source incremental build v0**.
-- Successor gated research issue: **#85 link-time baseline v0**.
+- Latest verified stable `main` before active PR #86: `c1ba2f2776a3b00bb5833a525f94e7b3e0cfa16f`
+- Post-merge main CI #359 / run `34358142270`: **SUCCESS** on Ubuntu, Windows and macOS
+- Completed unchanged-build feature: **#79 / PR #81**
+- Completed changed-source incremental research: **#82 / PR #84**, production decision **REJECT / DEFER**
+- Active link-attribution research completion PR: **#86**, tracking **#85**
+- Gated successor experiment: **#87**
 
-Always verify live GitHub before acting. The active PR may advance beyond the accepted evidence SHA below due documentation synchronization.
+Always verify live GitHub before acting. An active PR may advance beyond the accepted evidence SHA due documentation synchronization.
 
 ## Accepted unchanged-build behavior — #79
 
@@ -39,7 +39,7 @@ Durable contract: `docs/BUILD_CACHE.md` and D-021.
 
 ## Accepted build-latency predecessor — #76
 
-The accepted controlled single-file baseline established:
+The controlled single-file baseline established:
 
 - `evo check`: **1.207 ms**;
 - `evo emit-rust`: **1.210 ms**;
@@ -51,126 +51,150 @@ The accepted controlled single-file baseline established:
 
 The frontend is therefore not the dominant uncached native-build cost.
 
-## #82 changed-source incremental build research — final decision
-
-Issue **#82** researched persistent rustc incremental/session state before any production implementation was allowed.
+## #82 changed-source incremental research — completed
 
 Durable report: `docs/INCREMENTAL_BUILD_RESEARCH.md`.
 
-Research PR: **#84 — `research: measure changed-source rustc incremental reuse`**.
-
-Accepted final evidence head before documentation sync:
-
-- `bbdec7f5f6ec4668849212f49bc07c49196024e2`
-- CI #355 / run `34356624339`: **SUCCESS** on Ubuntu, Windows and macOS
-- Ubuntu preserved every existing turnaround, build-cache and runtime/performance gate
-- artifact `evo-incremental-build-research-ubuntu-latest`
-- artifact id `10106092707`
-- digest `sha256:217d9849e7e88f8ee05ebd408c0c9b2afaea57f3925f42d099b040dba7eb3a9c`
-
-### Slice 1 — current CGU1 strategy
-
-Edited medians:
-
-- stable direct rustc, no incremental: **110.763 ms**;
-- stable direct rustc, persistent incremental, CGU1: **121.040 ms**.
-
-Result: CGU1 incremental state was about **9.28% slower** than its matching control.
-
-### Slice 2 — CGU256 matching control
-
-Edited medians:
-
-- CGU256, no incremental: **107.522 ms**;
-- CGU256, persistent incremental: **97.167 ms**.
-
-Result: **1.107x** matching-control speedup, about **9.63% lower median**. This was enough to justify runtime-quality research but not production adoption.
-
-### Slice 3/4 — runtime/codegen identity
-
-On the Enums-v0 fixture, CGU256 + `-C incremental` produced a stable roughly **19% runtime improvement** versus the matching non-incremental CGU256 binary.
-
-Isolation proved this was not stale edit-history reuse:
-
-- baseline/edited no-incremental binaries were byte-identical;
-- incremental prime/edited-reuse binaries were byte-identical;
-- incremental-mode binary differed from no-incremental output at roughly **3,618,404 byte positions**.
-
-Therefore enabling `-C incremental` itself changed optimized codegen identity.
-
-### Slice 5 — committed runtime corpus
-
-Seven committed performance cases were measured with exact-output correctness PASS, 3 warmups and 21 samples per arm.
-
-| Case | Candidate/reference | Candidate/current | Verdict |
-| --- | ---: | ---: | --- |
-| runtime-repeat-v0 | 0.999231 | 0.998121 | PASS |
-| control-flow-branch-v0 | 1.001843 | 1.001111 | FAIL |
-| logical-operators-v0 | 1.019303 | 1.018570 | FAIL |
-| function-call-v0 | 0.999582 | 0.999869 | PASS |
-| block-locals-v0 | 1.000019 | 0.999306 | FAIL |
-| records-v0 | 0.999854 | 1.000877 | FAIL |
-| enums-v0 | 0.805402 | 0.804054 | PASS |
-
-Aggregate decision: **REJECT**.
-
-The favorable Enums effect did not generalize. `logical-operators-v0` was the clearest regression at about **1.93% slower than reference** and **1.86% slower than current Evolution**.
-
-## #82 production decision
+Final production decision:
 
 **REJECT / DEFER production rustc incremental state under the current architecture and Rust 1.98.0 configuration.**
 
-Why:
+Accepted conclusions:
 
-1. the production-equivalent CGU1 strategy regresses changed-source compile latency;
-2. the CGU256 configuration can improve compile latency but changes optimized codegen identity;
-3. the runtime effect is workload-dependent;
-4. the broader committed corpus violates the non-negotiable runtime parity-or-better contract.
+- production-equivalent CGU1 + persistent incremental state made the matching deterministic edited compile path about **9.28% slower**;
+- CGU256 + persistent incremental state improved matching edited compile latency by about **9.63%**, enough to justify deeper runtime research;
+- enabling `-C incremental` changed optimized codegen identity;
+- the favorable Enums runtime effect did not generalize across the committed seven-case runtime corpus;
+- the clearest runtime regression was `logical-operators-v0`, about **1.93% slower than reference** and **1.86% slower than current Evolution**.
 
-The project does not trade generated-program runtime regressions for compiler convenience.
+The project does not trade generated-program runtime regressions for compile-time convenience.
 
-Because the runtime gate fails first, #82 intentionally stops before a production persistent-state design for invalidation, corruption fallback, races/cleanup or diagnostic/source-map integration.
+No production cache/compiler/language/source-map/diagnostic/runtime behavior changed from #82.
 
-## Production behavior after #82 research
+## #85 link-time attribution — final research decision pending merge
 
-No production behavior is changed by PR #84.
+Issue **#85 — `P0 research link-time baseline v0: split rustc backend/codegen from linker cost`** is implemented as measurement-only PR **#86 — `research: attribute native build time to linker work`**.
 
-The following remain unchanged:
+Durable report on the PR branch: `docs/LINK_TIME_RESEARCH.md`.
 
-- Evolution language syntax and accepted-program semantics;
-- ownership/type rules;
-- production generated Rust;
-- production rustc flags (`edition=2024`, `opt-level=3`, `codegen-units=1`);
-- `build-cache-v0`;
-- `run-cache-v0`;
-- source mappings;
-- rustc diagnostic remapping;
-- runtime thresholds;
-- linker choice;
-- package/dependency behavior.
+Accepted evidence head before final documentation synchronization:
 
-Direct-rustc arms in #82 are measurement-only and do not replace the production compile/remap path.
+`121581ed1c105dd30cfdcfeb4567a3a988f20c23`
 
-## Successor P0 — #85 link-time baseline v0
+Validation:
 
-Issue **#85 — `P0 research link-time baseline v0: split rustc backend/codegen from linker cost`** is open but gated.
+- normal CI #361 / run `34361156009`: **SUCCESS** on Ubuntu, Windows and macOS;
+- dedicated Link-time research #2 / run `34361156018`: **SUCCESS**;
+- artifact `evo-link-time-research-ubuntu-latest`;
+- artifact id `10107871908`;
+- digest `sha256:62d454a95fd2a1f0ec7ba3c92b08582a29cb9a237bda8cf78b0113818ccc4162`;
+- rustc 1.98.0 / LLVM 22.1.8;
+- host `x86_64-unknown-linux-gnu`;
+- driver `cc` 13.3.0;
+- exact-output correctness **PASS**;
+- 7 measured samples per arm/case;
+- exactly one linker-driver invocation per instrumented sample.
 
-Why it is next:
+### Method
 
-- the frontend is already known to be small relative to native compile+link;
-- exact unchanged build is solved by #79;
-- the tested persistent incremental configurations are rejected/deferred by #82;
-- direct rustc evidence still combines compile/codegen and final link work, so the link share is unknown.
+Two committed workload shapes are measured:
 
-Dependency-build/proc-macro roadmap items remain deferred until Evolution has a real user-program package/dependency graph. The current compiler still emits one `main.rs` and invokes rustc directly.
+- `enums-v0`;
+- `logical-operators-v0`.
 
-#85 must not start until:
+The research harness records:
 
-1. PR #84 final documentation head passes exact-head CI;
-2. PR #84 is squash-merged with expected-head protection;
-3. the natural post-merge `main` CI is SUCCESS;
-4. #82 is closed as completed research with its negative decision retained;
-5. live main/open PR/issue/Action state is re-read and no duplicate work exists.
+- normal production-equivalent full rustc compile+link;
+- `rustc --emit=obj` pre-link/object work;
+- transparent PATH-shadow `cc` instrumentation;
+- direct wall time of the real linker-driver child;
+- actual linker argv;
+- object/native sizes;
+- exact native output correctness;
+- raw CSV/JSON/Markdown evidence.
+
+`full - object` is retained only as rough supporting attribution. The primary signal is the directly timed child path.
+
+### Accepted link-time results
+
+| Case | Full rustc | Object | Direct link child | Link/full | Classification |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `enums-v0` | 115.158 ms | 85.330 ms | 26.784 ms | 23.259% | MATERIAL |
+| `logical-operators-v0` | 113.687 ms | 84.238 ms | 26.393 ms | 23.215% | MATERIAL |
+
+Stability from retained raw samples:
+
+- Enums full relative MAD ~0.46%; link-child ~1.33%;
+- Logical full relative MAD ~0.24%; link-child ~0.36%;
+- transparent wrapper overhead ~2.1 ms on both cases.
+
+Final #85 research decision:
+
+**FOLLOW-UP-CANDIDATE.**
+
+Final link work is a material, stable share of the current uncached/changed-source native build, so one bounded successor experiment is justified.
+
+## Current linker identity
+
+Retained Rust 1.98.0 linker argv includes:
+
+`-fuse-ld=lld`
+
+The current Ubuntu production-equivalent path is:
+
+`rustc -> cc driver -> lld`
+
+Therefore **lld is already the baseline**. A successor must not describe ordinary lld adoption as a new optimization.
+
+No production linker or rustc flag changes in #85/#86.
+
+## Gated successor — #87
+
+Issue **#87 — `P0 experiment linker candidate v0: beat current Rust 1.98 lld path without runtime or deployment regression`** is open.
+
+Start gate:
+
+1. PR #86 documentation-synchronized exact head passes normal CI and dedicated link-time research;
+2. PR #86 is squash-merged with expected-head protection;
+3. the resulting natural `main` CI is SUCCESS;
+4. #85 is closed as completed research with FOLLOW-UP-CANDIDATE retained;
+5. live main/open PR/branch/Action state is re-read and no duplicate experiment exists.
+
+Only then create the #87 branch from the exact verified main SHA.
+
+#87 must compare the exact current `cc -> lld` baseline with at least one genuinely different reproducible link path/configuration.
+
+Potential research directions, only if exactly provisioned and recorded:
+
+- stable `-C linker-features=-lld` as a non-lld control;
+- a genuinely different linker such as `mold` if its exact version/provisioning is reproducible;
+- another bounded configuration that changes real link behavior rather than merely renaming the same lld path.
+
+The exact GitHub Ubuntu runner image used by #85 does not list `mold` as preinstalled. Do not assume it exists and do not make production depend on an ad-hoc download.
+
+A candidate advances only if it materially reduces **total production-equivalent native build latency** while preserving:
+
+- exact correctness;
+- #4 runtime parity-or-better;
+- binary/startup/deployment behavior;
+- understandable failure behavior;
+- a bounded Windows/macOS story before any global production default.
+
+## Production behavior remains unchanged
+
+Current production contracts remain:
+
+- Evolution language syntax and accepted-program semantics unchanged;
+- ownership/type rules unchanged;
+- production generated Rust unchanged;
+- production rustc flags remain edition 2024, opt-level 3, codegen-units 1;
+- current target-default linker behavior unchanged;
+- `build-cache-v0` unchanged;
+- `run-cache-v0` unchanged;
+- source mappings unchanged;
+- rustc diagnostic remapping unchanged;
+- runtime thresholds unchanged;
+- package/dependency behavior unchanged.
 
 ## Current implemented language / diagnostics state
 
@@ -193,7 +217,7 @@ Current accepted core includes:
 - native `check`, `emit-rust`, `build`, `run`, `fmt` workflows;
 - verified persistent `evo run` compile caching;
 - verified persistent exact unchanged-`evo build` artifact reuse;
-- controlled build-latency/turnaround evidence infrastructure;
+- controlled build-latency/turnaround/link-attribution evidence infrastructure;
 - differential correctness/performance infrastructure and retained artifacts.
 
 The current `string` value semantics remain static/literal. Do not silently treat the type as a general owned runtime string.
