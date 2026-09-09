@@ -82,7 +82,9 @@ jobs:
         env:
           EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           EVO_INCREMENTAL_RESEARCH_OUT: ${{ github.workspace }}/target/evo-incremental-build-research
-        run: cargo test -p evo-cli --test incremental_build_research incremental_build_research_isolates_stable_path_and_persistent_rustc_state -- --ignored --exact --nocapture
+        run: |
+          cargo test -p evo-cli --test incremental_build_research incremental_build_research_isolates_stable_path_and_persistent_rustc_state -- --ignored --exact --nocapture
+          cargo test -p evo-cli --test incremental_codegen_units_research incremental_codegen_unit_granularity_compares_matching_256_cgu_control -- --ignored --exact --nocapture
 
       - name: Upload incremental build research evidence
         if: matrix.os == 'ubuntu-latest' && always() && steps.incremental_build_research.outcome != 'skipped'
