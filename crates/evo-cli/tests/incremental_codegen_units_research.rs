@@ -164,9 +164,8 @@ This slice changes only codegen-unit granularity in the research harness. Both c
     );
     fs::write(out_dir.join("report.json"), json).expect("CGU JSON report should be written");
 
-    let mut csv = String::from(
-        "arm,phase,index,elapsed_ms,rustc_compile_delta,state_files,state_bytes\n",
-    );
+    let mut csv =
+        String::from("arm,phase,index,elapsed_ms,rustc_compile_delta,state_files,state_bytes\n");
     push_granularity_csv_rows(
         &mut csv,
         "stable-cgu256-no-incremental",
