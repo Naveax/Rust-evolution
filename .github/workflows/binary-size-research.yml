@@ -1,0 +1,61 @@
+name: Binary size research
+
+on:
+  pull_request:
+    paths:
+      - scripts/binary_size_research.py
+      - .github/workflows/binary-size-research.yml
+  push:
+    branches:
+      - main
+    paths:
+      - scripts/binary_size_research.py
+      - .github/workflows/binary-size-research.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal
+
+      - name: Show toolchain
+        run: rustc +1.98.0 -Vv
+
+      - name: Show binary inspection tools
+        run: |
+          size --version
+          readelf --version
+
+      - name: Build evo measurement binary
+        run: cargo +1.98.0 build -p evo-cli --bin evo
+
+      - name: Binary size evidence
+        env:
+          RUSTC: rustc
+          EVO_BIN: target/debug/evo
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_BINARY_SIZE_OUT: target/evo-binary-size-research
+        run: python3 scripts/binary_size_research.py
+
+      - name: Validate report JSON
+        run: python3 -m json.tool target/evo-binary-size-research/report.json >/dev/null
+
+      - name: Upload binary size evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-binary-size-research-ubuntu-24.04
+          path: target/evo-binary-size-research
+          if-no-files-found: error

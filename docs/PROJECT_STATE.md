@@ -8,15 +8,15 @@ This is the durable project handoff. Always re-read live GitHub issue/PR/Actions
 
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
-- Stable `main` before active PR #92: `f122f4011537f2ed73624c95f1809ba122de924c`
+- Stable `main` before active PR #94: `c8ec7d397a50772ed500c4717dc340a4d00936d4`
 - Rust toolchain: **1.98.0**
 - production flags: edition 2024, opt-level 3, codegen-units 1
 - measured GNU/Linux linker path: `rustc -> cc -> lld`
 
-Post-PR #90 validation:
+Post-PR #92 validation:
 
-- CI #375 / run `34457802639`: SUCCESS on Ubuntu, Windows and macOS;
-- Release optimization research #4 / run `34457802658`: SUCCESS.
+- CI #378 / run `34471091448`: SUCCESS on Ubuntu, Windows and macOS;
+- Compile memory research #3 / run `34471091443`: SUCCESS.
 
 ## Accepted build/compile sequence
 
@@ -44,66 +44,75 @@ Decision: **REJECT / DEFER**. Current lld beat tested GNU ld and pinned mold alt
 
 Decision: **REJECT / DEFER opt3 -> opt2**. Opt2 did not approach the pre-registered 5% + 5 ms total-build advancement gate. Production remains opt-level 3. Durable report: `docs/RELEASE_OPTIMIZATION_RESEARCH.md`.
 
-PR #90 merged as `f122f4011537f2ed73624c95f1809ba122de924c`; issue #89 is closed/completed.
+### #91 — compile memory baseline
 
-## Active completion — #91 / PR #92 compile memory baseline
+Decision: **DEFER / NO ACTION** for Evolution-side compile-memory optimization under the current architecture.
 
-PR #92: `research: establish compile memory baseline v0`  
-Branch: `research/compile-memory-baseline-v0`
+Accepted measurement showed Evolution frontend process peak RSS around 3.8-3.9 MiB while direct rustc was about 231 MiB on both initial cases. Frontend was only about 1.65-1.67% of rustc peak RSS, far below the pre-registered 64 MiB + 25% follow-up guide.
+
+PR #92 squash-merged as `c8ec7d397a50772ed500c4717dc340a4d00936d4`; post-merge CI #378 and Compile memory research #3 succeeded. Issue #91 is closed/completed.
+
+Durable report: `docs/COMPILE_MEMORY_RESEARCH.md`.
+
+## Active completion — #93 / PR #94 binary size baseline
+
+PR #94: `research: establish binary size baseline v0`  
+Branch: `research/binary-size-baseline-v0`
 
 Accepted measurement head before docs synchronization:
 
-- `3e2c3e390ff7c90ce61088b6c54540dce9dbf27f`;
-- CI #376 / run `34470282815`: **SUCCESS** on Ubuntu, Windows and macOS;
-- Compile memory research #1 / run `34470282845`: **SUCCESS**;
-- artifact `evo-compile-memory-research-ubuntu-24.04`;
-- id `10149215121`;
-- digest `sha256:e7fbfff77bed760784cf5ca9c2d57da5a0df206e670e6fc402349c563be7b12a`;
+- `3c2565f513ef7951a7fa011879525e9e60aa469b`;
+- CI #379 / run `34471973541`: **SUCCESS** on Ubuntu, Windows and macOS;
+- Binary size research #1 / run `34471973624`: **SUCCESS**;
+- artifact `evo-binary-size-research-ubuntu-24.04`;
+- id `10149900668`;
+- digest `sha256:68eea4e28b4a24008cb5ef8d7490541bef616a95ce9e29555a22516ef3583e5a`;
 - correctness PASS;
 - report JSON validation PASS.
 
 ### Measurement method
 
-GNU `/usr/bin/time` `%M` maximum resident set size in KiB for the directly measured process. 1 warmup + 5 measured samples per arm/case.
+For each committed corpus case, reference Rust and Evolution-generated Rust are staged as canonical `benchmark.rs` in isolated work directories and compiled with the same crate name and production-equivalent Rust 1.98 settings: edition 2024, opt-level 3, codegen-units 1, default linker, no ThinLTO/stripping/panic override/incremental state.
 
-Arms:
+The artifact retains exact source inputs, file sizes, SHA-256, byte equality, GNU `size -A` section data, `readelf -d`, `DT_NEEDED`, correctness, JSON/CSV/Markdown summaries and tool identities.
 
-1. `evo check`;
-2. `evo emit-rust`;
-3. direct rustc on exact generated Rust with production-equivalent flags.
+### Accepted #93 results
 
-GNU time process RSS is **not** treated as simultaneous whole-process-tree peak RSS. Full `evo build --no-cache` tree peak remains unavailable unless a separate cgroup/process-tree method is proven.
+| Case | Reference bytes | Evolution bytes | Delta |
+| --- | ---: | ---: | ---: |
+| runtime-repeat-v0 | 4,517,168 | 4,517,168 | 0 |
+| control-flow-branch-v0 | 4,517,360 | 4,517,360 | 0 |
+| logical-operators-v0 | 4,517,280 | 4,517,280 | 0 |
+| function-call-v0 | 4,517,344 | 4,517,344 | 0 |
+| block-locals-v0 | 4,517,376 | 4,517,376 | 0 |
+| records-v0 | 4,517,408 | 4,517,408 | 0 |
+| enums-v0 | 4,517,376 | 4,517,376 | 0 |
 
-### Accepted #91 results
+All seven binaries are byte-for-byte identical between reference and Evolution. `DT_NEEDED` identity and section sizes are also identical, and generated Rust equals the committed reference source in every controlled case.
 
-| Case | check median | emit-rust median | direct-rustc median | frontend share |
-| --- | ---: | ---: | ---: | ---: |
-| Enums | 3,932 KiB | 3,964 KiB | 236,816 KiB | ~1.66-1.67% |
-| Logical Operators | 3,916 KiB | 3,912 KiB | 236,748 KiB | ~1.65% |
+### #93 decision
 
-Direct rustc peaks at about 231 MiB. Frontend processes peak at about 3.8-3.9 MiB.
+**DEFER / NO ACTION for Evolution-specific binary-size optimization under the current language/corpus.**
 
-Pre-registered #91 guide required an Evolution-controlled phase to reach at least 64 MiB and at least 25% of direct-rustc peak on both cases for a memory-optimization follow-up. Neither case is remotely close.
+The roughly 4.5 MB ELF footprint is ordinary Rust/toolchain baseline, not Evolution-specific overhead. No stripping/LTO/panic/linker experiment is justified by this result.
 
-### #91 decision
+Durable report: `docs/BINARY_SIZE_RESEARCH.md`.
 
-**DEFER / NO ACTION for Evolution-side compile-memory optimization under the current architecture.**
+## Build/compile structural deferrals
 
-No production code or runtime behavior changes in this slice.
+Dependency-build, proc-macro cost and workspace scaling remain deferred until Evolution has a real user-program package/dependency graph. The directly actionable current single-file Phase 3.4 questions have otherwise been measured through #93.
 
-Durable report: `docs/COMPILE_MEMORY_RESEARCH.md`.
+## Gated successor — #95 borrow inference feasibility
 
-## Gated successor — #93 binary size baseline
+Issue #95 is open but must not start before PR #94 merges and the resulting natural `main` CI succeeds.
 
-Issue #93 is open but must not start before PR #92 merges and the resulting natural `main` CI succeeds.
+#95 researches whether a narrow statically provable read-only borrow-inference subset can reduce nominal-value move friction without hidden clone/copy/boxing/RC/GC, unsafe lifetime widening, or caller-visible ownership surprises.
 
-#93 will measure the existing committed seven-case corpus under production-equivalent Rust 1.98 flags, retaining reference/generated binary sizes, byte identity where applicable, section sizes where defensible, dynamic dependency identity, exact correctness and machine-readable evidence.
-
-Dependency-build, proc-macro and workspace-scaling roadmap items remain deferred until Evolution has an actual user-program package/dependency graph.
+The research must classify positive/negative fixtures before any implementation decision and preserve ordinary Rust shared-borrow lowering plus source-native diagnostics.
 
 ## Implemented language / tooling state
 
-`docs/LANGUAGE_SPEC_V0.md` remains the implemented-language source of truth. Current accepted core includes integer/bool/static strings, input/repeat/control flow, functions, lexical block locals, Records v0, Enums v0, by-value ownership/reinitialization, source-native diagnostics, direct static Rust lowering, source maps, formatter, native check/emit/build/run and verified run/build caches.
+`docs/LANGUAGE_SPEC_V0.md` remains the implemented-language source of truth. Current accepted core includes integer/bool/static strings, input/repeat/control flow, functions, lexical block locals, Records v0, Enums v0, by-value ownership/reinitialization, source-native move provenance diagnostics, source maps, formatter, native check/emit/build/run and verified run/build caches.
 
 ## Zero-cost / safety boundary
 
