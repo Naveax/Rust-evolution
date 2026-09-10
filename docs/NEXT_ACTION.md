@@ -2,70 +2,75 @@
 
 Last verified update: **2026-09-10**
 
-## Stable main before active PR #92
+## Stable main before active PR #94
 
-- `f122f4011537f2ed73624c95f1809ba122de924c`
-- PR #90 / #89 release-optimization research merge
-- post-merge CI #375 / run `34457802639`: **SUCCESS** on Ubuntu, Windows and macOS
-- post-merge Release optimization research #4 / run `34457802658`: **SUCCESS**
+- `c8ec7d397a50772ed500c4717dc340a4d00936d4`
+- PR #92 / #91 compile-memory research merge
+- post-merge CI #378 / run `34471091448`: **SUCCESS** on Ubuntu, Windows and macOS
+- post-merge Compile memory research #3 / run `34471091443`: **SUCCESS**
 - Rust toolchain: **1.98.0**
 
-## Active completion — #91 / PR #92
+## Active completion — #93 / PR #94
 
-Issue **#91 — compile memory baseline v0** has reached a research decision.
+Issue **#93 — binary size baseline v0** has reached a research decision.
 
 PR:
 
-- #92 `research: establish compile memory baseline v0`
-- branch: `research/compile-memory-baseline-v0`
-- accepted measurement head before documentation sync: `3e2c3e390ff7c90ce61088b6c54540dce9dbf27f`
+- #94 `research: establish binary size baseline v0`
+- branch: `research/binary-size-baseline-v0`
+- accepted measurement head before documentation sync: `3c2565f513ef7951a7fa011879525e9e60aa469b`
 
 Accepted validation:
 
-- CI #376 / run `34470282815`: **SUCCESS** on Ubuntu, Windows and macOS;
-- Compile memory research #1 / run `34470282845`: **SUCCESS**;
-- artifact id `10149215121`;
-- digest `sha256:e7fbfff77bed760784cf5ca9c2d57da5a0df206e670e6fc402349c563be7b12a`;
+- CI #379 / run `34471973541`: **SUCCESS** on Ubuntu, Windows and macOS;
+- Binary size research #1 / run `34471973624`: **SUCCESS**;
+- artifact id `10149900668`;
+- digest `sha256:68eea4e28b4a24008cb5ef8d7490541bef616a95ce9e29555a22516ef3583e5a`;
 - correctness **PASS**;
 - JSON validation **PASS**.
 
-Accepted process peak-RSS medians:
+Accepted corpus result:
 
-| Case | check | emit-rust | direct rustc |
+| Case | Reference bytes | Evolution bytes | Delta |
 | --- | ---: | ---: | ---: |
-| enums-v0 | 3,932 KiB | 3,964 KiB | 236,816 KiB |
-| logical-operators-v0 | 3,916 KiB | 3,912 KiB | 236,748 KiB |
+| runtime-repeat-v0 | 4,517,168 | 4,517,168 | 0 |
+| control-flow-branch-v0 | 4,517,360 | 4,517,360 | 0 |
+| logical-operators-v0 | 4,517,280 | 4,517,280 | 0 |
+| function-call-v0 | 4,517,344 | 4,517,344 | 0 |
+| block-locals-v0 | 4,517,376 | 4,517,376 | 0 |
+| records-v0 | 4,517,408 | 4,517,408 | 0 |
+| enums-v0 | 4,517,376 | 4,517,376 | 0 |
 
-Frontend phases are only about 1.65-1.67% of direct-rustc peak RSS. The pre-registered 64 MiB + 25% Evolution-side hotspot guide is not met.
+All seven reference/Evolution binaries are byte-for-byte identical. `DT_NEEDED` identity and parsed section sizes are also identical. Generated Rust equals the committed reference source in every controlled case.
 
-Decision: **DEFER / NO ACTION** for Evolution-side compile-memory optimization under the current architecture.
+Decision: **DEFER / NO ACTION** for Evolution-specific binary-size optimization under the current language/corpus.
 
-Full `evo build --no-cache` whole-tree peak RSS remains intentionally unavailable because GNU time process RSS is not a simultaneous process-tree peak.
-
-Durable report: `docs/COMPILE_MEMORY_RESEARCH.md`.
+Durable report: `docs/BINARY_SIZE_RESEARCH.md`.
 
 ## Immediate sequence
 
-1. Keep PR #92 on the single documentation-synchronized final head.
-2. Track the natural exact-head normal CI and Compile memory research workflows; do not duplicate them.
+1. Keep PR #94 on one documentation-synchronized final head.
+2. Track the natural exact-head normal CI and Binary size research workflows; do not duplicate them.
 3. Require normal CI green on Ubuntu, Windows and macOS.
-4. Require final-head compile-memory workflow green and artifact retained.
-5. Update PR #92 / #91 with final-head provenance.
-6. Squash-merge PR #92 using expected-head protection only after both final-head workflows are green.
-7. Track natural post-merge `main` CI and compile-memory push workflow.
-8. Close #91 completed only after post-merge main CI succeeds.
+4. Require final-head binary-size workflow green and artifact retained.
+5. Update PR #94 / #93 with final-head provenance.
+6. Squash-merge PR #94 using expected-head protection only after both final-head workflows are green.
+7. Track natural post-merge `main` CI and binary-size push workflow.
+8. Close #93 completed only after post-merge main CI succeeds.
 9. Re-read live main/branch/PR/Actions state.
-10. Only then create #93 binary-size research branch from exact verified main.
+10. Only then create #95 borrow-inference research branch from exact verified main.
 
-## Gated successor — #93
+## Gated successor — #95
 
-Issue **#93 — binary size baseline v0** is open and must not start before PR #92 merge + green post-merge main CI.
+Issue **#95 — borrow inference feasibility v0** is open and must not start before PR #94 merge + green post-merge main CI.
 
-First #93 slice should measure the committed seven-case corpus under production-equivalent Rust 1.98 flags, retaining reference/generated binary sizes, byte identity, section sizes where defensible, `DT_NEEDED`, exact output correctness, generated/reference Rust, JSON/CSV/Markdown evidence.
+The first #95 slice is research/semantics classification, not implementation. It should classify representative read-only nominal-value use sites as safe local inference candidates, explicit-borrow-syntax cases, lifetime-model cases, keep-by-value cases, or unsafe/ambiguous cases.
 
-Do not change stripping, LTO, panic strategy, opt-level or linker in the baseline issue.
+No automatic clone/copy insertion, hidden RC/GC/boxing, generalized lifetime magic or silent ownership weakening is permitted.
 
-Dependency-build, proc-macro and workspace-scaling work remains deferred until Evolution has a real user-program package/dependency graph.
+## Build/compile structural deferrals
+
+Dependency-build, proc-macro cost and workspace scaling remain deferred until Evolution user programs have a real package/dependency graph. Current single-file Phase 3.4 work is otherwise measured through binary-size baseline v0.
 
 ## Production contracts unchanged
 
