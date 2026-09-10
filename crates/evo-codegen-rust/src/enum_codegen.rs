@@ -1,11 +1,11 @@
 use crate::{GeneratedRust, SourceMapping};
 use evo_lexer::Span;
-use evo_lowering::{BinaryOp, ParameterPassingMode};
 use evo_lowering::enum_codegen_view::{
     EnumCodegenExprKindView, EnumCodegenExprView, EnumCodegenFunctionView, EnumCodegenMatchArmView,
     EnumCodegenProgramView, EnumCodegenRecordView, EnumCodegenStmtKindView, EnumCodegenStmtView,
     EnumCodegenValueType,
 };
+use evo_lowering::{BinaryOp, ParameterPassingMode};
 
 pub(super) fn generate_enum_rust(program: EnumCodegenProgramView<'_>) -> GeneratedRust {
     EnumGenerator::new().generate(program)
