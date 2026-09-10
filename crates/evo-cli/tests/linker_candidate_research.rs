@@ -272,9 +272,10 @@ fn run_instrumented_sample(
     mode: CandidateMode,
     tag: &str,
 ) -> SampleOutcome {
-    let binary = context
-        .case_dir
-        .join(format!("{}-{tag}{}", mode.label(), env::consts::EXE_SUFFIX));
+    let binary =
+        context
+            .case_dir
+            .join(format!("{}-{tag}{}", mode.label(), env::consts::EXE_SUFFIX));
     let timing_file = context
         .case_dir
         .join(format!("{}-{tag}-link-timing.txt", mode.label()));
@@ -470,7 +471,7 @@ fn write_candidate_report(
     fs::write(out_dir.join("report.md"), markdown).expect("candidate Markdown report should write");
 
     let mut json = format!(
-        "{{\n  \"git_sha\": \"{git_sha}\",\n  \"platform\": \"{}-{}\",\n  \"rustc_host\": \"{host}\",\n  \"mold_package_version\": \"{}\",\n  \"samples_per_arm\": {LINKER_CANDIDATE_SAMPLES},\n  \"warmups_per_arm\": {LINKER_CANDIDATE_WARMUPS},\n  \"aggregate_verdict\": \"{aggregate}\",\n  \"correctness\": \"PASS\",\n  \"cases\": [\n",
+        "{{\n  \"git_sha\": \"{git_sha}\",\n  \"platform\": \"{}-{}`\",\n  \"rustc_host\": \"{host}\",\n  \"mold_package_version\": \"{}\",\n  \"samples_per_arm\": {LINKER_CANDIDATE_SAMPLES},\n  \"warmups_per_arm\": {LINKER_CANDIDATE_WARMUPS},\n  \"aggregate_verdict\": \"{aggregate}\",\n  \"correctness\": \"PASS\",\n  \"cases\": [\n",
         env::consts::OS,
         env::consts::ARCH,
         tools.mold_package_version,
