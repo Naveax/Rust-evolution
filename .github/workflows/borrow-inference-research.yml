@@ -1,0 +1,56 @@
+name: Borrow inference research
+
+on:
+  pull_request:
+    paths:
+      - crates/evo-lowering/tests/borrow_inference_research.rs
+      - crates/evo-lowering/tests/borrow_inference_cases/**
+      - .github/workflows/borrow-inference-research.yml
+  push:
+    branches:
+      - main
+    paths:
+      - crates/evo-lowering/tests/borrow_inference_research.rs
+      - crates/evo-lowering/tests/borrow_inference_cases/**
+      - .github/workflows/borrow-inference-research.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal
+
+      - name: Show toolchain
+        run: rustc +1.98.0 -Vv
+
+      - name: Borrow inference feasibility evidence
+        env:
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_BORROW_INFERENCE_RESEARCH_OUT: ${{ github.workspace }}/target/evo-borrow-inference-research
+        run: >-
+          cargo +1.98.0 test -p evo-lowering --test borrow_inference_research
+          borrow_inference_research_classifies_local_nominal_parameter_effects
+          -- --ignored --exact --nocapture
+
+      - name: Validate report JSON
+        run: python3 -m json.tool "${{ github.workspace }}/target/evo-borrow-inference-research/report.json" >/dev/null
+
+      - name: Upload borrow inference evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-borrow-inference-research-ubuntu-24.04
+          path: ${{ github.workspace }}/target/evo-borrow-inference-research
+          if-no-files-found: error

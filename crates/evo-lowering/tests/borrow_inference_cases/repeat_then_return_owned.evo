@@ -1,0 +1,18 @@
+record Item
+value int
+end
+
+enum Marker
+None
+end
+
+fn repeat_then_return(item Item, n int) Item
+repeat n
+print item.value
+end
+return item
+end
+
+item = Item(value = 7)
+moved = repeat_then_return(item, 2)
+print moved.value

@@ -1,0 +1,16 @@
+record Item
+value int
+end
+
+enum Marker
+None
+end
+
+fn inspect_then_return(item Item) Item
+print item.value
+return item
+end
+
+item = Item(value = 7)
+moved = inspect_then_return(item)
+print moved.value

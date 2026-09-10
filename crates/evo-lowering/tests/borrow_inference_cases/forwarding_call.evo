@@ -1,0 +1,18 @@
+record Item
+value int
+end
+
+enum Marker
+None
+end
+
+fn read_value(item Item) int
+return item.value
+end
+
+fn forward(item Item) int
+return read_value(item)
+end
+
+item = Item(value = 7)
+print forward(item)
