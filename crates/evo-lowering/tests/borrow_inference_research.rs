@@ -448,8 +448,11 @@ fn write_reports(findings: &[Finding], verdict: &str, out: &Path, git_sha: &str)
     writeln!(markdown, "- aggregate verdict: **{verdict}**").expect("writing Markdown cannot fail");
     writeln!(markdown, "- safe local candidates: **{safe_count}**")
         .expect("writing Markdown cannot fail");
-    writeln!(markdown, "- demonstrated current move-friction cases: **{friction_count}**")
-        .expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "- demonstrated current move-friction cases: **{friction_count}**"
+    )
+    .expect("writing Markdown cannot fail");
     writeln!(
         markdown,
         "- rule: only direct nominal parameter uses that are all current `Inspect` contexts and never reinitialized qualify; current call boundaries, returns, owned matches and reinitialization fail closed."
