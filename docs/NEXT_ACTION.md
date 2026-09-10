@@ -2,112 +2,124 @@
 
 This file is intentionally operational. A fresh chat/agent should be able to resume from here without prior conversation history.
 
-Last verified update: **2026-09-09**
+Last verified update: **2026-09-10**
 
-## Current verified main
+## Current verified main before active PR
 
-Verified stable `main` before active PR #86:
+Stable `main` before PR #88:
 
-- `c1ba2f2776a3b00bb5833a525f94e7b3e0cfa16f`
-- squash merge from PR #84
-- post-merge CI #359 / run `34358142270`: **SUCCESS** on Ubuntu, Windows and macOS
+- `b14173c8add554963df7ccb0f48de41e72fa3136`
+- squash merge from PR #86 / #85 link-time research
+- post-merge CI #365 / run `34362873485`: **SUCCESS** on Ubuntu, Windows and macOS
+- post-merge Link-time research #6 / run `34362873679`: **SUCCESS**
 - Rust toolchain: **1.98.0**
 
-#82 changed-source rustc incremental research is closed/completed with a **REJECT / DEFER** production decision. Durable evidence: `docs/INCREMENTAL_BUILD_RESEARCH.md`.
+Completed build work already retained on `main`:
 
-## Active completion PR — #86 / issue #85
+- #79 / PR #81: verified exact unchanged-build artifact reuse;
+- #82 / PR #84: rustc incremental research, **REJECT / DEFER**;
+- #85 / PR #86: link-time attribution, **FOLLOW-UP-CANDIDATE**;
+- durable predecessor reports: `docs/INCREMENTAL_BUILD_RESEARCH.md` and `docs/LINK_TIME_RESEARCH.md`.
 
-Issue **#85 — link-time baseline v0** has reached its research decision.
+## Active completion PR — #88 / issue #87
+
+Issue **#87 — linker candidate v0** has reached its research decision.
 
 Active PR:
 
-- **#86 — `research: attribute native build time to linker work`**
-- branch `research/link-time-baseline-v0`
-- accepted evidence head before final docs synchronization: `121581ed1c105dd30cfdcfeb4567a3a988f20c23`
+- **#88 — `research: compare current lld path with bounded linker candidates`**
+- branch: `research/linker-candidate-v0`
+- accepted code/evidence head before documentation synchronization: `852bc56eeeb69123b5a7f9c120338ab2c966a35b`
 
-Accepted validation:
+Accepted exact-head validation:
 
-- normal CI #361 / run `34361156009`: **SUCCESS** on Ubuntu, Windows and macOS;
-- dedicated Link-time research #2 / run `34361156018`: **SUCCESS**;
-- artifact `evo-link-time-research-ubuntu-latest`;
-- artifact id `10107871908`;
-- digest `sha256:62d454a95fd2a1f0ec7ba3c92b08582a29cb9a237bda8cf78b0113818ccc4162`.
+- normal CI #369 / run `34453683622`: **SUCCESS** on Ubuntu, Windows and macOS;
+- dedicated Linker candidate research #4 / run `34453683646`: **SUCCESS**;
+- artifact: `evo-linker-candidate-research-ubuntu-24.04`;
+- artifact id: `10142574260`;
+- digest: `sha256:d550ce688c1979c103df8ab3d2260ec136552672268d32f5be5d683e4c3ab7e1`;
+- correctness: **PASS**;
+- report JSON independently parses successfully.
 
-Durable report: `docs/LINK_TIME_RESEARCH.md`.
+Durable report: `docs/LINKER_CANDIDATE_RESEARCH.md`.
 
-## #85 decision
+## #87 final research decision
 
-**FOLLOW-UP-CANDIDATE.**
+**REJECT / DEFER linker replacement under the current single-file architecture/toolchain setup.**
 
-Controlled exact-head medians:
+Final controlled medians:
 
-| Case | Full rustc | Direct linker-child | Link/full |
-| --- | ---: | ---: | ---: |
-| `enums-v0` | 115.158 ms | 26.784 ms | 23.259% |
-| `logical-operators-v0` | 113.687 ms | 26.393 ms | 23.215% |
+| Case | Current lld full | GNU ld full | Mold full | Mold vs lld |
+| --- | ---: | ---: | ---: | ---: |
+| `enums-v0` | 113.077 ms | 165.612 ms | 122.321 ms | 1.08175 / ~8.17% slower |
+| `logical-operators-v0` | 111.557 ms | 163.700 ms | 119.199 ms | 1.06850 / ~6.85% slower |
 
-The signal is stable, exact-output correctness passes, and every instrumented sample contains exactly one linker-driver invocation.
+Supporting evidence:
 
-Important baseline identity:
+- current lld link-child median: 24.727 / 24.457 ms;
+- mold link-child median: 33.401 / 32.316 ms;
+- every measured arm invokes the linker driver exactly once;
+- relative MAD values are comfortably below the 0.10 instability ceiling;
+- baseline and mold `DT_NEEDED` names match exactly;
+- pinned candidate: Ubuntu Noble `mold=2.30.0+dfsg-1build1`;
+- aggregate verdict: `MOLD-REJECT-OR-DEFER`.
 
-- driver: `cc` 13.3.0;
-- retained argv includes `-fuse-ld=lld`;
-- current Ubuntu Rust 1.98.0 path is therefore **`rustc -> cc -> lld`**.
-
-Do not create a successor whose premise is "switch to lld". The project is already measuring lld.
+The candidate fails the **total build** gate before runtime-corpus adoption validation. Do not expand this mold configuration into the seven-case runtime suite and do not change the production linker.
 
 ## Immediate sequence
 
-1. Keep PR #86 on its documentation-synchronized final head and track the natural exact-head workflows created by the docs commits. Do not create duplicate runs.
-2. Require final PR #86 normal CI to be green on Ubuntu, Windows and macOS.
-3. Require the final-head dedicated Link-time research workflow to remain green and retain its artifact.
-4. Squash-merge PR #86 with expected-head protection only after both exact-head workflows are accepted.
-5. Track the one natural post-merge `main` CI. Do not create the #87 branch before that run is SUCCESS.
-6. Close #85 as completed research with the **FOLLOW-UP-CANDIDATE** decision retained.
-7. Re-read live main, #87, open PRs/branches and active Actions.
-8. Only then create the #87 experiment branch from the exact verified main SHA.
+1. Keep PR #88 on the single documentation-synchronized final head created after the accepted `852bc56e...` evidence.
+2. Track the natural exact-head normal CI and Linker candidate research workflows. Do not create duplicates for the same SHA/workflow/input.
+3. Require final PR #88 normal CI to be green on Ubuntu, Windows and macOS.
+4. Require the final-head dedicated candidate workflow to remain green and retain its artifact.
+5. Update PR #88 / #87 with final-head provenance if the docs head changes the artifact SHA.
+6. Squash-merge PR #88 with expected-head protection only after both final-head workflows are accepted.
+7. Track the natural post-merge `main` CI; do not start #89 before it is SUCCESS.
+8. Close #87 as completed research with **REJECT / DEFER** retained.
+9. Re-read live `main`, open PR/issue/branch state and active Actions.
+10. Only then create the #89 research branch from the exact verified `main` SHA.
 
-## Successor P0 — #87
+## Gated successor P0 — #89
 
-Issue **#87 — `P0 experiment linker candidate v0: beat current Rust 1.98 lld path without runtime or deployment regression`** is open and gated on #86 merge + green post-merge main CI.
+Issue **#89 — `P0 research release optimization cost v0: measure opt-level 3 build/runtime tradeoff`** is open and gated on PR #88 merge + green post-merge main CI.
 
-The experiment is research-first. It must compare the exact current `cc -> lld` baseline with at least one genuinely different reproducible link path/configuration.
+Why #89 is next:
 
-Candidate discovery may include:
+- frontend/check/emit cost is already small relative to native rustc work;
+- exact unchanged builds are solved by #79;
+- tested persistent incremental approaches are rejected/deferred by #82;
+- the current Rust 1.98 `cc -> lld` path beats the tested GNU ld and mold alternatives;
+- final #87 evidence leaves roughly 86–88 ms outside the direct linker-child median;
+- production explicitly uses `-C opt-level=3`.
 
-- stable `-C linker-features=-lld` as a non-lld control;
-- a different linker such as `mold` only if its exact version/provisioning can be reproduced;
-- another bounded link configuration that changes real link behavior rather than renaming the same lld path.
+## First #89 research sequence
 
-The exact GitHub Ubuntu runner image used for #85 does not list `mold` as preinstalled. Do not assume availability or make production depend on an ad-hoc network download.
-
-## #87 acceptance sequence
-
-1. Preserve the current Rust 1.98.0 baseline: edition 2024, opt-level 3, codegen-units 1, `x86_64-unknown-linux-gnu`, current `cc -> lld` link path.
-2. Record exact candidate version, provisioning source and actual linker argv before measuring it.
-3. Start with the same #85 cases: `enums-v0` and `logical-operators-v0`.
-4. Measure total production-equivalent native compile+link latency and direct linker-child latency separately.
-5. Require exact native output correctness for every candidate artifact.
-6. Retain raw samples, median/min/max/p95 or derivable equivalents, and a stability signal such as relative MAD.
-7. A candidate only advances if it materially reduces **total build latency**, not merely isolated linker time.
-8. If it wins, expand to the committed seven-case runtime corpus and enforce #4 runtime parity-or-better.
-9. Inspect binary size, startup/deployment/dynamic dependencies and link-failure behavior before any production proposal.
-10. Explicitly address Windows/macOS before a global default-linker proposal.
-11. End with IMPLEMENT-CANDIDATE, EXPAND/ITERATE, or REJECT/DEFER from retained evidence.
+1. Re-read live production rustc invocation from `crates/evo-cli/src/main.rs`; do not rely on remembered flags.
+2. Preserve Rust 1.98.0, edition 2024, codegen-units 1, current lld path, source/path policy and no incremental state.
+3. Compare current `opt-level=3` against a bounded `opt-level=2` candidate on `enums-v0` and `logical-operators-v0`.
+4. Measure total compile+link latency first. Candidate must show a stable material win, initially at least 5% and 5 ms on every initial case, before runtime expansion.
+5. Retain raw samples, median/min/max/p95, relative MAD, exact output correctness and binary size.
+6. If opt2 clears the build gate, expand to the seven-case runtime corpus.
+7. Runtime acceptance then requires both:
+   - Evolution opt2 <= equivalent reference Rust opt2 under #4;
+   - Evolution opt2 does not show a repeatable runtime regression versus current production-equivalent Evolution opt3.
+8. Any stable runtime regression rejects the production candidate even when compilation is faster.
+9. Production `RUST_OPT_LEVEL=3` remains unchanged until a separate proven implementation issue exists.
 
 ## Production contracts that remain unchanged
 
-PR #86 and #85 are measurement only. They do not change:
-
-- Evolution syntax or semantics;
+- Evolution syntax and semantics;
 - generated Rust;
 - ownership/type rules;
-- production rustc flags;
-- production linker configuration;
-- `build-cache-v0` or `run-cache-v0`;
-- source mapping or diagnostic remapping;
-- runtime thresholds;
-- package/dependency behavior.
+- Rust 1.98.0 production toolchain;
+- edition 2024;
+- opt-level 3;
+- codegen-units 1;
+- current linker behavior;
+- `build-cache-v0` and `run-cache-v0`;
+- source mapping and rustc diagnostic remapping;
+- #4 runtime parity-or-better threshold;
+- no hidden clone/allocation/boxing/dynamic dispatch/runtime metadata.
 
 ## CI rule
 
