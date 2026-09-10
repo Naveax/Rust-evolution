@@ -55,7 +55,7 @@ struct SampleOutcome {
     wrapper_args: String,
 }
 
-struct ArmAccumulator {
+struct ArmSamples {
     full: Vec<Duration>,
     link: Vec<Duration>,
     linker_invocations: Vec<u64>,
@@ -63,7 +63,7 @@ struct ArmAccumulator {
     final_binary: Option<PathBuf>,
 }
 
-impl ArmAccumulator {
+impl ArmSamples {
     fn new() -> Self {
         Self {
             full: Vec::with_capacity(LINKER_CANDIDATE_SAMPLES),
@@ -142,7 +142,7 @@ fn rotated_modes(index: usize) -> [CandidateMode; 3] {
 
 fn relative_mad(samples: &[Duration]) -> f64 {
     let median = stats(samples).median_ms;
-    if median == 0.0 {
+    if median <= f64::EPSILON {
         return 0.0;
     }
     let mut deviations = samples
@@ -159,9 +159,12 @@ fn relative_mad(samples: &[Duration]) -> f64 {
     mad / median
 }
 
-fn successful_output(mut command: Command, label: &str) -> Vec<u8> {
-    let output = command.output().expect("tool probe should execute");
-    assert_success(&output, label);
+fn tool_version(program: &OsStr) -> Vec<u8> {
+    let output = Command::new(program)
+        .arg("--version")
+        .output()
+        .expect("tool version probe should execute");
+    assert_success(&output, "tool version probe");
     let mut bytes = output.stdout;
     bytes.extend_from_slice(&output.stderr);
     bytes
@@ -209,7 +212,8 @@ fn probe_link_args(
     expected_stdout: &[u8],
 ) -> Vec<u8> {
     let binary = case_dir.join(format!("probe-{}{}", mode.label(), env::consts::EXE_SUFFIX));
-    let output = candidate_rustc_command(rustc, generated, mode)
+    let mut command = candidate_rustc_command(rustc, generated, mode);
+    let output = command
         .arg("--print")
         .arg("link-args")
         .arg("-o")
@@ -258,7 +262,7 @@ struct InstrumentedContext<'a> {
     generated: &'a Path,
     case_dir: &'a Path,
     instrumented_path: &'a OsStr,
-    real_cc: &'a OsStr,
+    real_cc: &'a Path,
     stdin: &'a [u8],
     expected_stdout: &'a [u8],
 }
@@ -268,11 +272,9 @@ fn run_instrumented_sample(
     mode: CandidateMode,
     tag: &str,
 ) -> SampleOutcome {
-    let binary = context.case_dir.join(format!(
-        "{}-{tag}{}",
-        mode.label(),
-        env::consts::EXE_SUFFIX
-    ));
+    let binary = context
+        .case_dir
+        .join(format!("{}-{tag}{}", mode.label(), env::consts::EXE_SUFFIX));
     let timing_file = context
         .case_dir
         .join(format!("{}-{tag}-link-timing.txt", mode.label()));
@@ -308,25 +310,21 @@ fn run_instrumented_sample(
     }
 }
 
-fn finish_arm(
-    mode: CandidateMode,
-    accumulator: ArmAccumulator,
-    print_link_args: Vec<u8>,
-) -> ArmResult {
-    let final_binary = accumulator
+fn finish_arm(mode: CandidateMode, samples: ArmSamples, print_link_args: Vec<u8>) -> ArmResult {
+    let final_binary = samples
         .final_binary
         .expect("measured arm should retain a final binary");
     ArmResult {
         label: mode.label(),
-        full: accumulator.full,
-        link: accumulator.link,
-        linker_invocations: accumulator.linker_invocations,
+        full: samples.full,
+        link: samples.link,
+        linker_invocations: samples.linker_invocations,
         binary_bytes: fs::metadata(&final_binary)
             .expect("candidate binary metadata should read")
             .len(),
         needed_libraries: needed_libraries(&final_binary),
         print_link_args,
-        wrapper_args: accumulator.wrapper_args,
+        wrapper_args: samples.wrapper_args,
     }
 }
 
@@ -467,10 +465,9 @@ fn write_candidate_report(
     }
 
     markdown.push_str(
-        "\nThe performance decision is based on total production-equivalent rustc wall time. Direct linker-child timing is supporting attribution only. The system-ld arm is a control, not a proposed production default. `mold` installation/provisioning happens before measurement and is not counted as build-time improvement. Every measured binary is executed against the committed stdin/stdout fixture before its sample is accepted. Dynamic `DT_NEEDED` names are retained and compared between the current lld baseline and mold candidate; a mismatch rejects the candidate before runtime-performance follow-up. No production linker setting is changed by this harness.\n",
+        "\nThe decision uses total production-equivalent rustc wall time; linker-child time is supporting attribution. The system-ld arm is a control, not a production proposal. `mold` provisioning occurs before measurement and is not counted as build-time improvement. Every measured binary must pass committed stdin/stdout correctness. `DT_NEEDED` names are compared between the current lld baseline and mold; a mismatch rejects the candidate before runtime follow-up. No production linker setting is changed.\n",
     );
-    fs::write(out_dir.join("report.md"), markdown)
-        .expect("candidate Markdown report should write");
+    fs::write(out_dir.join("report.md"), markdown).expect("candidate Markdown report should write");
 
     let mut json = format!(
         "{{\n  \"git_sha\": \"{git_sha}\",\n  \"platform\": \"{}-{}\",\n  \"rustc_host\": \"{host}\",\n  \"mold_package_version\": \"{}\",\n  \"samples_per_arm\": {LINKER_CANDIDATE_SAMPLES},\n  \"warmups_per_arm\": {LINKER_CANDIDATE_WARMUPS},\n  \"aggregate_verdict\": \"{aggregate}\",\n  \"correctness\": \"PASS\",\n  \"cases\": [\n",
@@ -479,7 +476,11 @@ fn write_candidate_report(
         tools.mold_package_version,
     );
     for (case_index, result) in results.iter().enumerate() {
-        let case_comma = if case_index + 1 == results.len() { "" } else { "," };
+        let case_comma = if case_index + 1 == results.len() {
+            ""
+        } else {
+            ","
+        };
         writeln!(
             json,
             "    {{\n      \"name\": \"{}\",\n      \"verdict\": \"{}\",\n      \"arms\": [",
@@ -539,10 +540,8 @@ fn write_candidate_report(
     fs::write(out_dir.join("raw-samples.csv"), csv).expect("candidate CSV should write");
     fs::write(out_dir.join("rustc-vV.txt"), tools.rustc_version)
         .expect("rustc evidence should write");
-    fs::write(out_dir.join("cc-version.txt"), tools.cc_version)
-        .expect("cc evidence should write");
-    fs::write(out_dir.join("ld-version.txt"), tools.ld_version)
-        .expect("ld evidence should write");
+    fs::write(out_dir.join("cc-version.txt"), tools.cc_version).expect("cc evidence should write");
+    fs::write(out_dir.join("ld-version.txt"), tools.ld_version).expect("ld evidence should write");
     fs::write(out_dir.join("mold-version.txt"), tools.mold_version)
         .expect("mold evidence should write");
     fs::write(
@@ -608,22 +607,17 @@ fn linker_candidate_research_compares_current_lld_system_ld_and_mold() {
         mold_package_version, EXPECTED_MOLD_PACKAGE_VERSION,
         "controlled candidate runner must use the pinned Noble mold package"
     );
-    let cc_version = successful_output(Command::new(&real_cc).tap_mut(|command| {
-        command.arg("--version");
-    }), "cc --version");
-    let ld_version = successful_output(Command::new("ld").tap_mut(|command| {
-        command.arg("--version");
-    }), "ld --version");
-    let mold_version = successful_output(Command::new("mold").tap_mut(|command| {
-        command.arg("--version");
-    }), "mold --version");
+    let cc_version = tool_version(real_cc.as_os_str());
+    let ld_version = tool_version(OsStr::new("ld"));
+    let mold_version = tool_version(OsStr::new("mold"));
 
     let mut results = Vec::with_capacity(LINKER_CANDIDATE_CASES.len());
     for case_name in LINKER_CANDIDATE_CASES {
         let fixture = repo_root().join("benchmarks/cases").join(case_name);
         let source_bytes =
             fs::read(fixture.join("evolution.evo")).expect("candidate fixture source should read");
-        let fixture_stdin = fs::read(fixture.join("stdin.bin")).expect("candidate stdin should read");
+        let fixture_stdin =
+            fs::read(fixture.join("stdin.bin")).expect("candidate stdin should read");
         let expected_stdout = fs::read(fixture.join("expected.stdout"))
             .expect("candidate expected stdout should read");
         let case_dir = dir.join(case_name);
@@ -634,7 +628,10 @@ fn linker_candidate_research_compares_current_lld_system_ld_and_mold() {
             .output()
             .expect("candidate emit-rust should execute");
         assert_success(&emitted, "candidate emit-rust");
-        assert!(!emitted.stdout.is_empty(), "generated Rust should not be empty");
+        assert!(
+            !emitted.stdout.is_empty(),
+            "generated Rust should not be empty"
+        );
         let generated = case_dir.join("main.rs");
         fs::write(&generated, &emitted.stdout).expect("candidate generated Rust should stage");
 
@@ -670,7 +667,7 @@ fn linker_candidate_research_compares_current_lld_system_ld_and_mold() {
             rustc: &rustc,
             generated: &generated,
             case_dir: &case_dir,
-            instrumented_path: &instrumented_path,
+            instrumented_path: instrumented_path.as_os_str(),
             real_cc: &real_cc,
             stdin: &fixture_stdin,
             expected_stdout: &expected_stdout,
@@ -683,9 +680,9 @@ fn linker_candidate_research_compares_current_lld_system_ld_and_mold() {
             }
         }
 
-        let mut baseline = ArmAccumulator::new();
-        let mut system = ArmAccumulator::new();
-        let mut mold = ArmAccumulator::new();
+        let mut baseline = ArmSamples::new();
+        let mut system = ArmSamples::new();
+        let mut mold = ArmSamples::new();
         for sample in 0..LINKER_CANDIDATE_SAMPLES {
             for mode in rotated_modes(sample) {
                 let tag = format!("sample-{}", sample + 1);
@@ -739,20 +736,4 @@ fn linker_candidate_research_compares_current_lld_system_ld_and_mold() {
     }
 
     let _ = fs::remove_dir_all(dir);
-}
-
-trait CommandTap {
-    fn tap_mut<F>(self, function: F) -> Self
-    where
-        F: FnOnce(&mut Self);
-}
-
-impl CommandTap for Command {
-    fn tap_mut<F>(mut self, function: F) -> Self
-    where
-        F: FnOnce(&mut Self),
-    {
-        function(&mut self);
-        self
-    }
 }
