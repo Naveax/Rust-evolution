@@ -1,0 +1,18 @@
+record Item
+value int
+end
+
+enum Marker
+None
+end
+
+fn sum_reads(item Item, n int) int
+sum = 0
+repeat n
+sum = sum + item.value
+end
+return sum
+end
+
+item = Item(value = 7)
+print sum_reads(item, 3)

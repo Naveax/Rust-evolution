@@ -1,0 +1,18 @@
+record Item
+value int
+end
+
+enum Marker
+None
+end
+
+fn choose_value(item Item, flag bool) int
+if flag
+return item.value
+else
+return item.value + 1
+end
+end
+
+item = Item(value = 7)
+print choose_value(item, true)

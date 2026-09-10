@@ -1,0 +1,15 @@
+record Item
+value int
+end
+
+enum Marker
+None
+end
+
+fn replace_value(item Item) int
+item = Item(value = 9)
+return item.value
+end
+
+item = Item(value = 7)
+print replace_value(item)

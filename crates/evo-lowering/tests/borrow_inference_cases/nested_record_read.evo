@@ -1,0 +1,19 @@
+record Inner
+value int
+end
+
+record Outer
+inner Inner
+end
+
+enum Marker
+None
+end
+
+fn nested_value(outer Outer) int
+return outer.inner.value
+end
+
+inner = Inner(value = 9)
+outer = Outer(inner = inner)
+print nested_value(outer)

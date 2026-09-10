@@ -1,0 +1,16 @@
+enum Step
+Small int
+Large int
+end
+
+fn inspect_step(step Step) int
+match step
+case Step.Small(value)
+return value
+case Step.Large(value)
+return value
+end
+end
+
+step = Step.Small(7)
+print inspect_step(step)
