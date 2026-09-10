@@ -98,6 +98,12 @@ mod enums_impl {
         include!("enum_executable_ir.rs");
     }
 
+    #[cfg(not(test))]
+    const _: fn(
+        &SyntaxProgram,
+        &program_ir::EnumProgramIr,
+    ) -> executable_ir::ExecutableEnumProgramIr = executable_ir::lower_executable_enum_program;
+
     pub(crate) use executable_ir::{
         ExecutableEnumIr, ExecutableEnumProgramIr, ExecutableEnumVariantIr, ExecutableExprIr,
         ExecutableExprKind, ExecutableFunctionIr, ExecutableMatchArmIr, ExecutableMatchBindingIr,
