@@ -38,19 +38,19 @@ jobs:
       - name: Borrow inference feasibility evidence
         env:
           EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          EVO_BORROW_INFERENCE_RESEARCH_OUT: target/evo-borrow-inference-research
+          EVO_BORROW_INFERENCE_RESEARCH_OUT: ${{ github.workspace }}/target/evo-borrow-inference-research
         run: >-
           cargo +1.98.0 test -p evo-lowering --test borrow_inference_research
           borrow_inference_research_classifies_local_nominal_parameter_effects
           -- --ignored --exact --nocapture
 
       - name: Validate report JSON
-        run: python3 -m json.tool target/evo-borrow-inference-research/report.json >/dev/null
+        run: python3 -m json.tool "${{ github.workspace }}/target/evo-borrow-inference-research/report.json" >/dev/null
 
       - name: Upload borrow inference evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: evo-borrow-inference-research-ubuntu-24.04
-          path: target/evo-borrow-inference-research
+          path: ${{ github.workspace }}/target/evo-borrow-inference-research
           if-no-files-found: error
