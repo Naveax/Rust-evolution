@@ -195,6 +195,18 @@ jobs:
           path: target/evo-bench-records/
           if-no-files-found: error
 
+      - name: Inferred shared-borrow v0 performance gate
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo run -p evo-bench -- run benchmarks/cases/inferred-shared-borrow-v0 --out target/evo-bench-inferred-shared-borrow
+
+      - name: Upload inferred shared-borrow v0 report
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-bench-inferred-shared-borrow-ubuntu-latest
+          path: target/evo-bench-inferred-shared-borrow/
+          if-no-files-found: error
+
       - name: Enums v0 performance gate
         if: matrix.os == 'ubuntu-latest'
         run: cargo run -p evo-bench -- run benchmarks/cases/enums-v0 --out target/evo-bench-enums
