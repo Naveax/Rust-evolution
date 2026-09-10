@@ -2,27 +2,26 @@
 
 Last verified update: **2026-09-10**
 
-This is the durable project handoff. Fresh sessions should read `AGENTS.md`, this file, `docs/NEXT_ACTION.md`, `docs/LANGUAGE_SPEC_V0.md`, the relevant research reports, and live GitHub issue/PR/Actions state before changing code.
+This is the durable project handoff. Fresh sessions should read `AGENTS.md`, this file, `docs/NEXT_ACTION.md`, `docs/LANGUAGE_SPEC_V0.md`, relevant research reports, and live GitHub issue/PR/Actions state before changing code.
 
 ## Repository / toolchain
 
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
 - Rust toolchain: **1.98.0**
-- Stable `main` before active PR #88: `b14173c8add554963df7ccb0f48de41e72fa3136`
-- post-merge CI #365 / run `34362873485`: **SUCCESS** on Ubuntu, Windows and macOS
-- current production Rust flags: edition 2024, opt-level 3, codegen-units 1
+- Stable `main` before active PR #90: `5646ad45dd3d6640d147a7fc40bbbda891a540d2`
+- post-merge CI #371 / run `34456073733`: **SUCCESS** on Ubuntu, Windows and macOS
+- post-merge Linker candidate research #6 / run `34456073754`: **SUCCESS**
+- production Rust flags: edition 2024, opt-level 3, codegen-units 1
 - measured GNU/Linux production-equivalent linker path: `rustc -> cc -> lld`
 
-Always re-read live GitHub state. The active PR may advance beyond an accepted measurement SHA because durable documentation is synchronized after evidence is accepted.
+Always re-read live GitHub state. Active PRs may advance beyond accepted measurement SHAs when durable documentation is synchronized after evidence is accepted.
 
 ## Accepted build / compile history
 
 ### #76 — native build latency baseline
 
-Controlled predecessor established that frontend/check/emit is small relative to rustc native work and that uncached single-file builds are dominated by rustc compile+link.
-
-Accepted historical medians included:
+Historical accepted medians:
 
 - `evo check`: 1.207 ms;
 - `evo emit-rust`: 1.210 ms;
@@ -31,162 +30,118 @@ Accepted historical medians included:
 - deterministic edited uncached build: 95.515 ms;
 - direct rustc compile+link: 94.131 ms.
 
+The frontend is small relative to native rustc work on the accepted single-file fixture.
+
 ### #79 / PR #81 — verified unchanged-build artifact reuse
 
-Production `build-cache-v0` is accepted.
-
-Hard behavior remains:
-
-- full frontend validation/lowering/codegen still runs before build-cache lookup;
-- exact Evolution source, generated Rust and compiler/configuration identity are verified;
-- complete regular non-symlink cached artifact is required;
-- verified unchanged hits can materialize the native output without invoking rustc;
-- different requested output paths may reuse the same verified artifact;
-- corruption/incomplete/mismatch/unavailable state fails closed to normal compilation;
-- `--no-cache` bypasses lookup/publication;
-- `run-cache-v0` stays independent;
-- no generated-program runtime/codegen semantic change.
-
-Durable contract: `docs/BUILD_CACHE.md` and D-021.
+Production `build-cache-v0` is accepted. Exact verified unchanged hits can materialize the native output without invoking rustc while normal frontend validation/lowering/codegen still runs. Corruption/mismatch/incomplete state fails closed to normal compilation. `run-cache-v0` remains independent.
 
 ### #82 / PR #84 — changed-source rustc incremental research
 
-Decision: **REJECT / DEFER production persistent rustc incremental state under the tested architecture/toolchain configuration.**
+Decision: **REJECT / DEFER** persistent rustc incremental state under the tested architecture/toolchain configuration.
 
-Key evidence:
-
-- current CGU1 + persistent incremental state regressed deterministic edited compile latency;
-- CGU256 + incremental could improve compile latency but changed optimized codegen identity;
-- the favorable Enums runtime effect did not generalize;
-- the committed seven-case runtime corpus contained repeatable regressions, including Logical Operators;
-- the project does not buy compile-time convenience with generated-program runtime regression.
-
-Durable report: `docs/INCREMENTAL_BUILD_RESEARCH.md`.
+CGU256 + incremental could improve compile latency, but wider runtime evidence violated the project's parity contract. Durable report: `docs/INCREMENTAL_BUILD_RESEARCH.md`.
 
 ### #85 / PR #86 — link-time attribution
 
-Decision: **FOLLOW-UP-CANDIDATE** for a bounded linker experiment, not production linker replacement.
+Decision: **FOLLOW-UP-CANDIDATE** for one bounded linker experiment.
 
-Accepted finding:
+Current Rust 1.98 GNU/Linux path already uses `cc -> lld`; direct linker-child work was roughly 23% of total production-equivalent rustc wall time on the initial controlled cases. Durable report: `docs/LINK_TIME_RESEARCH.md`.
 
-- current Rust 1.98 GNU/Linux path already uses `cc -> lld`;
-- direct linker-child work was roughly 23% of total production-equivalent rustc wall time on the initial Enums and Logical Operators cases;
-- link cost was material enough to justify one controlled alternative-linker experiment.
+### #87 / PR #88 — linker candidate experiment
 
-PR #86 merged as `b14173c8add554963df7ccb0f48de41e72fa3136`.
+Decision: **REJECT / DEFER** linker replacement under the current single-file architecture/toolchain setup.
+
+PR #88 merged as `5646ad45dd3d6640d147a7fc40bbbda891a540d2`.
 
 Post-merge validation:
 
-- CI #365 / run `34362873485`: SUCCESS on all three OSes;
-- Link-time research #6 / run `34362873679`: SUCCESS.
+- CI #371 / run `34456073733`: **SUCCESS** on Ubuntu, Windows and macOS;
+- Linker candidate research #6 / run `34456073754`: **SUCCESS**;
+- issue #87: closed/completed.
 
-Durable report: `docs/LINK_TIME_RESEARCH.md`.
+Accepted candidate evidence showed current lld faster than both GNU ld and pinned Ubuntu Noble mold. Durable report: `docs/LINKER_CANDIDATE_RESEARCH.md`.
 
-## Active completion — #87 / PR #88 linker candidate experiment
+## Active completion — #89 / PR #90 release optimization cost
 
-Issue: **#87 — linker candidate v0**  
-PR: **#88 — `research: compare current lld path with bounded linker candidates`**  
-Branch: `research/linker-candidate-v0`
+Issue: **#89 — release optimization cost v0**  
+PR: **#90 — `research: measure opt3 versus opt2 build cost`**  
+Branch: `research/release-optimization-cost-v0`
 
 Accepted code/evidence head before documentation synchronization:
 
-- `852bc56eeeb69123b5a7f9c120338ab2c966a35b`
-- normal CI #369 / run `34453683622`: **SUCCESS** on Ubuntu, Windows and macOS
-- Linker candidate research #4 / run `34453683646`: **SUCCESS**
-- artifact `evo-linker-candidate-research-ubuntu-24.04`
-- artifact id `10142574260`
-- digest `sha256:d550ce688c1979c103df8ab3d2260ec136552672268d32f5be5d683e4c3ab7e1`
-- artifact `report.json` independently parsed successfully
+`0e46279fb1038a90e1aced9dd268a0e61c45a1b1`
 
-### #87 experiment design
+Validation:
 
-Controlled Ubuntu 24.04, Rust 1.98.0, same generated source/path policy and otherwise production-equivalent flags.
+- normal CI #373 / run `34456762370`: **SUCCESS** on Ubuntu, Windows and macOS;
+- Release optimization research #2 / run `34456762372`: **SUCCESS**;
+- artifact `evo-release-optimization-research-ubuntu-24.04`;
+- artifact id `10143822084`;
+- digest `sha256:8b6ea8af1b1e65a321b4d958adab646b29517181621566531f7a22e524a2622e`;
+- correctness: **PASS**;
+- artifact `report.json` parsed successfully.
 
-Arms:
+### #89 experiment design
 
-1. current Rust 1.98 default `cc -> lld`;
-2. GNU/system linker control with `-C linker-features=-lld -C link-self-contained=-linker`;
-3. Ubuntu Noble `mold=2.30.0+dfsg-1build1`, selected through the same opt-out plus `-C link-arg=-fuse-ld=mold`.
+Controlled Ubuntu 24.04 / Rust 1.98.0. Initial cases:
 
-The workflow provisions mold before measurement. Installation time is excluded from compile timing.
+- `enums-v0`;
+- `logical-operators-v0`.
 
-Each case uses 2 warmups and 9 rotating-order measured samples per arm.
+Arms differ only in optimization level:
 
-### #87 accepted results
+- current: edition 2024, opt-level 3, CGU1, current default linker, no incremental state;
+- candidate: identical except opt-level 2.
 
-| Case | Arm | Full median | Link-child median | Full rel MAD | Binary bytes |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Enums | current lld | 113.077 ms | 24.727 ms | 0.0059 | 4,519,880 |
-| Enums | GNU ld | 165.612 ms | 76.155 ms | 0.0077 | 4,473,544 |
-| Enums | mold | 122.321 ms | 33.401 ms | 0.0087 | 4,536,552 |
-| Logical Operators | current lld | 111.557 ms | 24.457 ms | 0.0142 | 4,519,800 |
-| Logical Operators | GNU ld | 163.700 ms | 75.486 ms | 0.0084 | 4,473,544 |
-| Logical Operators | mold | 119.199 ms | 32.316 ms | 0.0153 | 4,536,472 |
+Sampling: 2 warmups + 9 measured samples per arm/case, alternating order. Each measured compile is followed by exact committed stdout correctness.
 
-Mold versus current lld total-build median:
+Pre-registered advancement required both cases to show stable measurements plus at least 5% and 5 ms lower total compile+link median.
 
-- Enums: about **8.17% slower**;
-- Logical Operators: about **6.85% slower**.
+### #89 accepted results
 
-Correctness and deployment evidence:
+| Case | opt3 median | opt2 median | Saved | Improvement | opt3 rel MAD | opt2 rel MAD | opt3 bytes | opt2 bytes | Verdict |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Enums | 109.425 ms | 109.036 ms | 0.389 ms | 0.36% | 0.003925 | 0.006854 | 4,519,880 | 4,519,832 | `BUILD-GATE-FAIL` |
+| Logical Operators | 109.784 ms | 109.726 ms | 0.058 ms | 0.05% | 0.008338 | 0.009040 | 4,519,800 | 4,519,736 | `BUILD-GATE-FAIL` |
 
-- exact committed stdout: PASS for every accepted timing sample;
-- exactly one linker-driver invocation per measured sample;
-- baseline and mold `DT_NEEDED` names match exactly;
-- all relevant relative MAD values are well below the 0.10 instability ceiling.
+Aggregate verdict: **`REJECT-DEFER`**.
 
-Aggregate verdict: **`MOLD-REJECT-OR-DEFER`**.
+The measurements are stable. Opt2 simply does not materially reduce total native build latency on either initial case.
 
-### #87 production decision
+### #89 production decision
 
-**REJECT / DEFER linker replacement under the current single-file architecture/toolchain setup.**
+**REJECT / DEFER lowering production optimization from opt3 to opt2.**
 
-The current lld path is faster than both tested alternatives. Mold fails the total-build gate before the wider runtime corpus is justified. Production linker behavior remains unchanged.
+The seven-case runtime corpus is intentionally not executed because the candidate fails the pre-registered build gate before runtime adoption validation is justified. Production remains at `-C opt-level=3`.
 
-Durable report: `docs/LINKER_CANDIDATE_RESEARCH.md`.
+Durable report added by the documentation synchronization commit: `docs/RELEASE_OPTIMIZATION_RESEARCH.md`.
 
-## Gated successor — #89 release optimization cost v0
+## Gated successor — #91 compile memory baseline v0
 
-Issue **#89 — `P0 research release optimization cost v0: measure opt-level 3 build/runtime tradeoff`** is open but must not start until PR #88 is merged and its natural post-merge `main` CI succeeds.
+Issue **#91 — `P0 research compile memory baseline v0: attribute frontend and rustc peak RSS`** is open. It must not start until PR #90 is merged and the resulting natural post-merge `main` CI is **SUCCESS**.
 
-Why this is the next current-architecture build question:
+Why this is next:
 
-- exact unchanged-build work is already solved by #79;
-- tested rustc incremental approaches are rejected/deferred by #82;
-- alternative linker paths failed to beat current lld under #87;
-- in final #87 evidence, current lld consumed only about 24–25 ms of the 111–113 ms total rustc time;
-- production explicitly uses `-C opt-level=3`.
+- unchanged-build latency is solved by verified artifact reuse;
+- tested incremental state is rejected/deferred;
+- current lld beats tested alternative linkers;
+- lowering opt3 to opt2 offers no material build win;
+- compile-time memory is the next directly measurable current-architecture Phase 3.4 resource question.
 
-#89 first compares current opt3 with bounded opt2 while holding edition, codegen-units, linker, toolchain, generated source/path policy and no-incremental behavior constant.
+The first #91 slice must prove its memory measurement method before accepting RSS values. It should separate frontend/check, emit-rust and direct-rustc peak RSS, and include full `evo build --no-cache` only if child/grandchild process memory is defensibly accounted for.
 
-A lower optimization setting may advance only after a stable material total-build win. If it advances, it must satisfy both:
+Start with Enums and Logical Operators; retain at least five samples per accepted arm plus raw RSS, median/min/max, supporting wall time, generated Rust, correctness, tool identity and JSON/CSV/Markdown evidence.
 
-- #4 Evolution <= equivalent reference Rust under the same opt-level/linker/codegen conditions;
-- no repeatable runtime regression versus current production-equivalent Evolution opt3.
+If the two current cases are too small to produce a useful memory baseline, expand with a committed deterministic fixture using supported Evolution constructs. Do not manufacture an uncommitted Rust stress blob merely to make a graph look interesting.
 
-Compile-time speed does not purchase runtime regression.
+Dependency build, proc-macro cost and workspace scaling remain structurally deferred until Evolution user programs have a real package/dependency graph.
 
 ## Current implemented language / tooling state
 
 `docs/LANGUAGE_SPEC_V0.md` remains the implemented-language source of truth.
 
-Accepted core includes, among other current v0 behavior:
-
-- integer, boolean and static/literal string values;
-- inferred mutability and lexical block locals;
-- arithmetic/comparisons/strict short-circuit logical operators;
-- `input_int`, `repeat`, `if/else`;
-- typed named functions including forward calls and recursion;
-- nominal Records v0 with by-value ownership;
-- nominal Enums v0 with unit/single-payload variants and exhaustive statement-only matching;
-- explicit same-type reinitialization after moves;
-- deterministic source-native move-origin diagnostics;
-- bounded spelling help for supported unknown-symbol diagnostics;
-- direct static Rust lowering;
-- generated-line source maps and rustc diagnostic remapping;
-- native `check`, `emit-rust`, `build`, `run`, `fmt` workflows;
-- verified persistent run cache and exact unchanged-build cache;
-- controlled correctness/runtime/build research infrastructure.
+Accepted core includes integer/boolean/static-string values, inferred mutability, lexical block locals, arithmetic/comparisons/logical operators, input/repeat/if, typed named functions, nominal Records and Enums, move diagnostics, direct static Rust lowering, source maps, native check/emit/build/run/fmt workflows, verified run/build caches, and controlled correctness/runtime/build research infrastructure.
 
 The current `string` semantics remain static/literal. Do not silently treat them as a general owned runtime string.
 
