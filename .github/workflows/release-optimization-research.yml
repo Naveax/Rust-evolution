@@ -1,0 +1,52 @@
+name: Release optimization research
+
+on:
+  pull_request:
+    paths:
+      - crates/evo-cli/tests/release_optimization_research.rs
+      - .github/workflows/release-optimization-research.yml
+  push:
+    branches:
+      - main
+    paths:
+      - crates/evo-cli/tests/release_optimization_research.rs
+      - .github/workflows/release-optimization-research.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal
+
+      - name: Show toolchain
+        run: |
+          rustc -Vv
+          cc --version
+
+      - name: Release optimization build evidence
+        id: release_optimization_research
+        env:
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_RELEASE_OPT_RESEARCH_OUT: ${{ github.workspace }}/target/evo-release-optimization-research
+        run: cargo test -p evo-cli --test release_optimization_research release_optimization_cost_compares_opt3_and_opt2_builds -- --ignored --exact --nocapture
+
+      - name: Upload release optimization evidence
+        if: always() && steps.release_optimization_research.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-release-optimization-research-ubuntu-24.04
+          path: target/evo-release-optimization-research/
+          if-no-files-found: error
