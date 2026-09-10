@@ -11,6 +11,9 @@ use std::ops::Deref;
 mod enums_impl {
     include!("enum_environment.rs");
 
+    type ParameterModes =
+        std::collections::HashMap<String, Vec<crate::ParameterPassingMode>>;
+
     mod ownership_state {
         include!("move_state.rs");
     }
@@ -22,22 +25,28 @@ mod enums_impl {
             include!("enum_ownership.rs");
         }
 
+        mod borrow_ownership {
+            include!("enum_borrow_ownership.rs");
+        }
+
         pub(super) use ownership::{OwnershipUseMode, ResolvedOwnershipUse};
 
         pub(super) fn collect_enum_ownership(
             program: &SyntaxProgram,
             enums: &EnumEnvironment,
             matches: &super::match_validation::MatchEnvironment,
+            parameter_modes: &super::ParameterModes,
         ) -> Result<Vec<ResolvedOwnershipUse>, LowerError> {
-            ownership::collect_enum_ownership(program, enums, matches)
+            borrow_ownership::collect_enum_ownership(program, enums, matches, parameter_modes)
         }
 
         pub(super) fn validate_enum_ownership(
             program: &SyntaxProgram,
             enums: &EnumEnvironment,
             matches: &super::match_validation::MatchEnvironment,
+            parameter_modes: &super::ParameterModes,
         ) -> Result<(), LowerError> {
-            ownership::validate_enum_ownership(program, enums, matches)
+            collect_enum_ownership(program, enums, matches, parameter_modes).map(|_| ())
         }
     }
 
@@ -77,9 +86,22 @@ mod enums_impl {
         ExecutableValueType,
     };
 
+    fn collect_parameter_modes(program: &SyntaxProgram) -> ParameterModes {
+        program
+            .functions
+            .iter()
+            .map(|function| {
+                (
+                    function.name.clone(),
+                    crate::borrow_inference::classify_function_parameters(program, function),
+                )
+            })
+            .collect()
+    }
+
     fn collect_validated_enum_state(
         program: &SyntaxProgram,
-    ) -> Result<(EnumEnvironment, program_ir::EnumProgramIr), LowerError> {
+    ) -> Result<(EnumEnvironment, program_ir::EnumProgramIr, ParameterModes), LowerError> {
         super::register_program_suggestions(program);
         validate_enum_declarations(program)?;
         let environment = collect_enum_environment(program)?;
@@ -87,10 +109,21 @@ mod enums_impl {
         constructor_typing::validate_enum_type_semantics(program, &environment)?;
         static_semantics::validate_enum_static_semantics(program, &environment)?;
         match_sidecar::validate_match_sidecar(program, &matches)?;
-        let ownership =
-            constructor_typing::collect_enum_ownership(program, &environment, &matches)?;
+        let parameter_modes = collect_parameter_modes(program);
+        let ownership = constructor_typing::collect_enum_ownership(
+            program,
+            &environment,
+            &matches,
+            &parameter_modes,
+        )?;
         debug_assert!(
-            constructor_typing::validate_enum_ownership(program, &environment, &matches).is_ok()
+            constructor_typing::validate_enum_ownership(
+                program,
+                &environment,
+                &matches,
+                &parameter_modes,
+            )
+            .is_ok()
         );
         debug_assert!(ownership.iter().all(|usage| {
             let _ = (&usage.value_type, usage.mode);
@@ -138,6 +171,7 @@ mod enums_impl {
                 matches: lowered_matches,
                 ownership_uses,
             },
+            parameter_modes,
         ))
     }
 
@@ -145,21 +179,23 @@ mod enums_impl {
     pub(crate) fn collect_validated_enum_environment(
         program: &SyntaxProgram,
     ) -> Result<EnumEnvironment, LowerError> {
-        collect_validated_enum_state(program).map(|(environment, _)| environment)
+        collect_validated_enum_state(program).map(|(environment, _, _)| environment)
     }
 
     pub(crate) fn collect_validated_enum_program_ir(
         program: &SyntaxProgram,
     ) -> Result<program_ir::EnumProgramIr, LowerError> {
-        collect_validated_enum_state(program).map(|(_, lowered)| lowered)
+        collect_validated_enum_state(program).map(|(_, lowered, _)| lowered)
     }
 
     pub(crate) fn collect_executable_enum_program_ir(
         program: &SyntaxProgram,
     ) -> Result<ExecutableEnumProgramIr, LowerError> {
-        let validated = collect_validated_enum_program_ir(program)?;
-        Ok(executable_ir::lower_executable_enum_program(
-            program, &validated,
+        let (_, validated, parameter_modes) = collect_validated_enum_state(program)?;
+        Ok(executable_ir::lower_executable_enum_program_with_parameter_modes(
+            program,
+            &validated,
+            &parameter_modes,
         ))
     }
 }
@@ -428,7 +464,7 @@ mod tests {
             "enum Flag\nOff\nOn\nend\nvalue = Flag.On()\nmatch value\ncase Flag.On\nprint 1\nend\n",
         );
         let error = validate_record_declarations(&program)
-            .expect_err("non-exhaustive match should precede unsupported enum execution");
+            .expect_err("non-exhaustive match should precede unsupported codegen gate");
         assert!(error.message.contains("missing variant(s): Off"));
         assert_eq!(error.span.line, 6);
     }
