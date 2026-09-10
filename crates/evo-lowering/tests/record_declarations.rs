@@ -1,5 +1,7 @@
-pub use evo_lowering::LowerError;
+pub use evo_lowering::{LowerError, ParameterPassingMode};
 
+#[path = "../src/borrow_inference.rs"]
+mod borrow_inference;
 #[path = "../src/diagnostic_suggestions.rs"]
 mod diagnostic_suggestions;
 #[allow(dead_code)]
