@@ -21,6 +21,27 @@ mod enums_impl {
         include!("enum_constructor_typing.rs");
 
         mod ownership {
+            use evo_lexer::Span;
+
+            use super::super::ResolvedPayloadType;
+
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            pub(crate) enum OwnershipUseMode {
+                Inspect,
+                Consume,
+            }
+
+            #[derive(Debug, Clone, PartialEq, Eq)]
+            pub(crate) struct ResolvedOwnershipUse {
+                pub(crate) name: String,
+                pub(crate) value_type: ResolvedPayloadType,
+                pub(crate) mode: OwnershipUseMode,
+                pub(crate) span: Span,
+            }
+        }
+
+        #[cfg(test)]
+        mod ownership_legacy {
             include!("enum_ownership.rs");
         }
 
@@ -181,6 +202,7 @@ mod enums_impl {
         collect_validated_enum_state(program).map(|(environment, _, _)| environment)
     }
 
+    #[cfg(test)]
     pub(crate) fn collect_validated_enum_program_ir(
         program: &SyntaxProgram,
     ) -> Result<program_ir::EnumProgramIr, LowerError> {
