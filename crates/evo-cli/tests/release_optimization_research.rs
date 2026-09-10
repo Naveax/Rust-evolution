@@ -311,8 +311,8 @@ fn release_optimization_cost_compares_opt3_and_opt2_builds() {
 
     for case_name in OPT_RESEARCH_CASES {
         let fixture = root.join(case_name);
-        let source_bytes =
-            fs::read(fixture.join("evolution.evo")).expect("optimization fixture source should read");
+        let source_bytes = fs::read(fixture.join("evolution.evo"))
+            .expect("optimization fixture source should read");
         let fixture_stdin =
             fs::read(fixture.join("stdin.bin")).expect("optimization fixture stdin should read");
         let expected_stdout = fs::read(fixture.join("expected.stdout"))
@@ -333,10 +333,8 @@ fn release_optimization_cost_compares_opt3_and_opt2_builds() {
 
         let generated = case_dir.join("main.rs");
         fs::write(&generated, &emitted.stdout).expect("optimization generated Rust should stage");
-        let current_binary =
-            case_dir.join(format!("opt3-current{}", env::consts::EXE_SUFFIX));
-        let candidate_binary =
-            case_dir.join(format!("opt2-candidate{}", env::consts::EXE_SUFFIX));
+        let current_binary = case_dir.join(format!("opt3-current{}", env::consts::EXE_SUFFIX));
+        let candidate_binary = case_dir.join(format!("opt2-candidate{}", env::consts::EXE_SUFFIX));
 
         for warmup in 0..OPT_RESEARCH_WARMUPS {
             for arm in optimization_order(warmup) {
