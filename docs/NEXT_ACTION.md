@@ -1,125 +1,85 @@
 # Rust Evolution — NEXT ACTION
 
-This file is intentionally operational. A fresh chat/agent should be able to resume from here without prior conversation history.
-
 Last verified update: **2026-09-10**
 
-## Current verified main before active PR
+## Stable main before active PR #92
 
-Stable `main` before PR #90:
+- `f122f4011537f2ed73624c95f1809ba122de924c`
+- PR #90 / #89 release-optimization research merge
+- post-merge CI #375 / run `34457802639`: **SUCCESS** on Ubuntu, Windows and macOS
+- post-merge Release optimization research #4 / run `34457802658`: **SUCCESS**
+- Rust toolchain: **1.98.0**
 
-- `5646ad45dd3d6640d147a7fc40bbbda891a540d2`;
-- squash merge from PR #88 / #87 linker-candidate research;
-- post-merge CI #371 / run `34456073733`: **SUCCESS** on Ubuntu, Windows and macOS;
-- post-merge Linker candidate research #6 / run `34456073754`: **SUCCESS**;
-- Rust toolchain: **1.98.0**.
+## Active completion — #91 / PR #92
 
-Completed build work retained on `main`:
+Issue **#91 — compile memory baseline v0** has reached a research decision.
 
-- #79 / PR #81: verified exact unchanged-build artifact reuse;
-- #82 / PR #84: rustc incremental research, **REJECT / DEFER**;
-- #85 / PR #86: link-time attribution, **FOLLOW-UP-CANDIDATE**;
-- #87 / PR #88: alternative linker experiment, **REJECT / DEFER**; current Rust 1.98 `cc -> lld` remains production behavior.
+PR:
 
-Durable predecessor reports:
-
-- `docs/INCREMENTAL_BUILD_RESEARCH.md`;
-- `docs/LINK_TIME_RESEARCH.md`;
-- `docs/LINKER_CANDIDATE_RESEARCH.md`.
-
-## Active completion PR — #90 / issue #89
-
-Issue **#89 — release optimization cost v0** has reached its research decision.
-
-Active PR:
-
-- **#90 — `research: measure opt3 versus opt2 build cost`**;
-- branch: `research/release-optimization-cost-v0`;
-- accepted code/evidence head before documentation synchronization: `0e46279fb1038a90e1aced9dd268a0e61c45a1b1`.
+- #92 `research: establish compile memory baseline v0`
+- branch: `research/compile-memory-baseline-v0`
+- accepted measurement head before documentation sync: `3e2c3e390ff7c90ce61088b6c54540dce9dbf27f`
 
 Accepted validation:
 
-- normal CI #373 / run `34456762370`: **SUCCESS** on Ubuntu, Windows and macOS;
-- Release optimization research #2 / run `34456762372`: **SUCCESS**;
-- artifact: `evo-release-optimization-research-ubuntu-24.04`;
-- artifact id: `10143822084`;
-- digest: `sha256:8b6ea8af1b1e65a321b4d958adab646b29517181621566531f7a22e524a2622e`;
-- correctness: **PASS**;
-- artifact JSON parses successfully.
+- CI #376 / run `34470282815`: **SUCCESS** on Ubuntu, Windows and macOS;
+- Compile memory research #1 / run `34470282845`: **SUCCESS**;
+- artifact id `10149215121`;
+- digest `sha256:e7fbfff77bed760784cf5ca9c2d57da5a0df206e670e6fc402349c563be7b12a`;
+- correctness **PASS**;
+- JSON validation **PASS**.
 
-Durable report added by the documentation synchronization commit: `docs/RELEASE_OPTIMIZATION_RESEARCH.md`.
+Accepted process peak-RSS medians:
 
-## #89 decision
+| Case | check | emit-rust | direct rustc |
+| --- | ---: | ---: | ---: |
+| enums-v0 | 3,932 KiB | 3,964 KiB | 236,816 KiB |
+| logical-operators-v0 | 3,916 KiB | 3,912 KiB | 236,748 KiB |
 
-**REJECT / DEFER lowering production optimization from opt3 to opt2 under the current single-file architecture/toolchain setup.**
+Frontend phases are only about 1.65-1.67% of direct-rustc peak RSS. The pre-registered 64 MiB + 25% Evolution-side hotspot guide is not met.
 
-Controlled accepted medians:
+Decision: **DEFER / NO ACTION** for Evolution-side compile-memory optimization under the current architecture.
 
-| Case | opt3 current | opt2 candidate | Saved | Improvement | Verdict |
-| --- | ---: | ---: | ---: | ---: | --- |
-| `enums-v0` | 109.425 ms | 109.036 ms | 0.389 ms | 0.36% | `BUILD-GATE-FAIL` |
-| `logical-operators-v0` | 109.784 ms | 109.726 ms | 0.058 ms | 0.05% | `BUILD-GATE-FAIL` |
+Full `evo build --no-cache` whole-tree peak RSS remains intentionally unavailable because GNU time process RSS is not a simultaneous process-tree peak.
 
-Both arms are stable; relevant relative MAD values are below 0.01. The pre-registered advancement gate required at least **5% and 5 ms** total compile+link reduction on **both** initial cases.
-
-The candidate misses that gate by a wide margin. Per the pre-registered plan, do **not** run the seven-case runtime corpus for opt2 and do not change production `opt-level=3`.
+Durable report: `docs/COMPILE_MEMORY_RESEARCH.md`.
 
 ## Immediate sequence
 
-1. Keep PR #90 on the single documentation-synchronized final head created after accepted head `0e46279f...`.
-2. Track the natural exact-head normal CI and Release optimization research workflows. Do not create duplicate runs.
-3. Require final PR #90 normal CI to be green on Ubuntu, Windows and macOS.
-4. Require the final-head dedicated research workflow to remain green and retain its artifact.
-5. Update PR #90 / #89 with final-head provenance and confirm the final artifact still reports `REJECT-DEFER`.
-6. Squash-merge PR #90 with expected-head protection only after both exact-head workflows are accepted.
-7. Track the natural post-merge `main` CI and dedicated research push workflow.
-8. Close #89 as completed research with **REJECT / DEFER** retained only after post-merge `main` CI succeeds.
-9. Re-read live `main`, #91, branches/PRs and active Actions.
-10. Only then create the #91 research branch from the exact verified `main` SHA.
+1. Keep PR #92 on the single documentation-synchronized final head.
+2. Track the natural exact-head normal CI and Compile memory research workflows; do not duplicate them.
+3. Require normal CI green on Ubuntu, Windows and macOS.
+4. Require final-head compile-memory workflow green and artifact retained.
+5. Update PR #92 / #91 with final-head provenance.
+6. Squash-merge PR #92 using expected-head protection only after both final-head workflows are green.
+7. Track natural post-merge `main` CI and compile-memory push workflow.
+8. Close #91 completed only after post-merge main CI succeeds.
+9. Re-read live main/branch/PR/Actions state.
+10. Only then create #93 binary-size research branch from exact verified main.
 
-## Gated successor P0 — #91
+## Gated successor — #93
 
-Issue **#91 — `P0 research compile memory baseline v0: attribute frontend and rustc peak RSS`** is open and gated on PR #90 merge + green post-merge main CI.
+Issue **#93 — binary size baseline v0** is open and must not start before PR #92 merge + green post-merge main CI.
 
-Why this is next:
+First #93 slice should measure the committed seven-case corpus under production-equivalent Rust 1.98 flags, retaining reference/generated binary sizes, byte identity, section sizes where defensible, `DT_NEEDED`, exact output correctness, generated/reference Rust, JSON/CSV/Markdown evidence.
 
-- unchanged build latency is already solved by verified artifact reuse;
-- tested rustc incremental configurations were rejected/deferred;
-- current lld beats tested linker alternatives;
-- opt2 gives no material total-build improvement versus opt3;
-- current architecture still has a directly measurable Phase 3.4 resource question: compile-time memory.
+Do not change stripping, LTO, panic strategy, opt-level or linker in the baseline issue.
 
-## First #91 research sequence
+Dependency-build, proc-macro and workspace-scaling work remains deferred until Evolution has a real user-program package/dependency graph.
 
-1. Prove the memory measurement method before treating any RSS number as evidence.
-2. Controlled platform: Ubuntu 24.04, Rust 1.98.0, `x86_64-unknown-linux-gnu`.
-3. Preserve production-equivalent edition 2024, opt3, CGU1, current linker, no incremental state.
-4. Start with `enums-v0` and `logical-operators-v0`.
-5. Separate at least frontend/check, emit-rust and direct rustc peak RSS.
-6. Measure full `evo build --no-cache` only if the mechanism defensibly accounts for child/grandchild compiler processes; otherwise mark whole-tree attribution unavailable.
-7. Retain at least 5 samples per accepted arm, median/min/max, raw RSS, supporting wall time, exact generated Rust, correctness, tool identity, JSON/CSV/Markdown.
-8. If the two cases are too small to distinguish useful memory behavior, expand with a committed deterministic supported-language stress fixture rather than an artificial uncommitted Rust blob.
-9. End with FOLLOW-UP-CANDIDATE, EXPAND-CORPUS, or DEFER / NO ACTION from evidence.
+## Production contracts unchanged
 
-Dependency-build, proc-macro and workspace-scaling roadmap items remain structurally deferred until Evolution has a real user-program package/dependency graph.
-
-## Production contracts that remain unchanged
-
-- Evolution syntax and semantics;
-- generated Rust;
-- ownership/type rules;
+- Evolution syntax/semantics and ownership/type rules;
 - Rust 1.98.0;
 - edition 2024;
 - opt-level 3;
 - codegen-units 1;
 - current linker behavior;
-- `build-cache-v0` and `run-cache-v0`;
+- build-cache-v0 / run-cache-v0;
 - source mapping and rustc diagnostic remapping;
-- #4 runtime parity-or-better threshold;
-- no hidden clone/allocation/boxing/dynamic dispatch/runtime metadata.
+- #4 runtime parity-or-better contract;
+- no hidden runtime allocation/clone/boxing/dynamic dispatch metadata.
 
 ## CI rule
 
-Never create duplicate active Actions for the same SHA/workflow/input.
-
-If a run is queued or in progress, track that exact run ID and continue independent work. Failed SHAs remain retained evidence and are not rerun merely to obtain a friendlier color.
+Never create duplicate active Actions for the same SHA/workflow/input. Failed SHAs remain evidence and are not rerun merely for color.
