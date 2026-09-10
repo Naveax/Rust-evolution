@@ -11,8 +11,7 @@ use std::ops::Deref;
 mod enums_impl {
     include!("enum_environment.rs");
 
-    type ParameterModes =
-        std::collections::HashMap<String, Vec<crate::ParameterPassingMode>>;
+    type ParameterModes = std::collections::HashMap<String, Vec<crate::ParameterPassingMode>>;
 
     mod ownership_state {
         include!("move_state.rs");
@@ -192,11 +191,13 @@ mod enums_impl {
         program: &SyntaxProgram,
     ) -> Result<ExecutableEnumProgramIr, LowerError> {
         let (_, validated, parameter_modes) = collect_validated_enum_state(program)?;
-        Ok(executable_ir::lower_executable_enum_program_with_parameter_modes(
-            program,
-            &validated,
-            &parameter_modes,
-        ))
+        Ok(
+            executable_ir::lower_executable_enum_program_with_parameter_modes(
+                program,
+                &validated,
+                &parameter_modes,
+            ),
+        )
     }
 }
 
