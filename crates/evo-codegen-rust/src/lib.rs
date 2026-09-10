@@ -1,6 +1,7 @@
 use evo_lexer::Span;
 use evo_lowering::{
-    BinaryOp, Expr, ExprKind, Function, Program, RecordIr, RecordType, Stmt, StmtKind, ValueType,
+    BinaryOp, Expr, ExprKind, Function, ParameterPassingMode, Program, RecordIr, RecordType, Stmt,
+    StmtKind, ValueType,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +122,9 @@ impl Generator {
             }
             signature.push_str(&generated_identifier(&parameter.name));
             signature.push_str(": ");
+            if parameter.passing_mode == ParameterPassingMode::SharedBorrow {
+                signature.push('&');
+            }
             signature.push_str(&rust_type(&parameter.value_type));
         }
         signature.push_str(") -> ");
@@ -251,10 +255,22 @@ fn render_expr(expr: &Expr) -> String {
         ExprKind::String(value) => format!("{value:?}"),
         ExprKind::Bool(value) => value.to_string(),
         ExprKind::Local(name) => generated_identifier(name),
-        ExprKind::Call { name, arguments } => {
+        ExprKind::Call {
+            name,
+            arguments,
+            argument_modes,
+        } => {
+            debug_assert_eq!(arguments.len(), argument_modes.len());
             let arguments = arguments
                 .iter()
-                .map(render_expr)
+                .zip(argument_modes)
+                .map(|(argument, passing_mode)| {
+                    let rendered = render_expr(argument);
+                    match passing_mode {
+                        ParameterPassingMode::Owned => rendered,
+                        ParameterPassingMode::SharedBorrow => format!("&{rendered}"),
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("{}({arguments})", generated_function_name(name))
