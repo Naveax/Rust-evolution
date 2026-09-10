@@ -200,6 +200,11 @@ def main() -> int:
         for row in rows
         if int(row["delta_bytes"]) > 16 * 1024 and float(row["overhead_ratio"]) > 0.01
     ]
+    threshold_edge_cases = [
+        row["case"]
+        for row in rows
+        if int(row["delta_bytes"]) > 16 * 1024 or float(row["overhead_ratio"]) > 0.01
+    ]
     hidden_footprint_cases = [
         row["case"]
         for row in rows
@@ -207,7 +212,7 @@ def main() -> int:
     ]
     if len(followup_cases) >= 2 or hidden_footprint_cases:
         verdict = "FOLLOW-UP-CANDIDATE"
-    elif any(int(row["delta_bytes"]) > 0 and not bool(row["byte_equal"]) for row in rows):
+    elif threshold_edge_cases:
         verdict = "EXPAND-INVESTIGATE"
     else:
         verdict = "DEFER-NO-ACTION"
@@ -220,6 +225,7 @@ def main() -> int:
         "correctness": "PASS",
         "pre_registered_thresholds": {"overhead_ratio": 0.01, "overhead_bytes": 16384, "representative_cases": 2},
         "followup_cases": followup_cases,
+        "threshold_edge_cases": threshold_edge_cases,
         "hidden_dependency_cases": hidden_footprint_cases,
         "verdict": verdict,
         "cases": report_cases,
