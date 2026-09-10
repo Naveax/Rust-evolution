@@ -1,0 +1,63 @@
+name: Linker candidate research
+
+on:
+  pull_request:
+    paths:
+      - crates/evo-cli/tests/linker_candidate_research.rs
+      - crates/evo-cli/tests/link_time_research.rs
+      - .github/workflows/linker-candidate-research.yml
+  push:
+    branches:
+      - main
+    paths:
+      - crates/evo-cli/tests/linker_candidate_research.rs
+      - crates/evo-cli/tests/link_time_research.rs
+      - .github/workflows/linker-candidate-research.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal
+
+      - name: Provision pinned mold candidate
+        run: |
+          sudo apt-get update
+          apt-cache policy mold
+          sudo apt-get install --yes mold=2.30.0+dfsg-1build1
+
+      - name: Show toolchain and linker candidates
+        run: |
+          rustc -Vv
+          cc --version
+          ld --version
+          mold --version
+          dpkg-query -W -f='${Version}\n' mold
+
+      - name: Linker candidate evidence
+        id: linker_candidate_research
+        env:
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_LINKER_CANDIDATE_OUT: ${{ github.workspace }}/target/evo-linker-candidate-research
+        run: cargo test -p evo-cli --test linker_candidate_research linker_candidate_research_compares_current_lld_system_ld_and_mold -- --ignored --exact --nocapture
+
+      - name: Upload linker candidate evidence
+        if: always() && steps.linker_candidate_research.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-linker-candidate-research-ubuntu-24.04
+          path: target/evo-linker-candidate-research/
+          if-no-files-found: error
