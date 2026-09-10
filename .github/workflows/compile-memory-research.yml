@@ -1,0 +1,56 @@
+name: Compile memory research
+
+on:
+  pull_request:
+    paths:
+      - scripts/compile_memory_research.py
+      - .github/workflows/compile-memory-research.yml
+  push:
+    branches:
+      - main
+    paths:
+      - scripts/compile_memory_research.py
+      - .github/workflows/compile-memory-research.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal
+
+      - name: Show toolchain
+        run: rustc +1.98.0 -Vv
+
+      - name: Build evo measurement binary
+        run: cargo +1.98.0 build -p evo-cli --bin evo
+
+      - name: Compile memory evidence
+        env:
+          RUSTC: rustc
+          EVO_BIN: target/debug/evo
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_COMPILE_MEMORY_OUT: target/evo-compile-memory-research
+        run: python3 scripts/compile_memory_research.py
+
+      - name: Validate report JSON
+        run: python3 -m json.tool target/evo-compile-memory-research/report.json >/dev/null
+
+      - name: Upload compile memory evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-compile-memory-research-ubuntu-24.04
+          path: target/evo-compile-memory-research
+          if-no-files-found: error
