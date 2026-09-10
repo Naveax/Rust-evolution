@@ -1,3 +1,4 @@
+mod borrow_inference;
 mod record_constructor;
 mod record_environment;
 mod record_ir;
@@ -51,10 +52,17 @@ pub struct Function {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParameterPassingMode {
+    Owned,
+    SharedBorrow,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parameter {
     pub name: String,
     pub value_type: ValueType,
+    pub passing_mode: ParameterPassingMode,
     pub mutable: bool,
     pub span: Span,
 }
@@ -111,6 +119,7 @@ pub enum ExprKind {
     Call {
         name: String,
         arguments: Vec<Expr>,
+        argument_modes: Vec<ParameterPassingMode>,
     },
     Construct {
         name: String,
@@ -165,6 +174,7 @@ struct BindingState {
 #[derive(Debug, Clone)]
 struct FunctionSignature {
     parameter_types: Vec<ValueType>,
+    parameter_modes: Vec<ParameterPassingMode>,
     return_type: ValueType,
 }
 
@@ -188,7 +198,7 @@ pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
             .is_some_and(|schema| schema.span == record.span)
     }));
 
-    let signatures = collect_function_signatures(&program.functions, &record_environment)?;
+    let signatures = collect_function_signatures(program, &record_environment)?;
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
         functions.push(lower_function(function, &signatures, &record_environment)?);
@@ -207,11 +217,11 @@ pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
 }
 
 fn collect_function_signatures(
-    functions: &[SyntaxFunction],
+    program: &SyntaxProgram,
     record_environment: &RecordEnvironment,
 ) -> Result<HashMap<String, FunctionSignature>, LowerError> {
     let mut signatures = HashMap::new();
-    for function in functions {
+    for function in &program.functions {
         if signatures.contains_key(&function.name) {
             return Err(LowerError {
                 message: format!("duplicate function name {:?}", function.name),
@@ -232,6 +242,8 @@ fn collect_function_signatures(
                 record_environment.resolve_type_name(&parameter.type_name, parameter.span)?;
             parameter_types.push(lowered_value_type(&parameter_type));
         }
+        let parameter_modes = borrow_inference::classify_function_parameters(program, function);
+        debug_assert_eq!(parameter_modes.len(), parameter_types.len());
 
         let return_type =
             record_environment.resolve_type_name(&function.return_type, function.span)?;
@@ -239,6 +251,7 @@ fn collect_function_signatures(
             function.name.clone(),
             FunctionSignature {
                 parameter_types,
+                parameter_modes,
                 return_type: lowered_value_type(&return_type),
             },
         );
@@ -258,7 +271,12 @@ fn lower_function(
     let mut analyzer = Analyzer::new(signatures, Some(return_type.clone()), record_environment);
     let mut parameters = Vec::with_capacity(function.parameters.len());
 
-    for (parameter, parameter_type) in function.parameters.iter().zip(&signature.parameter_types) {
+    for ((parameter, parameter_type), passing_mode) in function
+        .parameters
+        .iter()
+        .zip(&signature.parameter_types)
+        .zip(&signature.parameter_modes)
+    {
         let parameter_type = parameter_type.clone();
         analyzer.define_binding(
             parameter.name.clone(),
@@ -268,6 +286,7 @@ fn lower_function(
         parameters.push(Parameter {
             name: parameter.name.clone(),
             value_type: parameter_type,
+            passing_mode: *passing_mode,
             mutable: false,
             span: parameter.span,
         });
@@ -601,10 +620,14 @@ impl<'a> Analyzer<'a> {
                             });
                         }
                         let mut lowered_arguments = Vec::with_capacity(arguments.len());
-                        for (index, (argument, expected_type)) in
-                            arguments.iter().zip(&signature.parameter_types).enumerate()
+                        for (index, ((argument, expected_type), passing_mode)) in arguments
+                            .iter()
+                            .zip(&signature.parameter_types)
+                            .zip(&signature.parameter_modes)
+                            .enumerate()
                         {
-                            let (argument, actual_type) = self.lower_expr(argument)?;
+                            let (argument, actual_type) =
+                                self.lower_call_argument(argument, *passing_mode)?;
                             if &actual_type != expected_type {
                                 return Err(LowerError {
                                     message: format!(
@@ -622,6 +645,7 @@ impl<'a> Analyzer<'a> {
                             ExprKind::Call {
                                 name: name.clone(),
                                 arguments: lowered_arguments,
+                                argument_modes: signature.parameter_modes.clone(),
                             },
                             signature.return_type,
                         )
@@ -778,6 +802,26 @@ impl<'a> Analyzer<'a> {
             },
             expression_type,
         ))
+    }
+
+    fn lower_call_argument(
+        &mut self,
+        argument: &SyntaxExpr,
+        passing_mode: ParameterPassingMode,
+    ) -> Result<(Expr, ValueType), LowerError> {
+        if passing_mode == ParameterPassingMode::SharedBorrow
+            && let SyntaxExprKind::Identifier(name) = &argument.kind
+        {
+            let value_type = self.move_tracker.inspect_value(name, argument.span)?;
+            return Ok((
+                Expr {
+                    kind: ExprKind::Local(name.clone()),
+                    span: argument.span,
+                },
+                lowered_value_type(&value_type),
+            ));
+        }
+        self.lower_expr(argument)
     }
 
     fn lower_field_access(
