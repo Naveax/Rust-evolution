@@ -49,6 +49,7 @@ mod tests {
     use super::{OwnershipUseModeIr, SchemaType, lower_ownership_uses};
     use evo_lexer::lex;
     use evo_parser::parse;
+    use std::collections::HashMap;
 
     #[test]
     fn ownership_ir_preserves_modes_nominal_types_and_spans() {
@@ -61,10 +62,12 @@ mod tests {
             .expect("ownership IR match environment should resolve");
         super::super::constructor_typing::validate_enum_type_semantics(&program, &enums)
             .expect("ownership IR source should type-check");
+        let parameter_modes = HashMap::new();
         let uses = super::super::constructor_typing::collect_enum_ownership(
             &program,
             &enums,
             &matches,
+            &parameter_modes,
         )
         .expect("ownership IR source should validate ownership");
 
