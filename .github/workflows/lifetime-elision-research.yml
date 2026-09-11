@@ -1,0 +1,79 @@
+name: Lifetime elision research
+
+on:
+  pull_request:
+    paths:
+      - crates/evo-lowering/tests/lifetime_elision_research.rs
+      - .github/workflows/lifetime-elision-research.yml
+  push:
+    branches:
+      - main
+    paths:
+      - crates/evo-lowering/tests/lifetime_elision_research.rs
+      - .github/workflows/lifetime-elision-research.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal
+
+      - name: Show toolchain
+        run: rustc +1.98.0 -Vv
+
+      - name: Lifetime elision feasibility evidence
+        id: research
+        continue-on-error: true
+        env:
+          RUSTUP_TOOLCHAIN: 1.98.0
+          EVO_REQUIRE_PINNED_RUSTC: "1"
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_LIFETIME_ELISION_RESEARCH_OUT: ${{ github.workspace }}/target/evo-lifetime-elision-research
+        run: >-
+          cargo +1.98.0 test -p evo-lowering --test lifetime_elision_research
+          lifetime_elision_research_classifies_single_source_borrowed_returns
+          -- --ignored --exact --nocapture
+
+      - name: Validate report JSON
+        id: validate
+        if: ${{ always() && !cancelled() }}
+        continue-on-error: true
+        run: |
+          python3 -m json.tool "${{ github.workspace }}/target/evo-lifetime-elision-research/report.json" >/dev/null
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("target/evo-lifetime-elision-research/report.json")
+          report = json.loads(path.read_text())
+          assert report["verdict"] == "REFERENCE-SURFACE-FIRST", report["verdict"]
+          assert report["compile_expectation_mismatches"] == 0, report["compile_expectation_mismatches"]
+          PY
+
+      - name: Upload lifetime elision evidence
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-lifetime-elision-research-ubuntu-24.04
+          path: ${{ github.workspace }}/target/evo-lifetime-elision-research
+          if-no-files-found: error
+
+      - name: Enforce research gate
+        if: ${{ always() && !cancelled() }}
+        env:
+          RESEARCH_OUTCOME: ${{ steps.research.outcome }}
+          VALIDATE_OUTCOME: ${{ steps.validate.outcome }}
+        run: |
+          test "$RESEARCH_OUTCOME" = "success"
+          test "$VALIDATE_OUTCOME" = "success"
