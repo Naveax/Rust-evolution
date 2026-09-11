@@ -497,13 +497,37 @@ impl<'a> Analyzer<'a> {
     }
 
     fn lower_statements(&mut self, statements: &[SyntaxStmt]) -> Result<Vec<Stmt>, LowerError> {
-        statements
-            .iter()
-            .map(|statement| self.lower_statement(statement))
-            .collect()
+    let mut remaining_uses = Self::identifier_uses_in_statements(statements);
+    let mut lowered = Vec::with_capacity(statements.len());
+    for statement in statements {
+        lowered.push(self.lower_statement(statement)?);
+        Self::consume_statement_identifier_uses(statement, &mut remaining_uses);
+        self.release_dead_references_in_current_scope(&remaining_uses);
     }
+    Ok(lowered)
+}
 
-    fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError> {
+fn release_dead_references_in_current_scope(
+    &mut self,
+    remaining_uses: &HashMap<String, usize>,
+) {
+    let dead: Vec<String> = self
+        .scopes
+        .last()
+        .expect("analyzer always has a lexical scope")
+        .keys()
+        .filter(|name| {
+            self.reference_tracker.provenance(name).is_some()
+                && !remaining_uses.contains_key(*name)
+        })
+        .cloned()
+        .collect();
+    for name in dead {
+        self.reference_tracker.forget(&name);
+    }
+}
+
+fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError> {
         let kind = match &statement.kind {
             SyntaxStmtKind::Bind {
                 name,
@@ -1181,6 +1205,103 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+fn identifier_uses_in_statements(statements: &[SyntaxStmt]) -> HashMap<String, usize> {
+    let mut uses = HashMap::new();
+    for statement in statements {
+        Self::collect_statement_identifier_uses(statement, &mut uses);
+    }
+    uses
+}
+
+fn consume_statement_identifier_uses(
+    statement: &SyntaxStmt,
+    remaining: &mut HashMap<String, usize>,
+) {
+    let mut consumed = HashMap::new();
+    Self::collect_statement_identifier_uses(statement, &mut consumed);
+    for (name, count) in consumed {
+        let Some(value) = remaining.get_mut(&name) else {
+            continue;
+        };
+        *value = value.saturating_sub(count);
+        let exhausted = *value == 0;
+        if exhausted {
+            remaining.remove(&name);
+        }
+    }
+}
+
+fn collect_statement_identifier_uses(
+    statement: &SyntaxStmt,
+    uses: &mut HashMap<String, usize>,
+) {
+    match &statement.kind {
+        SyntaxStmtKind::Bind { expr, .. }
+        | SyntaxStmtKind::Print(expr)
+        | SyntaxStmtKind::Return(expr) => Self::collect_expr_identifier_uses(expr, uses),
+        SyntaxStmtKind::Repeat { count, body } => {
+            Self::collect_expr_identifier_uses(count, uses);
+            for statement in body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+        }
+        SyntaxStmtKind::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            Self::collect_expr_identifier_uses(condition, uses);
+            for statement in then_body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+            for statement in else_body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+        }
+        SyntaxStmtKind::Match { value, arms } => {
+            Self::collect_expr_identifier_uses(value, uses);
+            for arm in arms {
+                for statement in &arm.body {
+                    Self::collect_statement_identifier_uses(statement, uses);
+                }
+            }
+        }
+    }
+}
+
+fn collect_expr_identifier_uses(expr: &SyntaxExpr, uses: &mut HashMap<String, usize>) {
+    match &expr.kind {
+        SyntaxExprKind::Integer(_)
+        | SyntaxExprKind::String(_)
+        | SyntaxExprKind::Bool(_)
+        | SyntaxExprKind::InputInt => {}
+        SyntaxExprKind::Identifier(name) => {
+            *uses.entry(name.clone()).or_insert(0) += 1;
+        }
+        SyntaxExprKind::Call { arguments, .. }
+        | SyntaxExprKind::EnumConstruct { arguments, .. } => {
+            for argument in arguments {
+                Self::collect_expr_identifier_uses(argument, uses);
+            }
+        }
+        SyntaxExprKind::Construct { fields, .. } => {
+            for field in fields {
+                Self::collect_expr_identifier_uses(&field.value, uses);
+            }
+        }
+        SyntaxExprKind::FieldAccess { base, .. }
+        | SyntaxExprKind::LogicalNot(base)
+        | SyntaxExprKind::UnaryMinus(base)
+        | SyntaxExprKind::SharedBorrow(base) => {
+            Self::collect_expr_identifier_uses(base, uses);
+        }
+        SyntaxExprKind::Binary { left, right, .. } => {
+            Self::collect_expr_identifier_uses(left, uses);
+            Self::collect_expr_identifier_uses(right, uses);
+        }
+    }
+}
+
     fn apply_mutability(&self, statements: &mut [Stmt]) {
         for statement in statements {
             match &mut statement.kind {
@@ -1298,6 +1419,40 @@ mod tests {
         )
         .expect_err("owner reinitialization while reference is live must fail");
         assert!(reinitialized.message.contains("cannot reinitialize record local"));
+    }
+
+    #[test]
+    fn releases_owner_after_final_reference_use_in_same_block() {
+        lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nprint r.value\nmoved = item\nprint moved.value\n",
+        )
+        .expect("owner move after the final reference use should lower");
+
+        lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nprint r.value\nitem = Item(value = 2)\nprint item.value\n",
+        )
+        .expect("owner reinitialization after the final reference use should lower");
+    }
+
+    #[test]
+    fn unused_reference_does_not_pin_owner_to_scope_end() {
+        lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nmoved = item\nprint moved.value\n",
+        )
+        .expect("an unused reference should stop borrowing after its definition");
+    }
+
+    #[test]
+    fn releases_outer_reference_after_final_control_flow_use() {
+        lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nif true\nprint r.value\nend\nmoved = item\nprint moved.value\n",
+        )
+        .expect("reference use inside a completed branch should not pin the owner afterward");
+
+        lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nrepeat 2\nprint r.value\nend\nmoved = item\nprint moved.value\n",
+        )
+        .expect("reference use inside a completed repeat should not pin the owner afterward");
     }
 
     #[test]
