@@ -1,0 +1,420 @@
+name: DEV immutable reference bootstrap
+
+on:
+  push:
+    branches:
+      - feature/immutable-reference-surface-v0
+    paths:
+      - .github/workflows/dev-reference-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feature/immutable-reference-surface-v0
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+
+      - name: Apply bounded parser surface
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one replacement, found {count}\n--- needle ---\n{old}")
+              p.write_text(text.replace(old, new, 1))
+
+          parser = "crates/evo-parser/src/lib.rs"
+
+          replace_once(
+              parser,
+              """pub enum TypeName {
+              Int,
+              Bool,
+              String,
+              Named(String),
+          }
+          """,
+              """pub enum TypeName {
+              Int,
+              Bool,
+              String,
+              Named(String),
+              SharedRef(Box<TypeName>),
+          }
+          """,
+          )
+
+          replace_once(
+              parser,
+              """    LogicalNot(Box<Expr>),
+              UnaryMinus(Box<Expr>),
+              Binary {
+          """,
+              """    LogicalNot(Box<Expr>),
+              UnaryMinus(Box<Expr>),
+              SharedBorrow(Box<Expr>),
+              Binary {
+          """,
+          )
+
+          replace_once(
+              parser,
+              """            let payload_type = if matches!(self.current().kind, TokenKind::Newline) {
+                          None
+                      } else {
+                          Some(self.parse_type_name()?)
+                      };
+          """,
+              """            let payload_type = if matches!(self.current().kind, TokenKind::Newline) {
+                          None
+                      } else {
+                          if matches!(self.current().kind, TokenKind::Ampersand) {
+                              return Err(self.error_here(
+                                  "immutable reference enum payloads are not supported in v0",
+                              ));
+                          }
+                          Some(self.parse_owned_type_name()?)
+                      };
+          """,
+          )
+
+          replace_once(
+              parser,
+              """    fn parse_record_field_type(&mut self) -> Result<RecordFieldType, ParseError> {
+                  let token = self.advance();
+                  match token.kind {
+                      TokenKind::TypeInt => Ok(RecordFieldType::Int),
+                      TokenKind::TypeBool => Ok(RecordFieldType::Bool),
+                      TokenKind::TypeString => Ok(RecordFieldType::String),
+                      TokenKind::Identifier(name) => Ok(RecordFieldType::Named(name)),
+                      _ => Err(ParseError {
+                          message: "expected record field type".to_owned(),
+                          span: token.span,
+                      }),
+                  }
+              }
+          """,
+              """    fn parse_record_field_type(&mut self) -> Result<RecordFieldType, ParseError> {
+                  let token = self.advance();
+                  match token.kind {
+                      TokenKind::TypeInt => Ok(RecordFieldType::Int),
+                      TokenKind::TypeBool => Ok(RecordFieldType::Bool),
+                      TokenKind::TypeString => Ok(RecordFieldType::String),
+                      TokenKind::Identifier(name) => Ok(RecordFieldType::Named(name)),
+                      TokenKind::Ampersand => Err(ParseError {
+                          message: "immutable reference record fields are not supported in v0"
+                              .to_owned(),
+                          span: token.span,
+                      }),
+                      _ => Err(ParseError {
+                          message: "expected record field type".to_owned(),
+                          span: token.span,
+                      }),
+                  }
+              }
+          """,
+          )
+
+          replace_once(
+              parser,
+              """            let type_token = self.current().clone();
+                      let type_name = self.parse_type_name()?;
+                      parameters.push(Parameter {
+                          name,
+                          type_name,
+                          span: name_token.span.join(type_token.span),
+                      });
+          """,
+              """            let type_name = self.parse_type_name()?;
+                      let type_end = self.tokens[self.index.saturating_sub(1)].span;
+                      parameters.push(Parameter {
+                          name,
+                          type_name,
+                          span: name_token.span.join(type_end),
+                      });
+          """,
+          )
+
+          replace_once(
+              parser,
+              """    fn parse_type_name(&mut self) -> Result<TypeName, ParseError> {
+                  let token = self.advance();
+                  match token.kind {
+                      TokenKind::TypeInt => Ok(TypeName::Int),
+                      TokenKind::TypeBool => Ok(TypeName::Bool),
+                      TokenKind::TypeString => Ok(TypeName::String),
+                      TokenKind::Identifier(name) => Ok(TypeName::Named(name)),
+                      _ => Err(ParseError {
+                          message: "expected type name".to_owned(),
+                          span: token.span,
+                      }),
+                  }
+              }
+          """,
+              """    fn parse_type_name(&mut self) -> Result<TypeName, ParseError> {
+                  if !matches!(self.current().kind, TokenKind::Ampersand) {
+                      return self.parse_owned_type_name();
+                  }
+
+                  let marker = self.advance().span;
+                  let token = self.advance();
+                  match token.kind {
+                      TokenKind::Identifier(name) if name == "mut" => Err(ParseError {
+                          message: "mutable references are not supported in v0".to_owned(),
+                          span: marker.join(token.span),
+                      }),
+                      TokenKind::Identifier(name) => {
+                          Ok(TypeName::SharedRef(Box::new(TypeName::Named(name))))
+                      }
+                      TokenKind::Ampersand => Err(ParseError {
+                          message: "nested immutable reference types are not supported in v0"
+                              .to_owned(),
+                          span: marker.join(token.span),
+                      }),
+                      TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString => {
+                          Err(ParseError {
+                              message: "immutable reference types require a nominal type in v0"
+                                  .to_owned(),
+                              span: marker.join(token.span),
+                          })
+                      }
+                      _ => Err(ParseError {
+                          message: "expected nominal type name after '&'".to_owned(),
+                          span: marker.join(token.span),
+                      }),
+                  }
+              }
+
+              fn parse_owned_type_name(&mut self) -> Result<TypeName, ParseError> {
+                  let token = self.advance();
+                  match token.kind {
+                      TokenKind::TypeInt => Ok(TypeName::Int),
+                      TokenKind::TypeBool => Ok(TypeName::Bool),
+                      TokenKind::TypeString => Ok(TypeName::String),
+                      TokenKind::Identifier(name) => Ok(TypeName::Named(name)),
+                      _ => Err(ParseError {
+                          message: "expected type name".to_owned(),
+                          span: token.span,
+                      }),
+                  }
+              }
+          """,
+          )
+
+          replace_once(
+              parser,
+              """    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+                  if matches!(self.current().kind, TokenKind::Minus) {
+                      let start = self.advance().span;
+                      let expr = self.parse_unary()?;
+                      let span = start.join(expr.span);
+                      return Ok(Expr {
+                          kind: ExprKind::UnaryMinus(Box::new(expr)),
+                          span,
+                      });
+                  }
+                  self.parse_postfix()
+              }
+          """,
+              """    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+                  if matches!(self.current().kind, TokenKind::Minus) {
+                      let start = self.advance().span;
+                      let expr = self.parse_unary()?;
+                      let span = start.join(expr.span);
+                      return Ok(Expr {
+                          kind: ExprKind::UnaryMinus(Box::new(expr)),
+                          span,
+                      });
+                  }
+                  if matches!(self.current().kind, TokenKind::Ampersand) {
+                      let start = self.advance().span;
+                      if matches!(self.current().kind, TokenKind::Ampersand) {
+                          return Err(self.error_here(
+                              "nested immutable borrow expressions are not supported in v0",
+                          ));
+                      }
+                      let expr = self.parse_unary()?;
+                      let span = start.join(expr.span);
+                      return Ok(Expr {
+                          kind: ExprKind::SharedBorrow(Box::new(expr)),
+                          span,
+                      });
+                  }
+                  self.parse_postfix()
+              }
+          """,
+          )
+
+          test_anchor = """    #[test]
+              fn parses_named_record_types_in_function_signatures() {
+          """
+          tests = """    #[test]
+              fn parses_immutable_reference_contracts_and_borrow_expressions() {
+                  let program = parse_source(
+                      "record Item\\nvalue int\\nend\\nfn view(item &Item) &Item\\nreturn &item\\nend\\n",
+                  );
+                  assert_eq!(
+                      program.functions[0].parameters[0].type_name,
+                      TypeName::SharedRef(Box::new(TypeName::Named("Item".to_owned())))
+                  );
+                  assert_eq!(
+                      program.functions[0].return_type,
+                      TypeName::SharedRef(Box::new(TypeName::Named("Item".to_owned())))
+                  );
+                  let StmtKind::Return(expr) = &program.functions[0].body[0].kind else {
+                      panic!("expected return");
+                  };
+                  assert!(matches!(
+                      expr.kind,
+                      ExprKind::SharedBorrow(ref inner)
+                          if matches!(inner.kind, ExprKind::Identifier(ref name) if name == "item")
+                  ));
+              }
+
+              #[test]
+              fn immutable_borrow_wraps_postfix_field_access() {
+                  let program = parse_source("r = &item.inner\\n");
+                  let StmtKind::Bind { expr, .. } = &program.statements[0].kind else {
+                      panic!("expected binding");
+                  };
+                  assert!(matches!(
+                      expr.kind,
+                      ExprKind::SharedBorrow(ref inner)
+                          if matches!(inner.kind, ExprKind::FieldAccess { ref field, .. } if field == "inner")
+                  ));
+              }
+
+              #[test]
+              fn rejects_out_of_scope_reference_type_surfaces() {
+                  for (source, expected) in [
+                      (
+                          "fn nested(item &&Item) Item\\nreturn item\\nend\\n",
+                          "nested immutable reference types",
+                      ),
+                      (
+                          "fn mutable(item &mut) Item\\nreturn item\\nend\\n",
+                          "mutable references",
+                      ),
+                      (
+                          "fn scalar(item &int) int\\nreturn 1\\nend\\n",
+                          "require a nominal type",
+                      ),
+                      (
+                          "record Holder\\nitem &Item\\nend\\n",
+                          "reference record fields",
+                      ),
+                      (
+                          "enum MaybeItem\\nSome &Item\\nend\\n",
+                          "reference enum payloads",
+                      ),
+                  ] {
+                      let tokens = lex(source).expect("lexing should succeed");
+                      let error = parse(&tokens).expect_err("surface should be rejected");
+                      assert!(
+                          error.message.contains(expected),
+                          "expected {expected:?}, got {:?}",
+                          error.message
+                      );
+                  }
+              }
+
+              #[test]
+              fn rejects_nested_borrow_expression() {
+                  let tokens = lex("r = &&item\\n").expect("lexing should succeed");
+                  let error = parse(&tokens).expect_err("nested borrow should fail");
+                  assert!(error.message.contains("nested immutable borrow expressions"));
+              }
+
+              #[test]
+              fn recovering_parser_matches_fail_fast_for_reference_surface() {
+                  let source =
+                      "record Item\\nvalue int\\nend\\nfn view(item &Item) &Item\\nreturn &item\\nend\\n";
+                  let tokens = lex(source).expect("lexing should succeed");
+                  assert_eq!(
+                      parse_recovering(&tokens).expect("recovery parse should succeed"),
+                      parse(&tokens).expect("fail-fast parse should succeed")
+                  );
+              }
+
+          """
+          replace_once(parser, test_anchor, tests + test_anchor)
+
+          # SharedBorrow is explicitly distinct from first-class reference-typed parameters.
+          borrow = "crates/evo-lowering/src/borrow_inference.rs"
+          replace_once(
+              borrow,
+              """        SyntaxExprKind::LogicalNot(inner) | SyntaxExprKind::UnaryMinus(inner) => {
+                      collect_expr_effects(inner, parameter, UseMode::Consume, effects);
+                  }
+          """,
+              """        SyntaxExprKind::LogicalNot(inner)
+                  | SyntaxExprKind::UnaryMinus(inner)
+                  | SyntaxExprKind::SharedBorrow(inner) => {
+                      collect_expr_effects(inner, parameter, UseMode::Consume, effects);
+                  }
+          """,
+          )
+
+          # Frontend slice is intentionally ahead of semantic support in this commit. Lowering
+          # must reject the new explicit type source-natively rather than fall through to Rust.
+          records = "crates/evo-lowering/src/record_environment_records.rs"
+          replace_once(
+              records,
+              """            SyntaxTypeName::Named(name) => {
+                          if self.indices.contains_key(name) {
+                              Ok(SemanticType::Record(name.clone()))
+                          } else {
+                              Err(LowerError {
+                                  message: format!("unknown record type {name:?}"),
+                                  span,
+                              })
+                          }
+                      }
+          """,
+              """            SyntaxTypeName::Named(name) => {
+                          if self.indices.contains_key(name) {
+                              Ok(SemanticType::Record(name.clone()))
+                          } else {
+                              Err(LowerError {
+                                  message: format!("unknown record type {name:?}"),
+                                  span,
+                              })
+                          }
+                      }
+                      SyntaxTypeName::SharedRef(_) => Err(LowerError {
+                          message: "immutable reference semantic lowering is not implemented yet"
+                              .to_owned(),
+                          span,
+                      }),
+          """,
+          )
+
+      - name: Format
+        run: cargo +1.98.0 fmt --all
+
+      - name: Clippy
+        run: cargo +1.98.0 clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test workspace
+        run: cargo +1.98.0 test --workspace
+
+      - name: Commit verified frontend slice
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/evo-parser/src/lib.rs crates/evo-lowering/src/borrow_inference.rs crates/evo-lowering/src/record_environment_records.rs
+          git diff --cached --check
+          git commit -m "feat: parse immutable reference surface"
+          git push origin HEAD:feature/immutable-reference-surface-v0
