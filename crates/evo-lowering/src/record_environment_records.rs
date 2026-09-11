@@ -67,6 +67,10 @@ impl RecordEnvironment {
                     })
                 }
             }
+            SyntaxTypeName::SharedRef(_) => Err(LowerError {
+                message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+                span,
+            }),
         }
     }
 

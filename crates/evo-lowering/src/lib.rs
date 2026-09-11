@@ -722,6 +722,12 @@ impl<'a> Analyzer<'a> {
                 }
                 (ExprKind::UnaryMinus(Box::new(inner)), ValueType::Integer)
             }
+            SyntaxExprKind::SharedBorrow(_) => {
+                return Err(LowerError {
+                    message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+                    span: expr.span,
+                });
+            }
             SyntaxExprKind::Binary { left, op, right } => {
                 let (left, left_type) = self.lower_expr(left)?;
                 if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)

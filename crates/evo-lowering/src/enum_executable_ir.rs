@@ -506,6 +506,9 @@ impl<'a> BodyPromoter<'a> {
             SyntaxExprKind::UnaryMinus(inner) => {
                 ExecutableExprKind::UnaryMinus(Box::new(self.lower_expr(inner)))
             }
+            SyntaxExprKind::SharedBorrow(_) => unreachable!(
+                "immutable reference expressions are rejected before enum executable IR promotion"
+            ),
             SyntaxExprKind::Binary { left, op, right } => ExecutableExprKind::Binary {
                 left: Box::new(self.lower_expr(left)),
                 op: *op,
@@ -542,6 +545,9 @@ impl<'a> BodyPromoter<'a> {
                 );
                 ExecutableValueType::Record(name.clone())
             }
+            TypeName::SharedRef(_) => unreachable!(
+                "immutable reference types are rejected before enum executable IR promotion"
+            ),
         }
     }
 

@@ -135,7 +135,9 @@ fn collect_expr_effects(
         SyntaxExprKind::FieldAccess { base, .. } => {
             collect_expr_effects(base, parameter, UseMode::Inspect, effects);
         }
-        SyntaxExprKind::LogicalNot(inner) | SyntaxExprKind::UnaryMinus(inner) => {
+        SyntaxExprKind::LogicalNot(inner)
+        | SyntaxExprKind::UnaryMinus(inner)
+        | SyntaxExprKind::SharedBorrow(inner) => {
             collect_expr_effects(inner, parameter, UseMode::Consume, effects);
         }
         SyntaxExprKind::Binary { left, right, .. } => {
