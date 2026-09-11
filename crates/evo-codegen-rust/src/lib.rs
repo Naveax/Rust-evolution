@@ -237,6 +237,7 @@ fn rust_type(value_type: &ValueType) -> String {
         ValueType::Bool => "bool".to_owned(),
         ValueType::String => "&'static str".to_owned(),
         ValueType::Record(name) => generated_record_name(name),
+        ValueType::SharedRef(inner) => format!("&{}", rust_type(inner)),
     }
 }
 
@@ -471,6 +472,32 @@ mod tests {
             generated.contains("return __EvoRecord_Wrapper { __evo_field_point: __evo_point };")
         );
         assert!(generated.contains("return ((__evo_wrapper).__evo_field_point).__evo_field_x;"));
+    }
+
+    #[test]
+    fn immutable_reference_contract_codegen_is_direct_and_zero_cost() {
+        let generated = compile_source(
+            "record Item\nvalue int\nend\nfn identity(item &Item) &Item\nreturn item\nend\n",
+        );
+        assert!(generated.contains(
+            "fn __evo_fn_identity(__evo_item: &__EvoRecord_Item) -> &__EvoRecord_Item {"
+        ));
+        assert!(generated.contains("return __evo_item;"));
+        assert!(!generated.contains("&&__EvoRecord_Item"));
+        assert!(!generated.contains("Rc<"));
+        assert!(!generated.contains("Arc<"));
+        assert!(!generated.contains("Box<"));
+        assert!(!generated.contains("unsafe"));
+    }
+
+    #[test]
+    fn immutable_reference_field_read_uses_rust_autoderef_without_scaffolding() {
+        let generated = compile_source(
+            "record Item\nvalue int\nend\nfn value(item &Item) int\nreturn item.value\nend\n",
+        );
+        assert!(generated.contains("__evo_item: &__EvoRecord_Item) -> i64"));
+        assert!(generated.contains("return (__evo_item).__evo_field_value;"));
+        assert!(!generated.contains("clone()"));
     }
 
     #[test]

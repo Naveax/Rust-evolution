@@ -163,6 +163,7 @@ pub enum ValueType {
     String,
     Bool,
     Record(String),
+    SharedRef(Box<ValueType>),
 }
 
 #[derive(Debug, Clone)]
@@ -247,16 +248,43 @@ fn collect_function_signatures(
 
         let return_type =
             record_environment.resolve_type_name(&function.return_type, function.span)?;
+        let return_type = lowered_value_type(&return_type);
+        validate_reference_signature_relation(&parameter_types, &return_type, function.span)?;
         signatures.insert(
             function.name.clone(),
             FunctionSignature {
                 parameter_types,
                 parameter_modes,
-                return_type: lowered_value_type(&return_type),
+                return_type,
             },
         );
     }
     Ok(signatures)
+}
+
+fn validate_reference_signature_relation(
+    parameter_types: &[ValueType],
+    return_type: &ValueType,
+    span: Span,
+) -> Result<(), LowerError> {
+    if !matches!(return_type, ValueType::SharedRef(_)) {
+        return Ok(());
+    }
+
+    let reference_sources = parameter_types
+        .iter()
+        .filter(|value_type| matches!(value_type, ValueType::SharedRef(_)))
+        .count();
+    if reference_sources == 1 {
+        return Ok(());
+    }
+
+    Err(LowerError {
+        message: format!(
+            "immutable reference return requires exactly one reference parameter source in v0; found {reference_sources}"
+        ),
+        span,
+    })
 }
 
 fn lower_function(
@@ -349,6 +377,9 @@ fn semantic_type(value_type: &ValueType) -> SemanticType {
         ValueType::Bool => SemanticType::Bool,
         ValueType::String => SemanticType::String,
         ValueType::Record(name) => SemanticType::Record(name.clone()),
+        ValueType::SharedRef(inner) => {
+            SemanticType::SharedRef(Box::new(semantic_type(inner)))
+        }
     }
 }
 
@@ -358,15 +389,19 @@ fn lowered_value_type(value_type: &SemanticType) -> ValueType {
         SemanticType::Bool => ValueType::Bool,
         SemanticType::String => ValueType::String,
         SemanticType::Record(name) => ValueType::Record(name.clone()),
+        SemanticType::SharedRef(inner) => {
+            ValueType::SharedRef(Box::new(lowered_value_type(inner)))
+        }
     }
 }
 
-fn type_label(value_type: &ValueType) -> &str {
+fn type_label(value_type: &ValueType) -> String {
     match value_type {
-        ValueType::Integer => "int",
-        ValueType::Bool => "bool",
-        ValueType::String => "string",
-        ValueType::Record(name) => name,
+        ValueType::Integer => "int".to_owned(),
+        ValueType::Bool => "bool".to_owned(),
+        ValueType::String => "string".to_owned(),
+        ValueType::Record(name) => name.clone(),
+        ValueType::SharedRef(inner) => format!("&{}", type_label(inner)),
     }
 }
 
@@ -471,7 +506,10 @@ impl<'a> Analyzer<'a> {
             }
             SyntaxStmtKind::Print(expr) => {
                 let (expr, expression_type) = self.lower_expr(expr)?;
-                if matches!(&expression_type, ValueType::Record(_)) {
+                if matches!(
+            &expression_type,
+            ValueType::Record(_) | ValueType::SharedRef(_)
+        ) {
                     return Err(LowerError {
                         message: "printing whole record values is not supported in Records v0"
                             .to_owned(),
@@ -969,6 +1007,67 @@ mod tests {
             program.functions[0].return_type,
             ValueType::Record("Point".to_owned())
         );
+    }
+
+    #[test]
+    fn lowers_single_source_immutable_reference_contracts() {
+        let program = lower_source(
+            "record Item\nvalue int\nend\nfn identity(item &Item) &Item\nreturn item\nend\n",
+        )
+        .expect("single-source immutable reference contract should lower");
+        let function = &program.functions[0];
+        assert_eq!(
+            function.parameters[0].value_type,
+            ValueType::SharedRef(Box::new(ValueType::Record("Item".to_owned())))
+        );
+        assert_eq!(
+            function.return_type,
+            ValueType::SharedRef(Box::new(ValueType::Record("Item".to_owned())))
+        );
+        assert_eq!(
+            function.parameters[0].passing_mode,
+            super::ParameterPassingMode::Owned,
+            "explicit reference parameters must not receive an additional inferred SharedBorrow"
+        );
+        let StmtKind::Return(expr) = &function.body[0].kind else {
+            panic!("expected return");
+        };
+        assert!(matches!(expr.kind, ExprKind::Local(ref name) if name == "item"));
+    }
+
+    #[test]
+    fn rejects_ambiguous_reference_return_signatures_before_codegen() {
+        let zero = lower_source(
+            "record Item\nvalue int\nend\nfn bad() &Item\nreturn Item(value = 1)\nend\n",
+        )
+        .expect_err("reference return without a reference source must fail");
+        assert!(zero.message.contains("exactly one reference parameter source"));
+        assert!(zero.message.contains("found 0"));
+
+        let multiple = lower_source(
+            "record Item\nvalue int\nend\nfn choose(a &Item, b &Item) &Item\nreturn a\nend\n",
+        )
+        .expect_err("multiple possible reference sources must fail closed");
+        assert!(multiple.message.contains("exactly one reference parameter source"));
+        assert!(multiple.message.contains("found 2"));
+    }
+
+    #[test]
+    fn keeps_explicit_borrow_creation_fail_closed_until_provenance_tracking() {
+        let error = lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\n",
+        )
+        .expect_err("explicit borrow creation needs provenance/liveness support first");
+        assert!(error.message.contains("immutable reference semantic lowering is not implemented yet"));
+    }
+
+    #[test]
+    fn reads_scalar_fields_through_reference_parameters() {
+        let program = lower_source(
+            "record Item\nvalue int\nend\nfn value(item &Item) int\nreturn item.value\nend\n",
+        )
+        .expect("scalar field read through immutable reference should lower");
+        assert_eq!(program.functions[0].return_type, ValueType::Integer);
     }
 
     #[test]
