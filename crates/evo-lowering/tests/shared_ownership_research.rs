@@ -440,7 +440,12 @@ fn run_case(spec: &'static CaseSpec, root: &Path) -> Finding {
                 stderr_summary(&run.stderr),
             )
         } else {
-            (false, !spec.expected_rust_compile && !rust_compiled, String::new(), String::new())
+            (
+                false,
+                !spec.expected_rust_compile && !rust_compiled,
+                String::new(),
+                String::new(),
+            )
         };
 
     let compile_stderr = stderr_summary(&compile.stderr);
@@ -523,10 +528,16 @@ fn write_reports(findings: &[Finding], verdict: &str, out: &Path, git_sha: &str,
     writeln!(json, "  \"rustc_vv\": {},", json_string(rustc)).expect("writing JSON cannot fail");
     writeln!(json, "  \"verdict\": {},", json_string(verdict)).expect("writing JSON cannot fail");
     writeln!(json, "  \"case_count\": {},", findings.len()).expect("writing JSON cannot fail");
-    writeln!(json, "  \"compile_expectation_mismatches\": {compile_mismatches},")
-        .expect("writing JSON cannot fail");
-    writeln!(json, "  \"runtime_expectation_mismatches\": {runtime_mismatches},")
-        .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"compile_expectation_mismatches\": {compile_mismatches},"
+    )
+    .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"runtime_expectation_mismatches\": {runtime_mismatches},"
+    )
+    .expect("writing JSON cannot fail");
     writeln!(
         json,
         "  \"explicit_shared_candidate_count\": {},",
@@ -600,22 +611,32 @@ fn write_reports(findings: &[Finding], verdict: &str, out: &Path, git_sha: &str,
         .unwrap_or_else(|error| panic!("failed to write report JSON: {error}"));
 
     let mut markdown = String::new();
-    writeln!(markdown, "# Shared ownership ergonomics v0 research").expect("writing Markdown cannot fail");
+    writeln!(markdown, "# Shared ownership ergonomics v0 research")
+        .expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(markdown, "- git_sha: `{git_sha}`").expect("writing Markdown cannot fail");
     writeln!(markdown, "- aggregate verdict: **{verdict}**").expect("writing Markdown cannot fail");
     writeln!(markdown, "- cases: **{}**", findings.len()).expect("writing Markdown cannot fail");
-    writeln!(markdown, "- compile expectation mismatches: **{compile_mismatches}**")
-        .expect("writing Markdown cannot fail");
-    writeln!(markdown, "- runtime expectation mismatches: **{runtime_mismatches}**")
-        .expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "- compile expectation mismatches: **{compile_mismatches}**"
+    )
+    .expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "- runtime expectation mismatches: **{runtime_mismatches}**"
+    )
+    .expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(markdown, "```text\n{rustc}\n```").expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(markdown, "| Case | Classification | Ownership model | Allocation | Ops | Evolution today | Compile | Run/output match |")
         .expect("writing Markdown cannot fail");
-    writeln!(markdown, "| --- | --- | --- | --- | --- | --- | --- | --- |")
-        .expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "| --- | --- | --- | --- | --- | --- | --- | --- |"
+    )
+    .expect("writing Markdown cannot fail");
     for item in findings {
         writeln!(
             markdown,
@@ -720,8 +741,14 @@ fn shared_ownership_research_classifies_explicit_cost_boundaries() {
         });
     write_reports(&findings, verdict, &out, &git_sha, &rustc);
 
-    assert_eq!(compile_mismatches, 0, "all Rust compile expectations must match");
-    assert_eq!(runtime_mismatches, 0, "all successful probes must match expected output");
+    assert_eq!(
+        compile_mismatches, 0,
+        "all Rust compile expectations must match"
+    );
+    assert_eq!(
+        runtime_mismatches, 0,
+        "all successful probes must match expected output"
+    );
     assert!(
         count(Classification::ExplicitSharedCandidate) >= 4,
         "need multiple useful one-thread explicit shared-owner cases"
@@ -750,6 +777,9 @@ fn shared_ownership_research_classifies_explicit_cost_boundaries() {
         count(Classification::RejectHiddenCostAmbiguous) >= 1,
         "handle clone and deep clone ambiguity must be rejected"
     );
-    assert!(compile_rejections >= 2, "need fail-closed Rust ownership/thread-safety probes");
+    assert!(
+        compile_rejections >= 2,
+        "need fail-closed Rust ownership/thread-safety probes"
+    );
     assert_eq!(verdict, "SPLIT-RESEARCH");
 }
