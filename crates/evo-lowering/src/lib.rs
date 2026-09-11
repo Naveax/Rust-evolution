@@ -1515,6 +1515,32 @@ mod tests {
     }
 
     #[test]
+    fn same_owner_branches_preserve_reference_source() {
+        lower_source(
+            "record Item\nvalue int\nend\nfn choose_same(item &Item, flag bool) &Item\nr = item\nif flag\nreturn item\nelse\nreturn r\nend\nend\n",
+        )
+        .expect("both branches derive the returned reference from the same source");
+    }
+
+    #[test]
+    fn recursive_reference_forwarding_preserves_source() {
+        lower_source(
+            "record Item\nvalue int\nend\nfn recurse(item &Item, n int) &Item\nif n <= 0\nreturn item\nelse\nreturn recurse(item, n - 1)\nend\nend\n",
+        )
+        .expect("recursive forwarding through the sole reference source should lower");
+    }
+
+    #[test]
+    fn rejects_nominal_field_move_through_immutable_reference() {
+        let error = lower_source(
+            "record Inner\nvalue int\nend\nrecord Outer\ninner Inner\nend\nfn bad(item &Outer) Inner\nreturn item.inner\nend\n",
+        )
+        .expect_err("moving a nominal field through an immutable reference must fail");
+        assert!(error.message.contains("record-valued field"));
+        assert!(error.message.contains("no implicit clone"));
+    }
+
+    #[test]
     fn rejects_unknown_record_signature_types() {
         let error = lower_source("fn bad(point Missing) int\nreturn 1\nend\n")
             .expect_err("unknown record signature type must fail");
