@@ -1,0 +1,77 @@
+name: Shared ownership ergonomics research
+
+on:
+  pull_request:
+    paths:
+      - 'crates/evo-lowering/tests/shared_ownership_research.rs'
+      - '.github/workflows/shared-ownership-research.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'crates/evo-lowering/tests/shared_ownership_research.rs'
+      - '.github/workflows/shared-ownership-research.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Show toolchain
+        run: rustc -Vv
+
+      - name: Run shared ownership research matrix
+        env:
+          EVO_REQUIRE_PINNED_RUSTC: '1'
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_SHARED_OWNERSHIP_RESEARCH_OUT: ${{ github.workspace }}/target/evo-shared-ownership-research
+        run: >-
+          cargo test -p evo-lowering --test shared_ownership_research
+          shared_ownership_research_classifies_explicit_cost_boundaries
+          -- --ignored --exact --nocapture
+
+      - name: Validate research report
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path('target/evo-shared-ownership-research/report.json')
+          data = json.loads(report_path.read_text())
+          assert data['git_sha'] == os.environ['EXPECTED_GIT_SHA'], data
+          assert data['verdict'] == 'SPLIT-RESEARCH', data
+          assert data['case_count'] >= 14, data
+          assert data['compile_expectation_mismatches'] == 0, data
+          assert data['runtime_expectation_mismatches'] == 0, data
+          assert data['explicit_shared_candidate_count'] >= 4, data
+          assert data['borrow_instead_count'] >= 1, data
+          assert data['interior_mutability_boundary_count'] >= 1, data
+          assert data['concurrency_boundary_count'] >= 3, data
+          assert data['weak_cycle_boundary_count'] >= 1, data
+          assert data['arena_index_alternative_count'] >= 1, data
+          assert data['hidden_cost_ambiguity_count'] >= 1, data
+          print(json.dumps(data, indent=2))
+          PY
+
+      - name: Upload research evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-shared-ownership-research-ubuntu-24.04
+          path: target/evo-shared-ownership-research
+          if-no-files-found: error
+          retention-days: 30

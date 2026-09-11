@@ -4,53 +4,81 @@ Last verified update: **2026-09-11**
 
 ## Stable production gate
 
-Immutable references v0 is complete.
+Current verified `main` before the shared-ownership research merge:
 
-PR #105 squash-merged to `main` as:
+`3be6b212a549831c15ef5a30df2b35da6362683e`
 
-`5e3c111a903dbe717f374fcbe6fb2e93ab6864c1`
+This is docs handoff PR #107. Natural exact-SHA CI #459 / run `34612808532` is **SUCCESS** on Ubuntu, Windows and macOS, including the permanent Ubuntu build/cache/runtime gates and release build.
 
-Issue #104 is closed/completed. Natural exact-SHA post-merge CI #457 / run `34609435365` is **SUCCESS** on Ubuntu, Windows and macOS. Ubuntu also passed the permanent build/cache/runtime gates and release build.
+Immutable references v0 remains the latest production ownership feature. Existing owned `T`, inferred call-duration `SharedBorrow`, first-class immutable `&T` / `&expr`, deterministic single-source provenance, stored local references, bounded final-use liveness and direct safe Rust reference lowering are unchanged.
 
-Production now includes explicit `&T` / `&expr`, first-class immutable-reference semantic types, deterministic single-source provenance, stored local references, bounded final-use liveness, source-native ownership diagnostics, inferred `SharedBorrow` interoperability and direct safe Rust reference lowering. Historical immutable-reference research evidence remains in `docs/IMMUTABLE_REFERENCE_SURFACE_RESEARCH.md`.
+## #106 research decision — SPLIT-RESEARCH
 
-## Active research — #106
+Issue #106 / draft PR #108 researched shared ownership without adding production syntax.
 
-Issue #106 is the next Phase 3.3 ownership-ergonomics item:
+Validated exact research evidence head:
 
-`P0 research shared ownership ergonomics v0: explicit aliasing without hidden ownership cost`
+`651ef4f3e9fc70e493eb59e3b1b2e7dcc7526d6a`
 
-The question is not whether Evolution can hide `Rc` or `Arc` behind ordinary assignment. It must not. The research asks whether the current language is mature enough for a **caller-visible shared-ownership contract** whose cost and semantics remain explicit and whose generated Rust maps directly to the equivalent idiomatic primitive.
+Evidence:
 
-Required distinctions:
+- normal CI #463 / run `34614250716`: **SUCCESS** on Ubuntu, Windows and macOS;
+- dedicated Shared ownership ergonomics research #4 / run `34614250773`: **SUCCESS**;
+- artifact `evo-shared-ownership-research-ubuntu-24.04`;
+- artifact id `10269252562`;
+- digest `sha256:f33fd905c3feb550550a8fc99da75575dcce1d8a54c9ef1b1a531a68256149b5`;
+- 14 Rust 1.98 cases;
+- zero compile-expectation mismatches;
+- zero runtime-expectation mismatches;
+- verdict **SPLIT-RESEARCH**.
 
-- ordinary owned `T`;
-- immutable borrowed `&T`;
-- one-thread multiple ownership (`Rc`-like semantics);
-- cross-thread multiple ownership (`Arc`-like semantics);
-- interior mutability/synchronization as separate boundaries rather than implicit behavior;
-- cycle/graph cases where `Weak` or arena/index ownership may be preferable.
+Durable findings: `docs/SHARED_OWNERSHIP_RESEARCH.md`.
 
-## Immediate sequence
+The matrix proves that one generic “shared” feature would be wrong. It separates:
 
-1. Start #106 from exact verified `main` SHA `5e3c111a903dbe717f374fcbe6fb2e93ab6864c1`.
-2. Inventory what the current Records/Enums/functions/reference surface can honestly express before adding any syntax.
-3. Build a research-only Rust comparison corpus for owned, borrowed, `Rc`, `Arc`, interior-mutability boundary cases, `Weak` cycle breaking and arena/index alternatives.
-4. Record allocation/refcount/synchronization costs, safety boundaries and direct generated-Rust candidates. Never compare a shared-ownership candidate against a cheaper Rust program performing different ownership work.
-5. Classify each case as `EXPLICIT-SHARED-CANDIDATE`, `BORROW-INSTEAD`, `REQUIRES-INTERIOR-MUTABILITY-DESIGN`, `REQUIRES-CONCURRENCY-DESIGN`, `REQUIRES-WEAK/CYCLE-MODEL`, `ARENA/INDEX-PREFERRED`, `DEFER-CURRENT-LANGUAGE-TOO-SMALL`, or `REJECT-HIDDEN-COST/AMBIGUOUS`.
-6. Keep research code separate from production syntax. Do not overload `SharedBorrow` or `SharedRef`; both are non-owning concepts.
-7. If meaningful executable probes are possible, validate them under normal CI and #4/#5 methodology. If the current language is too small, document the missing prerequisite instead of manufacturing a performance claim.
-8. Produce a durable shared-ownership research report and one final verdict: `IMPLEMENT-CANDIDATE`, `SPLIT-RESEARCH`, `DEFER`, or `REJECT`.
-9. Open a separate implementation issue only if the evidence reaches `IMPLEMENT-CANDIDATE`.
+- borrowing, which remains preferable when one owner is sufficient;
+- one-thread `Rc`-like multiple ownership as a bounded explicit candidate;
+- `Arc` / cross-thread ownership as concurrency design;
+- `RefCell` as interior-mutability design;
+- `Mutex`-style shared mutation as synchronization design;
+- `Weak` / cycles as a separate ownership-edge model;
+- arena/index ownership as a distinct graph alternative;
+- handle duplication from payload deep cloning.
+
+No production shared-ownership syntax is approved by #106.
+
+## Immediate merge sequence for #108
+
+1. Keep PR #108 research-only: workflow + executable comparison harness + durable report/handoff docs.
+2. Validate the final exact PR head with both normal three-OS CI and the dedicated shared-ownership research workflow.
+3. Confirm the final diff contains no temporary bootstrap workflow and no production parser/type/codegen changes.
+4. Keep historical failed/intermediate SHAs as evidence; do not rerun them for color.
+5. When the exact final head is green, mark #108 ready and squash-merge with an expected-head lock.
+6. After merge, require natural exact-SHA `main` normal CI **and** dedicated shared-ownership research workflow **SUCCESS** before closing #106.
+
+## Gated successor — #109
+
+Issue #109 is open but must **not** start before #108 merges and post-merge exact-SHA validation succeeds:
+
+`P0 research explicit shared handle surface v0: one-thread Rc-like nominal ownership`
+
+#109 narrows the next question to a caller-visible, one-thread, reference-counted shared-owner handle equivalent to idiomatic `Rc<T>`.
+
+Required contracts for that research:
+
+- compare multiple explicit source-surface families before selecting syntax;
+- make initial allocation visible;
+- make owner-handle duplication visible;
+- ordinary assignment and by-value parameter passing move a handle rather than silently incrementing a count;
+- handle duplication is distinct from payload deep clone;
+- payload borrows continue through the existing non-owning reference provenance/liveness model;
+- moving the particular handle that produced a live reference remains invalid even if another shared owner exists;
+- any accepted codegen candidate maps directly to `Rc<T>`, `Rc::new`, `Rc::clone`, ordinary moves/borrows/drop with no extra Evolution runtime layer.
 
 ## Hard boundaries
 
-No implicit shared ownership inference, hidden allocation, hidden handle clone, deep clone, automatic `Arc` selection, implicit locking, GC/runtime ownership table, unsafe lifetime widening, mutable-reference implementation, generalized lifetime solver, interior-mutability implementation, concurrency runtime design or silent changes to existing `T` / `&T` contracts belong in #106.
-
-## Production contracts
-
-Rust remains pinned to **1.98.0**, edition 2024, opt-level 3 and codegen-units 1. Existing build/run caches, source mapping, diagnostic remapping, inferred call-duration shared borrowing, first-class immutable references and runtime parity-or-better contracts remain unchanged.
+Do not fold `Arc`, cross-thread transfer, interior mutability, `Mutex`/`RwLock`, `Weak` production semantics, cycle solving, arena/index implementation, mutable references, generalized lifetime solving, implicit handle duplication, implicit allocation, hidden deep clone, GC or runtime ownership tables into #109.
 
 ## CI rule
 
-Never create duplicate active Actions for the same SHA/workflow/input. Track the existing run. Failed SHAs remain evidence and are not rerun merely for a better color.
+Never create duplicate active Actions for the same SHA/workflow/input. Track the existing run. Failed/cancelled SHAs remain evidence and are not rerun merely for a better color.
