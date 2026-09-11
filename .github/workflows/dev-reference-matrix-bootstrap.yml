@@ -33,7 +33,7 @@ jobs:
           tests = '''    #[test]
               fn same_owner_branches_preserve_reference_source() {
                   lower_source(
-                      "record Item\\nvalue int\\nend\\nfn choose_same(item &Item, flag bool) &Item\\nif flag\\nreturn item\\nelse\\nreturn &item\\nend\\nend\\n",
+                      "record Item\\nvalue int\\nend\\nfn choose_same(item &Item, flag bool) &Item\\nr = item\\nif flag\\nreturn item\\nelse\\nreturn r\\nend\\nend\\n",
                   )
                   .expect("both branches derive the returned reference from the same source");
               }
