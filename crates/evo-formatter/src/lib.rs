@@ -143,6 +143,17 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
     if previous_unary_minus {
         return false;
     }
+    if matches!(previous, TokenKind::Ampersand) {
+        return false;
+    }
+
+    if matches!(current, TokenKind::Ampersand) {
+        return matches!(
+            previous,
+            TokenKind::Identifier(_) | TokenKind::RParen | TokenKind::Equal
+        ) || is_expression_prefix(previous)
+            || is_binary_operator(previous, previous_unary_minus);
+    }
 
     if matches!(current, TokenKind::LParen) {
         if matches!(previous, TokenKind::Identifier(_)) {
@@ -266,6 +277,25 @@ mod tests {
             "print add(1, true, \"x\")\n"
         );
         assert_eq!(format(source), expected);
+    }
+
+    #[test]
+    fn formats_immutable_reference_types_and_borrows_idempotently() {
+        let source = "fn view(item&Item)&Item\nreturn&item\nend\nr=&item\nprint view(&item).value\n";
+        let expected = concat!(
+            "fn view(item &Item) &Item\n",
+            "    return &item\n",
+            "end\n",
+            "r = &item\n",
+            "print view(&item).value\n"
+        );
+        assert_eq!(format(source), expected);
+        assert_eq!(format(expected), expected);
+    }
+
+    #[test]
+    fn keeps_nested_reference_markers_attached_for_parser_rejection() {
+        assert_eq!(format("r=&&item\n"), "r = &&item\n");
     }
 
     #[test]
