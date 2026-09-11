@@ -4,105 +4,52 @@ Last verified update: **2026-09-11**
 
 ## Stable predecessor gate
 
-PR #101 (`research: classify lifetime elision feasibility v0`) squash-merged to `main` as:
+Immutable-reference surface research #102 / PR #103 is complete and merged to `main` as:
 
-`3f501b51c79c39241107df1cbe098acb6ec058ad`
+`cc7e7002bd1dd9726e0fd6bcf3d73687fddc0e15`
 
-Natural exact-SHA post-merge validation succeeded:
+The accepted verdict remains **SURFACE-CANDIDATE / PUNCTUATION-AMPERSAND** with 19 semantic research cases and zero compile-expectation mismatches. Durable evidence remains in `docs/IMMUTABLE_REFERENCE_SURFACE_RESEARCH.md`.
 
-- CI #410 / run `34581869543`: **SUCCESS** on Ubuntu, Windows and macOS;
-- Lifetime elision research #4 / run `34581869494`: **SUCCESS**;
-- post-merge artifact id `10192045985`;
-- digest `sha256:2a21e3a591a33bcf07fc36bb2b2c29c2bfed15234a4a3e30fdc010e02c8e976e`;
-- verdict remains **REFERENCE-SURFACE-FIRST** with zero compile-expectation mismatches.
+## Active production — #104 / PR #105
 
-Issue #100 is complete. The required bounded successor is the current #102 / PR #103 immutable-reference-surface research.
+Issue #104 and draft PR #105 implement the bounded production successor on branch `feature/immutable-reference-surface-v0`.
 
-## Active research — #102 / PR #103
+Implemented production behavior now includes:
 
-Issue #102 researches the first caller-visible immutable reference / borrowed-result surface before any production escaping-borrow implementation.
+- lexer/formatter/parser support for `&T` and `&expr`;
+- explicit syntax, semantic and lowered immutable-reference types/expressions;
+- nominal-record reference parameters and return contracts;
+- first-class local reference bindings;
+- deterministic single-source provenance across direct returns, local forwarding, function forwarding, recursion and same-source branches;
+- source-native rejection of ambiguous multi-source returned-reference signatures and references escaping a local owner;
+- owner move/reinitialization rejection while a possibly-live reference remains;
+- bounded final-use liveness so an owner can move or be reinitialized after the final proven reference use;
+- conservative control-flow handling: nested block uses keep outer references live through the complete statement, then release them when no later use remains;
+- scalar reads through immutable references;
+- source-native rejection of moving nominal record fields through a reference, with no implicit clone;
+- interoperability with the existing inferred call-duration `SharedBorrow` without producing `&&T`;
+- direct safe Rust `&T` / `&expr` codegen with no runtime reference machinery.
 
-PR:
+Permanent lowering/codegen/parser/formatter/lexer tests cover these contracts. The historical immutable-reference research workflow is retired; production proof belongs to normal CI and permanent tests.
 
-- #103 `research: classify immutable reference surface v0`;
-- branch: `research/immutable-reference-surface-v0`;
-- accepted research code/evidence head before documentation synchronization: `7664d28dc0865ef4442063ed702875302271087c`.
+## Explicit non-goals
 
-This PR remains research/design evidence only. No production parser, lowering, ownership, codegen, runtime or accepted-program behavior changes.
-
-## Accepted research result
-
-Immutable reference surface research #3 / run `34598646494` on exact head `7664d28dc0865ef4442063ed702875302271087c`: **SUCCESS**.
-
-Artifact:
-
-- `evo-immutable-reference-surface-research-ubuntu-24.04`;
-- id `10263292508`;
-- digest `sha256:59535a36276e7c5903d37c1b271128bf54de9e0af894d61ecb7052f52428d1f8`.
-
-Normal CI #413 / run `34598646488` on the same exact head: **SUCCESS** on Ubuntu, Windows and macOS.
-
-Result:
-
-- verdict **SURFACE-CANDIDATE**;
-- recommended surface **PUNCTUATION-AMPERSAND**;
-- semantic cases: **19**;
-- compile-expectation mismatches: **0**.
-
-Surface comparison:
-
-- punctuation `&T` / `&expr`: one new lexer token, zero reserved current identifiers, direct safe Rust lowering;
-- keyword `ref T` / `borrow expr`: would reserve two currently-valid identifiers;
-- generic-like `Ref(...)`: collides with current nominal/call-shaped identifier space and is not direct Rust syntax.
-
-The semantic matrix also confirms the bounded ownership rule needed by the successor: owner move/reinitialization while a later reference use remains must fail, while owner move after the final reference use is valid. Multi-owner returned-reference relationships and references to dead local owners fail closed.
-
-Durable report: `docs/IMMUTABLE_REFERENCE_SURFACE_RESEARCH.md`.
-
-## Recommended bounded production model
-
-The report records the production-successor recommendation without making it current language behavior:
-
-- explicit `&T` immutable-reference type surface;
-- explicit `&expr` borrow expression;
-- dedicated syntax/semantic reference variants rather than reinterpreting owned `T`;
-- single deterministic owner/source provenance for v0;
-- first-class immutable-reference locals;
-- bounded local last-use liveness so owners may move after the final proven reference use;
-- conservative fail-closed behavior where liveness/provenance is ambiguous;
-- existing inferred `SharedBorrow` remains a separate call-duration passing mode;
-- direct safe Rust `&T` / `&expr` codegen;
-- no mutable references, generalized lifetime syntax/solver, unsafe widening, hidden clone, allocation, RC/GC or runtime ownership map.
-
-## Failed-SHA evidence retained
-
-Initial research head `6f9f9f10c61f2b01ca44ac02a46106c8af5c604c` produced successful dedicated evidence, but normal CI #411 / run `34583343742` failed only rustfmt. That SHA was not rerun.
-
-Format-only head `733f7efe154422ac0e5c84ce500204b62cf84f51` preserved the matrix and produced successful immutable-reference research #2 / run `34583596906`, but normal CI #412 / run `34583596924` exposed one research-harness Clippy failure: `write_reports` had 9 parameters under `-D warnings`.
-
-The fix on `7664d28d...` is deliberately local to that research helper. It does not relax workspace lints or change the research matrix.
+The active v0 feature does not add mutable references, nested references, primitive reference types, reference fields in records/enums, generalized or user-written lifetimes, multi-owner lifetime solving, self-referential structures, hidden clone/copy, allocation, RC/GC, runtime borrow tables, unsafe lifetime widening, or invented `'static` references.
 
 ## Immediate sequence
 
-1. This documentation synchronization must be one semantic-neutral commit containing `IMMUTABLE_REFERENCE_SURFACE_RESEARCH`, this file and `PROJECT_STATE`.
-2. Track only the natural normal CI and Immutable reference surface research runs created for that exact documentation head; do not dispatch duplicates.
-3. Require both final-head workflows **SUCCESS** and validate that the final artifact still reports `SURFACE-CANDIDATE`, `PUNCTUATION-AMPERSAND`, 19 semantic cases and zero mismatches.
-4. Live-check PR #103 head/base/mergeability and changed files.
-5. Squash-merge PR #103 with expected-head protection only from that validated exact head.
-6. Track the natural post-merge `main` CI and Immutable reference surface research push workflow on the exact merge SHA.
-7. Close #102 completed only after both exact-SHA post-merge workflows succeed.
-8. Update living meta #40 with the durable report and verified main provenance.
-9. Re-read live roadmap/issues/branches/PRs, then atomize the bounded production implementation successor from the accepted report.
-
-## Successor direction after #102 closes
-
-The next production slice should implement only the accepted immutable-reference v0 boundary: caller-visible `&T` / `&expr`, deterministic single-source provenance, source-native borrow-vs-move/reinit diagnostics, local stored references and bounded last-use liveness.
-
-It must preserve current owned APIs and existing call-duration `SharedBorrow`. Multiple-source returned-reference relationships remain rejected until separately researched. Mutable references, generalized lifetime syntax/inference, reference fields, unsafe lifetime extension and runtime ownership machinery remain outside this successor.
+1. Synchronize `LANGUAGE_SPEC_V0`, this file, `PROJECT_STATE`, and PR #105 with the implemented behavior.
+2. Remove all development bootstrap workflows from the feature branch.
+3. Track only the natural normal CI for the exact documentation-synchronized user-authored head; never duplicate a queued/in-progress run for the same SHA/workflow/input.
+4. Require Ubuntu, Windows and macOS CI, workspace tests, Clippy, formatter checks, release build and existing performance gates to succeed on that exact head.
+5. Live-check PR #105 head/base/mergeability and changed files after the final exact-head gate.
+6. Squash-merge PR #105 only from the validated exact head.
+7. Track natural post-merge `main` CI on the merge SHA; close #104 completed only after the required post-merge gate succeeds.
+8. Re-read the live roadmap/issues before atomizing any generalized lifetime or mutable-reference successor.
 
 ## Production contracts
 
-Rust remains pinned to **1.98.0**, edition 2024, opt-level 3 and codegen-units 1. `build-cache-v0` / `run-cache-v0`, source mapping, diagnostic remapping, bounded inferred shared borrowing and the #4 runtime parity-or-better contract remain unchanged.
+Rust remains pinned to **1.98.0**, edition 2024, opt-level 3 and codegen-units 1. Existing build/run caches, source mapping, diagnostic remapping, inferred call-duration shared borrowing and runtime parity-or-better contracts remain unchanged.
 
 ## CI rule
 
