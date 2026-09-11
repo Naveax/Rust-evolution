@@ -1,0 +1,423 @@
+name: DEV immutable reference semantic bootstrap
+
+on:
+  push:
+    branches:
+      - feature/immutable-reference-surface-v0
+    paths:
+      - .github/workflows/dev-reference-semantic-bootstrap.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dev-reference-semantic-bootstrap-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feature/immutable-reference-surface-v0
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+
+      - name: Apply bounded semantic reference contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one replacement, found {count}\n--- needle ---\n{old}")
+              p.write_text(text.replace(old, new, 1))
+
+          records = "crates/evo-lowering/src/record_environment_records.rs"
+          replace_once(
+              records,
+              """pub(crate) enum SemanticType {
+              Integer,
+              Bool,
+              String,
+              Record(String),
+          }
+          """,
+              """pub(crate) enum SemanticType {
+              Integer,
+              Bool,
+              String,
+              Record(String),
+              SharedRef(Box<SemanticType>),
+          }
+          """,
+          )
+          replace_once(
+              records,
+              """            SyntaxTypeName::SharedRef(_) => Err(LowerError {
+                          message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+                          span,
+                      }),
+          """,
+              """            SyntaxTypeName::SharedRef(inner) => self
+                          .resolve_type_name(inner, span)
+                          .map(|inner| SemanticType::SharedRef(Box::new(inner))),
+          """,
+          )
+          replace_once(
+              records,
+              """        let SemanticType::Record(record_name) = base_type else {
+                      return Err(LowerError {
+                          message: "field access requires a record value".to_owned(),
+                          span: access_span,
+                      });
+                  };
+          """,
+              """        let record_name = match base_type {
+                      SemanticType::Record(name) => name,
+                      SemanticType::SharedRef(inner) => match inner.as_ref() {
+                          SemanticType::Record(name) => name,
+                          _ => {
+                              return Err(LowerError {
+                                  message: "field access requires a record value or immutable record reference"
+                                      .to_owned(),
+                                  span: access_span,
+                              });
+                          }
+                      },
+                      _ => {
+                          return Err(LowerError {
+                              message: "field access requires a record value or immutable record reference"
+                                  .to_owned(),
+                              span: access_span,
+                          });
+                      }
+                  };
+          """,
+          )
+          replace_once(
+              records,
+              """        SemanticType::Record(name) => name.clone(),
+              }
+          }
+          """,
+              """        SemanticType::Record(name) => name.clone(),
+                  SemanticType::SharedRef(inner) => format!("&{}", semantic_type_label(inner)),
+              }
+          }
+          """,
+          )
+          record_anchor = """    #[test]
+              fn constructor_requires_exact_named_fields_and_types() {
+          """
+          record_tests = """    #[test]
+              fn resolves_immutable_reference_signature_types() {
+                  let program = parse_source("record Point\\nx int\\nend\\n");
+                  let environment = collect_record_environment(&program).expect("environment should build");
+                  let resolved = environment
+                      .resolve_type_name(
+                          &TypeName::SharedRef(Box::new(TypeName::Named("Point".to_owned()))),
+                          test_span(1),
+                      )
+                      .expect("known immutable record reference should resolve");
+                  assert_eq!(
+                      resolved,
+                      SemanticType::SharedRef(Box::new(SemanticType::Record("Point".to_owned())))
+                  );
+                  assert!(resolved.is_trivially_reusable_v0());
+              }
+
+              #[test]
+              fn field_access_accepts_immutable_record_references() {
+                  let program = parse_source("record Point\\nx int\\nend\\n");
+                  let environment = collect_record_environment(&program).expect("environment should build");
+                  let point_ref =
+                      SemanticType::SharedRef(Box::new(SemanticType::Record("Point".to_owned())));
+                  assert_eq!(
+                      environment
+                          .field_type(&point_ref, "x", test_span(2))
+                          .expect("scalar field read through immutable reference should resolve"),
+                      SemanticType::Integer
+                  );
+              }
+
+          """
+          replace_once(records, record_anchor, record_tests + record_anchor)
+
+          lower = "crates/evo-lowering/src/lib.rs"
+          replace_once(
+              lower,
+              """pub enum ValueType {
+              Integer,
+              String,
+              Bool,
+              Record(String),
+          }
+          """,
+              """pub enum ValueType {
+              Integer,
+              String,
+              Bool,
+              Record(String),
+              SharedRef(Box<ValueType>),
+          }
+          """,
+          )
+          replace_once(
+              lower,
+              """        let return_type =
+                      record_environment.resolve_type_name(&function.return_type, function.span)?;
+                  signatures.insert(
+                      function.name.clone(),
+                      FunctionSignature {
+                          parameter_types,
+                          parameter_modes,
+                          return_type: lowered_value_type(&return_type),
+                      },
+                  );
+          """,
+              """        let return_type =
+                      record_environment.resolve_type_name(&function.return_type, function.span)?;
+                  let return_type = lowered_value_type(&return_type);
+                  validate_reference_signature_relation(&parameter_types, &return_type, function.span)?;
+                  signatures.insert(
+                      function.name.clone(),
+                      FunctionSignature {
+                          parameter_types,
+                          parameter_modes,
+                          return_type,
+                      },
+                  );
+          """,
+          )
+          helper_anchor = """fn lower_function(
+          """
+          helper = """fn validate_reference_signature_relation(
+              parameter_types: &[ValueType],
+              return_type: &ValueType,
+              span: Span,
+          ) -> Result<(), LowerError> {
+              if !matches!(return_type, ValueType::SharedRef(_)) {
+                  return Ok(());
+              }
+
+              let reference_sources = parameter_types
+                  .iter()
+                  .filter(|value_type| matches!(value_type, ValueType::SharedRef(_)))
+                  .count();
+              if reference_sources == 1 {
+                  return Ok(());
+              }
+
+              Err(LowerError {
+                  message: format!(
+                      "immutable reference return requires exactly one reference parameter source in v0; found {reference_sources}"
+                  ),
+                  span,
+              })
+          }
+
+          """
+          replace_once(lower, helper_anchor, helper + helper_anchor)
+          replace_once(
+              lower,
+              """        ValueType::Record(name) => SemanticType::Record(name.clone()),
+              }
+          }
+
+          fn lowered_value_type(value_type: &SemanticType) -> ValueType {
+              match value_type {
+                  SemanticType::Integer => ValueType::Integer,
+                  SemanticType::Bool => ValueType::Bool,
+                  SemanticType::String => ValueType::String,
+                  SemanticType::Record(name) => ValueType::Record(name.clone()),
+              }
+          }
+
+          fn type_label(value_type: &ValueType) -> &str {
+              match value_type {
+                  ValueType::Integer => "int",
+                  ValueType::Bool => "bool",
+                  ValueType::String => "string",
+                  ValueType::Record(name) => name,
+              }
+          }
+          """,
+              """        ValueType::Record(name) => SemanticType::Record(name.clone()),
+                  ValueType::SharedRef(inner) => {
+                      SemanticType::SharedRef(Box::new(semantic_type(inner)))
+                  }
+              }
+          }
+
+          fn lowered_value_type(value_type: &SemanticType) -> ValueType {
+              match value_type {
+                  SemanticType::Integer => ValueType::Integer,
+                  SemanticType::Bool => ValueType::Bool,
+                  SemanticType::String => ValueType::String,
+                  SemanticType::Record(name) => ValueType::Record(name.clone()),
+                  SemanticType::SharedRef(inner) => {
+                      ValueType::SharedRef(Box::new(lowered_value_type(inner)))
+                  }
+              }
+          }
+
+          fn type_label(value_type: &ValueType) -> String {
+              match value_type {
+                  ValueType::Integer => "int".to_owned(),
+                  ValueType::Bool => "bool".to_owned(),
+                  ValueType::String => "string".to_owned(),
+                  ValueType::Record(name) => name.clone(),
+                  ValueType::SharedRef(inner) => format!("&{}", type_label(inner)),
+              }
+          }
+          """,
+          )
+          replace_once(
+              lower,
+              """                if matches!(&expression_type, ValueType::Record(_)) {
+          """,
+              """                if matches!(
+                      &expression_type,
+                      ValueType::Record(_) | ValueType::SharedRef(_)
+                  ) {
+          """,
+          )
+          lower_test_anchor = """    #[test]
+              fn rejects_unknown_record_signature_types() {
+          """
+          lower_tests = """    #[test]
+              fn lowers_single_source_immutable_reference_contracts() {
+                  let program = lower_source(
+                      "record Item\\nvalue int\\nend\\nfn identity(item &Item) &Item\\nreturn item\\nend\\n",
+                  )
+                  .expect("single-source immutable reference contract should lower");
+                  let function = &program.functions[0];
+                  assert_eq!(
+                      function.parameters[0].value_type,
+                      ValueType::SharedRef(Box::new(ValueType::Record("Item".to_owned())))
+                  );
+                  assert_eq!(
+                      function.return_type,
+                      ValueType::SharedRef(Box::new(ValueType::Record("Item".to_owned())))
+                  );
+                  assert_eq!(
+                      function.parameters[0].passing_mode,
+                      super::ParameterPassingMode::Owned,
+                      "explicit reference parameters must not receive an additional inferred SharedBorrow"
+                  );
+                  let StmtKind::Return(expr) = &function.body[0].kind else {
+                      panic!("expected return");
+                  };
+                  assert!(matches!(expr.kind, ExprKind::Local(ref name) if name == "item"));
+              }
+
+              #[test]
+              fn rejects_ambiguous_reference_return_signatures_before_codegen() {
+                  let zero = lower_source(
+                      "record Item\\nvalue int\\nend\\nfn bad() &Item\\nreturn Item(value = 1)\\nend\\n",
+                  )
+                  .expect_err("reference return without a reference source must fail");
+                  assert!(zero.message.contains("exactly one reference parameter source"));
+                  assert!(zero.message.contains("found 0"));
+
+                  let multiple = lower_source(
+                      "record Item\\nvalue int\\nend\\nfn choose(a &Item, b &Item) &Item\\nreturn a\\nend\\n",
+                  )
+                  .expect_err("multiple possible reference sources must fail closed");
+                  assert!(multiple.message.contains("exactly one reference parameter source"));
+                  assert!(multiple.message.contains("found 2"));
+              }
+
+              #[test]
+              fn keeps_explicit_borrow_creation_fail_closed_until_provenance_tracking() {
+                  let error = lower_source(
+                      "record Item\\nvalue int\\nend\\nitem = Item(value = 1)\\nr = &item\\n",
+                  )
+                  .expect_err("explicit borrow creation needs provenance/liveness support first");
+                  assert!(error.message.contains("immutable reference semantic lowering is not implemented yet"));
+              }
+
+              #[test]
+              fn reads_scalar_fields_through_reference_parameters() {
+                  let program = lower_source(
+                      "record Item\\nvalue int\\nend\\nfn value(item &Item) int\\nreturn item.value\\nend\\n",
+                  )
+                  .expect("scalar field read through immutable reference should lower");
+                  assert_eq!(program.functions[0].return_type, ValueType::Integer);
+              }
+
+          """
+          replace_once(lower, lower_test_anchor, lower_tests + lower_test_anchor)
+
+          codegen = "crates/evo-codegen-rust/src/lib.rs"
+          replace_once(
+              codegen,
+              """        ValueType::Record(name) => generated_record_name(name),
+              }
+          }
+          """,
+              """        ValueType::Record(name) => generated_record_name(name),
+                  ValueType::SharedRef(inner) => format!("&{}", rust_type(inner)),
+              }
+          }
+          """,
+          )
+          codegen_anchor = """    #[test]
+              fn zero_field_record_codegen_uses_empty_struct_literal() {
+          """
+          codegen_tests = """    #[test]
+              fn immutable_reference_contract_codegen_is_direct_and_zero_cost() {
+                  let generated = compile_source(
+                      "record Item\\nvalue int\\nend\\nfn identity(item &Item) &Item\\nreturn item\\nend\\n",
+                  );
+                  assert!(generated.contains(
+                      "fn __evo_fn_identity(__evo_item: &__EvoRecord_Item) -> &__EvoRecord_Item {"
+                  ));
+                  assert!(generated.contains("return __evo_item;"));
+                  assert!(!generated.contains("&&__EvoRecord_Item"));
+                  assert!(!generated.contains("Rc<"));
+                  assert!(!generated.contains("Arc<"));
+                  assert!(!generated.contains("Box<"));
+                  assert!(!generated.contains("unsafe"));
+              }
+
+              #[test]
+              fn immutable_reference_field_read_uses_rust_autoderef_without_scaffolding() {
+                  let generated = compile_source(
+                      "record Item\\nvalue int\\nend\\nfn value(item &Item) int\\nreturn item.value\\nend\\n",
+                  );
+                  assert!(generated.contains("__evo_item: &__EvoRecord_Item) -> i64"));
+                  assert!(generated.contains("return (__evo_item).__evo_field_value;"));
+                  assert!(!generated.contains("clone()"));
+              }
+
+          """
+          replace_once(codegen, codegen_anchor, codegen_tests + codegen_anchor)
+
+      - name: Format
+        run: cargo +1.98.0 fmt --all
+
+      - name: Clippy
+        run: cargo +1.98.0 clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test workspace
+        run: cargo +1.98.0 test --workspace
+
+      - name: Verify diff
+        run: git diff --check
+
+      - name: Commit verified semantic reference contract
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/evo-lowering/src/record_environment_records.rs crates/evo-lowering/src/lib.rs crates/evo-codegen-rust/src/lib.rs
+          git diff --cached --check
+          git commit -m "feat: lower immutable reference contracts"
+          git push origin HEAD:feature/immutable-reference-surface-v0
