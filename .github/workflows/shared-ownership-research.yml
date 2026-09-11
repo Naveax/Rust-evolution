@@ -35,7 +35,7 @@ jobs:
       - name: Run shared ownership research matrix
         env:
           EVO_REQUIRE_PINNED_RUSTC: '1'
-          EVO_GIT_SHA: ${{ github.sha }}
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           EVO_SHARED_OWNERSHIP_RESEARCH_OUT: ${{ github.workspace }}/target/evo-shared-ownership-research
         run: >-
           cargo test -p evo-lowering --test shared_ownership_research
@@ -43,14 +43,17 @@ jobs:
           -- --ignored --exact --nocapture
 
       - name: Validate research report
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           report_path = Path('target/evo-shared-ownership-research/report.json')
           data = json.loads(report_path.read_text())
-          assert data['git_sha'] == '${{ github.sha }}', data
+          assert data['git_sha'] == os.environ['EXPECTED_GIT_SHA'], data
           assert data['verdict'] == 'SPLIT-RESEARCH', data
           assert data['case_count'] >= 14, data
           assert data['compile_expectation_mismatches'] == 0, data
