@@ -1,0 +1,73 @@
+name: DEV immutable reference bootstrap v3
+
+on:
+  push:
+    branches:
+      - feature/immutable-reference-surface-v0
+    paths:
+      - .github/workflows/dev-reference-bootstrap-v3.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feature/immutable-reference-surface-v0
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+
+      - name: Reuse v2 patch and cover historical research consumer
+        shell: python
+        run: |
+          from pathlib import Path
+
+          workflow = Path(".github/workflows/dev-reference-bootstrap-v2.yml").read_text().splitlines()
+          marker = workflow.index("      - name: Apply bounded frontend surface")
+          run_line = next(i for i in range(marker + 1, len(workflow)) if workflow[i] == "        run: |")
+          end = next(i for i in range(run_line + 1, len(workflow)) if workflow[i] == "      - name: Format")
+          prefix = "          "
+          code = "\n".join(
+              line[len(prefix):] if line.startswith(prefix) else line
+              for line in workflow[run_line + 1:end]
+          )
+          exec(compile(code, "dev-reference-bootstrap-v2", "exec"), {})
+
+          path = Path("crates/evo-lowering/tests/borrow_inference_research.rs")
+          text = path.read_text()
+          old = """        ExprKind::LogicalNot(inner) | ExprKind::UnaryMinus(inner) => {
+                  collect_expr_effects(inner, parameter, UseMode::Consume, effects);
+              }
+          """
+          new = """        ExprKind::LogicalNot(inner)
+              | ExprKind::UnaryMinus(inner)
+              | ExprKind::SharedBorrow(inner) => {
+                  collect_expr_effects(inner, parameter, UseMode::Consume, effects);
+              }
+          """
+          if text.count(old) != 1:
+              raise SystemExit("borrow_inference_research: expected exactly one unary effect match")
+          path.write_text(text.replace(old, new, 1))
+
+      - name: Format
+        run: cargo +1.98.0 fmt --all
+
+      - name: Clippy
+        run: cargo +1.98.0 clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test workspace
+        run: cargo +1.98.0 test --workspace
+
+      - name: Commit verified frontend slice
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/evo-parser/src/lib.rs crates/evo-lowering/src/ crates/evo-lowering/tests/borrow_inference_research.rs
+          git diff --cached --check
+          git commit -m "feat: parse immutable reference surface"
+          git push origin HEAD:feature/immutable-reference-surface-v0
