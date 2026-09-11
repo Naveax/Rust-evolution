@@ -281,7 +281,8 @@ mod tests {
 
     #[test]
     fn formats_immutable_reference_types_and_borrows_idempotently() {
-        let source = "fn view(item&Item)&Item\nreturn&item\nend\nr=&item\nprint view(&item).value\n";
+        let source =
+            "fn view(item&Item)&Item\nreturn&item\nend\nr=&item\nprint view(&item).value\n";
         let expected = concat!(
             "fn view(item &Item) &Item\n",
             "    return &item\n",
