@@ -2,82 +2,99 @@
 
 Last verified update: **2026-09-11**
 
-## Stable production gate
+## Stable gate
 
-Current verified `main` before the shared-ownership research merge:
+Current exact verified `main`:
 
-`3be6b212a549831c15ef5a30df2b35da6362683e`
+`d13c94227f89c7ed323f26d7fd63bc5835caaccd`
 
-This is docs handoff PR #107. Natural exact-SHA CI #459 / run `34612808532` is **SUCCESS** on Ubuntu, Windows and macOS, including the permanent Ubuntu build/cache/runtime gates and release build.
+This is PR #108 squash merge: `research: classify shared ownership ergonomics v0 (#108)`.
 
-Immutable references v0 remains the latest production ownership feature. Existing owned `T`, inferred call-duration `SharedBorrow`, first-class immutable `&T` / `&expr`, deterministic single-source provenance, stored local references, bounded final-use liveness and direct safe Rust reference lowering are unchanged.
+Natural exact-SHA validation:
 
-## #106 research decision — SPLIT-RESEARCH
+- CI #465 / run `34616193977`: **SUCCESS** on Ubuntu, Windows and macOS;
+- Ubuntu passed fmt, Clippy, workspace tests, every permanent build/cache/runtime gate and release build;
+- Shared ownership ergonomics research #6 / run `34616193950`: **SUCCESS**;
+- artifact `evo-shared-ownership-research-ubuntu-24.04`, id `10270430868`;
+- digest `sha256:292e8a022af57068d53b602f8ffbf349ebd046b801d226ee5ef66dfdc64fcd29`;
+- artifact report `git_sha` exactly matches `d13c94227f89c7ed323f26d7fd63bc5835caaccd`.
 
-Issue #106 / draft PR #108 researched shared ownership without adding production syntax.
+Issue #106 is closed/completed.
 
-Validated exact research evidence head:
+## Accepted #106 result — SPLIT-RESEARCH
 
-`651ef4f3e9fc70e493eb59e3b1b2e7dcc7526d6a`
+Durable report: `docs/SHARED_OWNERSHIP_RESEARCH.md`.
 
-Evidence:
+The Rust 1.98 matrix retained 14 cases with zero compile-expectation mismatches and zero runtime-expectation mismatches. It deliberately split materially different models rather than approving one magic `shared` feature:
 
-- normal CI #463 / run `34614250716`: **SUCCESS** on Ubuntu, Windows and macOS;
-- dedicated Shared ownership ergonomics research #4 / run `34614250773`: **SUCCESS**;
-- artifact `evo-shared-ownership-research-ubuntu-24.04`;
-- artifact id `10269252562`;
-- digest `sha256:f33fd905c3feb550550a8fc99da75575dcce1d8a54c9ef1b1a531a68256149b5`;
-- 14 Rust 1.98 cases;
-- zero compile-expectation mismatches;
-- zero runtime-expectation mismatches;
-- verdict **SPLIT-RESEARCH**.
+- ordinary owned control: 1;
+- `BORROW-INSTEAD`: 1;
+- one-thread `EXPLICIT-SHARED-CANDIDATE`: 5;
+- `REQUIRES-INTERIOR-MUTABILITY-DESIGN`: 1;
+- `REQUIRES-CONCURRENCY-DESIGN`: 3;
+- `REQUIRES-WEAK/CYCLE-MODEL`: 1;
+- `ARENA/INDEX-PREFERRED`: 1;
+- `REJECT-HIDDEN-COST/AMBIGUOUS`: 1.
 
-Durable findings: `docs/SHARED_OWNERSHIP_RESEARCH.md`.
+`SharedBorrow`, `SharedRef` and `ReferenceTracker` remain non-owning concepts. They must not be reinterpreted as shared ownership.
 
-The matrix proves that one generic “shared” feature would be wrong. It separates:
+## Active work — #109
 
-- borrowing, which remains preferable when one owner is sufficient;
-- one-thread `Rc`-like multiple ownership as a bounded explicit candidate;
-- `Arc` / cross-thread ownership as concurrency design;
-- `RefCell` as interior-mutability design;
-- `Mutex`-style shared mutation as synchronization design;
-- `Weak` / cycles as a separate ownership-edge model;
-- arena/index ownership as a distinct graph alternative;
-- handle duplication from payload deep cloning.
-
-No production shared-ownership syntax is approved by #106.
-
-## Immediate merge sequence for #108
-
-1. Keep PR #108 research-only: workflow + executable comparison harness + durable report/handoff docs.
-2. Validate the final exact PR head with both normal three-OS CI and the dedicated shared-ownership research workflow.
-3. Confirm the final diff contains no temporary bootstrap workflow and no production parser/type/codegen changes.
-4. Keep historical failed/intermediate SHAs as evidence; do not rerun them for color.
-5. When the exact final head is green, mark #108 ready and squash-merge with an expected-head lock.
-6. After merge, require natural exact-SHA `main` normal CI **and** dedicated shared-ownership research workflow **SUCCESS** before closing #106.
-
-## Gated successor — #109
-
-Issue #109 is open but must **not** start before #108 merges and post-merge exact-SHA validation succeeds:
+Issue #109 is now the active Phase 3.3 ownership-ergonomics research item:
 
 `P0 research explicit shared handle surface v0: one-thread Rc-like nominal ownership`
 
-#109 narrows the next question to a caller-visible, one-thread, reference-counted shared-owner handle equivalent to idiomatic `Rc<T>`.
+The goal is to decide whether Evolution should expose a caller-visible, one-thread, reference-counted shared-owner handle equivalent to idiomatic `Rc<T>`.
 
-Required contracts for that research:
+This remains **research first**. No production shared-owner syntax is approved.
 
-- compare multiple explicit source-surface families before selecting syntax;
-- make initial allocation visible;
-- make owner-handle duplication visible;
-- ordinary assignment and by-value parameter passing move a handle rather than silently incrementing a count;
-- handle duplication is distinct from payload deep clone;
-- payload borrows continue through the existing non-owning reference provenance/liveness model;
-- moving the particular handle that produced a live reference remains invalid even if another shared owner exists;
-- any accepted codegen candidate maps directly to `Rc<T>`, `Rc::new`, `Rc::clone`, ordinary moves/borrows/drop with no extra Evolution runtime layer.
+## Immediate sequence
+
+1. Start from this exact verified main or from a later separately exact-SHA-validated docs-only handoff main.
+2. Keep the work research-only until one surface is actually justified.
+3. Compare at least three explicit source-surface families:
+   - nominal wrapper spelling such as `Shared<Item>`;
+   - Rust-transparent spelling such as `Rc<Item>` / `rc(...)`;
+   - keyword/operator-style spelling with explicit allocation and handle duplication.
+4. Measure real compatibility/parser/formatter cost. Current `TypeName` has no general generic-type node, and `<` / `>` already lex as comparison tokens.
+5. Model explicit creation, inspection, handle duplication, ordinary handle move, function forwarding/return, branch/repeat clone/drop, payload borrowing, source-handle borrow conflicts, deep-clone distinction, immutable mutation rejection and cross-thread rejection.
+6. Keep ordinary assignment and by-value parameter/return as **moves** of the handle. Never silently increment a refcount.
+7. Treat handle duplication as an explicit semantic operation, not a MoveTracker exception and not payload `Clone`.
+8. Keep payload references in the existing non-owning provenance/liveness model where possible.
+9. Require any accepted codegen candidate to map directly to `Rc<T>`, `Rc::new`, `Rc::clone`, ordinary moves/borrows/drop with no wrapper/runtime ownership table.
+10. Produce one final #109 verdict: `IMPLEMENT-CANDIDATE`, `DEFER`, or `REJECT`; open production implementation work only after `IMPLEMENT-CANDIDATE`.
+
+## Architecture facts to preserve
+
+- Parser `TypeName`: `Int`, `Bool`, `String`, `Named`, `SharedRef`; no general generic type surface.
+- Lexer `<` and `>` already mean comparison tokens.
+- `SemanticType` / `ValueType` currently model owned records and `SharedRef`, not shared owners.
+- `SemanticType::is_trivially_reusable_v0` must not make a future shared-owner handle implicitly copyable; `Rc` clone is observable ownership work.
+- `MoveTracker` already provides the correct basis for ordinary by-value handle moves.
+- `ReferenceTracker` is provenance for non-owning references. A payload borrow derived from a shared handle must remain tied to the specific source handle unless later research proves a different safe model.
+- Rust codegen can represent a future accepted owner type directly, but it must not add hidden `Rc::clone` calls.
 
 ## Hard boundaries
 
-Do not fold `Arc`, cross-thread transfer, interior mutability, `Mutex`/`RwLock`, `Weak` production semantics, cycle solving, arena/index implementation, mutable references, generalized lifetime solving, implicit handle duplication, implicit allocation, hidden deep clone, GC or runtime ownership tables into #109.
+Do not fold any of these into #109:
+
+- `Arc` / cross-thread shared ownership;
+- `RefCell` or other interior mutability;
+- `Mutex` / `RwLock` / synchronization;
+- `Weak` production semantics or cycle solving;
+- arena/index implementation;
+- mutable references;
+- generalized lifetime solving;
+- implicit allocation;
+- implicit handle duplication;
+- hidden payload deep clone;
+- GC/runtime ownership tables;
+- unsafe lifetime or aliasing emulation;
+- silent changes to existing `T`, `&T`, or inferred `SharedBorrow` semantics.
+
+## Performance contract
+
+Explicit shared ownership is not “zero operations”. The rule is **no overhead beyond the equivalent idiomatic Rust `Rc<T>` program**. Compare like-for-like allocation, strong-count clone/drop operations and generated Rust shape. Do not compare against a cheaper borrow/owned program doing less ownership work.
 
 ## CI rule
 
