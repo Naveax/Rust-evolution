@@ -1,0 +1,81 @@
+name: Immutable reference surface research
+
+on:
+  pull_request:
+    paths:
+      - crates/evo-lowering/tests/immutable_reference_surface_research.rs
+      - .github/workflows/immutable-reference-surface-research.yml
+  push:
+    branches:
+      - main
+    paths:
+      - crates/evo-lowering/tests/immutable_reference_surface_research.rs
+      - .github/workflows/immutable-reference-surface-research.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal
+
+      - name: Show toolchain
+        run: rustc +1.98.0 -Vv
+
+      - name: Immutable reference surface evidence
+        id: research
+        continue-on-error: true
+        env:
+          RUSTUP_TOOLCHAIN: 1.98.0
+          EVO_REQUIRE_PINNED_RUSTC: "1"
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_IMMUTABLE_REFERENCE_RESEARCH_OUT: ${{ github.workspace }}/target/evo-immutable-reference-surface-research
+        run: >-
+          cargo +1.98.0 test -p evo-lowering --test immutable_reference_surface_research
+          immutable_reference_surface_research_selects_bounded_candidate
+          -- --ignored --exact --nocapture
+
+      - name: Validate report JSON
+        id: validate
+        if: ${{ always() && !cancelled() }}
+        continue-on-error: true
+        run: |
+          python3 -m json.tool "${{ github.workspace }}/target/evo-immutable-reference-surface-research/report.json" >/dev/null
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("target/evo-immutable-reference-surface-research/report.json")
+          report = json.loads(path.read_text())
+          assert report["verdict"] == "SURFACE-CANDIDATE", report["verdict"]
+          assert report["recommended_surface"] == "PUNCTUATION-AMPERSAND", report["recommended_surface"]
+          assert report["compile_expectation_mismatches"] == 0, report["compile_expectation_mismatches"]
+          assert report["semantic_case_count"] >= 14, report["semantic_case_count"]
+          PY
+
+      - name: Upload immutable reference surface evidence
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-immutable-reference-surface-research-ubuntu-24.04
+          path: ${{ github.workspace }}/target/evo-immutable-reference-surface-research
+          if-no-files-found: error
+
+      - name: Enforce research gate
+        if: ${{ always() && !cancelled() }}
+        env:
+          RESEARCH_OUTCOME: ${{ steps.research.outcome }}
+          VALIDATE_OUTCOME: ${{ steps.validate.outcome }}
+        run: |
+          test "$RESEARCH_OUTCOME" = "success"
+          test "$VALIDATE_OUTCOME" = "success"
