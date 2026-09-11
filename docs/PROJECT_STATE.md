@@ -8,180 +8,136 @@ This is the durable project handoff. Always re-read live GitHub issue/PR/Actions
 
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
-- Stable predecessor merge for active #97: `cfc19e3308a505a45c970e883dffc72a8bf0b81b`
+- Current verified stable main predecessor for active #100: `355847a23faa29360e1da10bdfb2739eec6f8b6a`
 - Rust toolchain: **1.98.0**
 - production flags: edition 2024, opt-level 3, codegen-units 1
 - measured GNU/Linux linker path: `rustc -> cc -> lld`
 
 ## Accepted build / compile sequence
 
-### #76 — build latency baseline
-
-Frontend/check/emit is roughly ~1 ms while uncached single-file native builds are dominated by rustc compile+link. Historical direct rustc median: 94.131 ms.
-
-### #79 — verified unchanged-build reuse
-
-`build-cache-v0` is production-accepted. Exact verified unchanged builds can materialize a native artifact without invoking rustc. Corruption/mismatch/unavailable state fails closed to normal compilation. `--no-cache` bypasses lookup/publication.
-
-### #82 — changed-source rustc incremental research
-
-Decision: **REJECT / DEFER**. Tested persistent rustc incremental configurations did not preserve the project runtime contract across the committed corpus. Durable report: `docs/INCREMENTAL_BUILD_RESEARCH.md`.
-
-### #85 — link-time attribution
-
-Current Rust 1.98 Linux path already uses `cc -> lld`. Linker-child work was a material component of total production-equivalent rustc wall time on controlled cases. Durable report: `docs/LINK_TIME_RESEARCH.md`.
-
-### #87 — linker candidate experiment
-
-Decision: **REJECT / DEFER**. Current lld beat tested GNU ld and pinned mold alternatives on total native build latency. Durable report: `docs/LINKER_CANDIDATE_RESEARCH.md`.
-
-### #89 — release optimization cost
-
-Decision: **REJECT / DEFER opt3 -> opt2**. Production remains opt-level 3. Durable report: `docs/RELEASE_OPTIMIZATION_RESEARCH.md`.
-
-### #91 — compile memory baseline
-
-Decision: **DEFER / NO ACTION** for Evolution-side compile-memory optimization under the current architecture. Durable report: `docs/COMPILE_MEMORY_RESEARCH.md`.
-
-### #93 — binary-size baseline
-
-Decision: **DEFER / NO ACTION** for Evolution-specific binary-size optimization under the current language/corpus. PR #94 merged as `733900781ea61f5684209570a35e9f63df71a7d4`; accepted controlled reference/Evolution binaries were byte-identical across the committed seven-case corpus. Durable report: `docs/BINARY_SIZE_RESEARCH.md`.
+- #76: build latency baseline established; single-file native builds are rustc-dominated.
+- #79 / PR #81: `build-cache-v0` accepted for verified unchanged-build artifact reuse.
+- #82 / PR #84: changed-source rustc incremental research **REJECT / DEFER**.
+- #85 / PR #86: link-time attribution established current `cc -> lld` path and link cost.
+- #87 / PR #88: GNU ld / mold candidate experiment **REJECT / DEFER**.
+- #89 / PR #90: opt-level 3 -> 2 release optimization candidate **REJECT / DEFER**.
+- #91 / PR #92: compile-memory baseline **DEFER / NO ACTION**.
+- #93 / PR #94: binary-size baseline **DEFER / NO ACTION**; controlled reference/Evolution binaries were byte-identical across the seven-case corpus.
 
 Dependency-build, proc-macro cost and workspace scaling remain deferred until Evolution has a real user-program package/dependency graph.
 
-## #95 — borrow inference feasibility completed
+Durable reports remain under `docs/` for each accepted/rejected/deferred research step.
 
-Issue #95 established that a narrow, statically local read-only nominal-parameter subset can be inferred as a call-duration shared borrow without generalized lifetime solving or hidden runtime machinery.
+## #95 / #97 — bounded shared-borrow work completed
 
-Accepted research head:
+#95 / PR #96 established a useful local read-only nominal-parameter subset and returned **IMPLEMENT-CANDIDATE**. #97 / PR #99 implemented that bounded rule.
 
-`b3ef92be7e273bc4a27812d24733b87c12bd81c3`
+PR #99 squash-merged to main as:
 
-Accepted research evidence:
+`355847a23faa29360e1da10bdfb2739eec6f8b6a`
 
-- CI #384 / run `34478349183`: **SUCCESS** on Ubuntu, Windows and macOS;
-- Borrow inference research #3 / run `34478349203`: **SUCCESS**;
-- artifact `evo-borrow-inference-research-ubuntu-24.04`;
-- artifact id `10152500994`;
-- digest `sha256:3ba6965b0ffac03d9e1b74bd82152c4c0cbcf47a5d502f694910483e7f13b6fd`;
-- aggregate verdict: **IMPLEMENT-CANDIDATE**;
-- 6 safe local candidates, including 2 cases reproducing current move friction.
+Natural post-merge CI #406 / run `34577783740`: **SUCCESS** on Ubuntu, Windows and macOS.
 
-PR #96 then squash-merged to `main` as `cfc19e3308a505a45c970e883dffc72a8bf0b81b`. Post-merge CI #386 / run `34481370952` and Borrow inference research #5 / run `34481370964` both succeeded, after which #95 was closed completed.
+Issue #97 is closed/completed.
 
-Durable report: `docs/BORROW_INFERENCE_RESEARCH.md`.
+### Production shared-borrow contract
 
-## Active implementation — #97 / PR #99
+The lowering layer has explicit parameter passing modes:
 
-Issue #97 implements inferred shared-borrow nominal parameters v0.
-
-PR #99: `implement: infer shared-borrow nominal parameters v0`  
-Branch: `feature/inferred-shared-borrow-parameters-v0`
-
-Latest accepted implementation/benchmark head before documentation synchronization:
-
-`f33b513188add2c6755263f6c7e1079072ec9d7b`
-
-### Implemented semantic contract
-
-The lowering layer now has an explicit parameter passing contract:
-
-- `Owned`: existing by-value behavior;
+- `Owned`: ordinary by-value behavior;
 - `SharedBorrow`: call-duration immutable borrow for a proven read-only nominal parameter.
 
-A parameter is inferred `SharedBorrow` only when:
+A parameter can become `SharedBorrow` only when the accepted local/non-transitive classifier proves the nominal parameter is inspected, never consumed and never reinitialized under the current body-use rules. Classification does not recursively depend on callee modes.
 
-1. its declared type is nominal (`Record` or `Enum`);
-2. its own body contains at least one direct `Inspect` use;
-3. it has zero `Consume` uses under the pre-existing/current body-use rules;
-4. it is never reinitialized/assigned;
-5. classification does not depend on inferred modes of callees.
+Rust codegen emits ordinary `&T` parameters and `&expr` arguments. The feature creates no stored first-class reference value and no returned/escaping reference. No implicit clone/copy, boxing, RC/GC, runtime ownership map, invented lifetime or mutable borrow was added.
 
-Nested calls remain consuming boundaries while classifying the caller, so v0 is deliberately non-transitive and requires no fixpoint or generalized lifetime solver.
+The permanent inferred-shared-borrow benchmark remains part of Ubuntu CI and is guarded by generated/reference Rust equality plus the established #4 performance policy.
 
-After classification:
+## Active research — #100 / PR #101 lifetime elision feasibility v0
 
-- a direct top-level nominal local passed to a `SharedBorrow` parameter is ownership-inspected instead of moved;
-- temporaries and subexpressions retain ordinary owned evaluation and are borrowed only for the call duration;
-- later owned move/reinitialization remains valid after a completed shared-borrow call;
-- executable/lowered IR carries the decided mode before Rust codegen;
-- Rust codegen emits direct ordinary `&T` parameters and `&expr` arguments;
-- the record-only and enum-integrated pipelines use the same classifier/passing contract.
+Issue #100 investigates the next Phase 3.3 ownership-ergonomics question: whether useful escaping borrowed results can avoid **named lifetime annotations** without silently changing current owned API contracts.
 
-The following remain `Owned`/fail-closed in v0:
+PR #101: `research: classify lifetime elision feasibility v0`  
+Branch: `research/lifetime-elision-feasibility-v0`
 
-- parameters returned by value;
-- a parameter forwarded through a nested call while classifying the caller;
-- owned enum match scrutinees and payload extraction;
-- parameter reinitialization;
-- any direct consume in a branch or after repeat inspection;
-- stored or escaping references.
+Accepted research code/evidence head before documentation synchronization:
 
-No Evolution `&` syntax, generalized lifetime inference, mutable borrow inference, implicit clone/copy, boxing, RC/GC, runtime ownership map, dynamic dispatch or stored first-class borrow was added.
+`f65db4a68a93240abe51d26444e70fc568a7ba02`
 
-### Targeted correctness coverage
+The PR changes research evidence only:
 
-Committed lowering/codegen coverage proves:
+- `crates/evo-lowering/tests/lifetime_elision_research.rs`;
+- `.github/workflows/lifetime-elision-research.yml`.
 
-- repeated read-only calls on one nominal local;
-- borrow then later owned move;
-- branch/repeat/nested field inspection;
-- temporary arguments are borrowed only at the call boundary;
-- enum-integrated behavior obeys the same rule;
-- owned return/reinitialization boundaries stay owned;
-- forwarding remains deliberately non-transitive;
-- generated benchmark Rust is exactly locked to the committed reference.
+No production parser, lowering, ownership, codegen, language syntax, runtime or accepted-program semantics change.
 
-CI #404 / run `34576556404` on exact head `f33b513...` passed fmt, Clippy, workspace tests and release builds on Ubuntu, Windows and macOS.
+### Dedicated research evidence
 
-### Permanent differential/runtime evidence
-
-New permanent case: `benchmarks/cases/inferred-shared-borrow-v0`.
-
-The Evolution fixture performs 5,000,000 repeated read-only calls on a nominal value and later reassigns that owned value. Its Rust reference uses explicit ordinary shared borrowing and is guarded by a committed exact-reference test.
-
-Accepted Ubuntu CI #404 evidence:
-
-- correctness: **true**;
-- normalized LLVM IR equal: **true**;
-- exact binary equal: **true**;
-- reference median: **5,305,283 ns**;
-- Evolution median: **5,286,876 ns**;
-- observed ratio: **0.996530440**;
-- stable: **true**;
-- timing verdict: **PASS**;
-- final verdict: **PASS**;
-- verdict basis: `byte-identical-binary-parity`.
+Lifetime elision research #2 / run `34580003076`: **SUCCESS** on Ubuntu 24.04 with Rust 1.98.0.
 
 Artifact:
 
-- name `evo-bench-inferred-shared-borrow-ubuntu-latest`;
-- id `10189953214`;
-- digest `sha256:8fcee06fa8df815e0aaf156649d787cf59459f0d829151811f19ff9ae48d7955`.
+- `evo-lifetime-elision-research-ubuntu-24.04`;
+- id `10191268492`;
+- digest `sha256:40b6d338e7ed74aa7d158f32ac07a956cc2694892d3f945015ef99cf8dfad62f`.
 
-Every pre-existing Ubuntu runtime gate also passed on the same head. Several byte-identical cases showed tiny wall-clock ratios above 1.0, but final verdict correctly remained PASS on deterministic binary parity under the established #4 policy.
+Observed matrix:
 
-### Failed-SHA history retained
+- compile-expectation mismatches: **0**;
+- `ELISION-CANDIDATE-REQUIRES-REFERENCE-TYPE`: **8** cases;
+- `REQUIRES-EXPLICIT-LIFETIME-RELATION`: **2** cases;
+- `UNSAFE-OR-UNREPRESENTABLE`: **1** case;
+- aggregate verdict: **REFERENCE-SURFACE-FIRST**.
 
-- CI #394 / run `34487001305`: initial enum-integrated implementation failed rustfmt only.
-- CI #396 / run `34494690100`: Clippy exposed stale API/dead-code integration issues.
-- CI #399 / run `34495384328`: legacy direct-include integration harnesses lacked the new crate-root bridge.
-- CI #402 / run `34496493149` on `64b30b6ddf280adfb04b578ed675331df065c658`: all earlier corpus gates passed, but the new benchmark's manually written Rust reference placed the input helper/function in a different source order than generated Rust. Correctness and stability passed, but LLVM/binary identity was false and the measured ratio was `1.006804464`, so the gate correctly failed. That SHA was not rerun.
-- The reference was aligned with generated Rust and a permanent exact-reference test was added. Corrected exact head `f33b513...` then produced byte-identical PASS evidence in CI #404.
+### Meaning of REFERENCE-SURFACE-FIRST
 
-## Completion gate still open
+Rust can elide lifetime names for useful single-source borrowed-return signatures, including whole-value, nested-field, forwarding and recursive single-source shapes.
 
-#97 is implemented and has accepted implementation/benchmark evidence, but PR #99 must not merge until documentation is synchronized and the exact documentation head receives natural CI **SUCCESS** on Ubuntu, Windows and macOS including the new borrow gate and all existing runtime gates.
+That does not make a returned reference an owned value:
 
-After merge, natural `main` CI must succeed on the exact merge SHA before #97 is closed completed.
+- a stored borrowed result keeps an ownership relation to its source owner;
+- owner move and owner reinitialization while that result is live are rejected;
+- two possible borrowed input owners do not receive a unique returned lifetime from ordinary Rust elision;
+- a returned reference derived from a temporary/local owner is invalid;
+- current `T -> T` owned return semantics cannot silently become `&T`.
+
+Therefore production escaping borrows require a **caller-visible immutable reference / borrowed-result type distinction first**. Named lifetime syntax can remain absent for the proven single-source subset.
+
+Durable report: `docs/LIFETIME_ELISION_RESEARCH.md`.
+
+### Failed-SHA evidence retained
+
+Initial research head:
+
+`6203569451abc1ea448a36eaa47e21fddbe0eed7`
+
+- Lifetime elision research #1 / run `34579682344`: **SUCCESS** with the same decision and zero expectation mismatches;
+- artifact id `10191069517`, digest `sha256:d97af7e415cfe0d27ce3515531a2aa54dae4feba1f5c685796ed4689d2be0c56`;
+- normal CI #407 / run `34579682411` failed only rustfmt on the research test;
+- the SHA was not rerun.
+
+Formatting-only head `f65db4a68a93240abe51d26444e70fc568a7ba02` preserves the matrix and decision. Dedicated research #2 is green. Normal CI #408 / run `34580003002` is the exact-head three-OS gate that must be green before documentation synchronization is attached.
+
+## Required successor direction after #100 completion
+
+Do not implement escaping borrowed returns directly from this research result.
+
+First atomize an immutable reference surface v0 research/design slice covering:
+
+- explicit caller-visible owned `T` versus borrowed `&T`-equivalent distinction;
+- immutable borrowed values stored in locals;
+- source-native owner move/reinitialization conflict diagnostics;
+- single-source lifetime-name elision;
+- compatibility with current owned return contracts;
+- fail-closed behavior for multiple-source lifetime relationships.
+
+Mutable references, generalized lifetime syntax/inference, invented `'static`, hidden clone/copy, boxing, RC/GC, runtime ownership maps and unsafe lifetime widening remain outside that first slice.
 
 ## Implemented language / tooling state
 
-`docs/LANGUAGE_SPEC_V0.md` is the implemented-language source of truth. Current accepted core includes integer/bool/static strings, input/repeat/control flow, functions, lexical block locals, Records v0, Enums v0, by-value ownership/reinitialization, bounded inferred shared-borrow nominal parameters, source-native move provenance diagnostics, source maps, formatter, native check/emit/build/run and verified run/build caches.
+`docs/LANGUAGE_SPEC_V0.md` is the implemented-language source of truth. Current accepted core includes integer/bool/static strings, input/repeat/control flow, functions, lexical block locals, Records v0, Enums v0, by-value ownership/reinitialization, bounded inferred shared-borrow nominal parameters, source-native move diagnostics, source maps, formatter, native check/emit/build/run and verified run/build caches.
 
-## Zero-cost / safety boundary
-
-Core language work must not silently add hidden clone, allocation, boxing, GC/RC, runtime maps, reflection metadata or dynamic dispatch. Shared-borrow inference is call-duration only. It does not invent `'static`, store inferred references, weaken owned-match payload rules, create user-visible reference values, or extend v0 into generalized lifetime semantics.
+There is still **no production user-facing first-class reference syntax/value or returned/escaping reference feature**.
 
 ## CI / handoff invariant
 
