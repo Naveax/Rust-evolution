@@ -476,6 +476,10 @@ fn punctuation_count(text: &str) -> usize {
         .count()
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "research report writer records independent evidence dimensions verbatim"
+)]
 fn write_reports(
     findings: &[SemanticFinding],
     verdict: &str,
