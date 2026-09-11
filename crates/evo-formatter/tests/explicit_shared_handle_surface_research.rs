@@ -668,8 +668,12 @@ fn write_report(
         .expect("writing JSON cannot fail");
     writeln!(json, "  \"surface_count\": {},", surface_findings.len())
         .expect("writing JSON cannot fail");
-    writeln!(json, "  \"semantic_case_count\": {},", semantic_findings.len())
-        .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"semantic_case_count\": {},",
+        semantic_findings.len()
+    )
+    .expect("writing JSON cannot fail");
     writeln!(
         json,
         "  \"compile_expectation_mismatches\": {compile_mismatches},"
@@ -746,20 +750,30 @@ fn write_report(
         .expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(markdown, "- git_sha: `{git_sha}`").expect("writing Markdown cannot fail");
-    writeln!(markdown, "- verdict: **IMPLEMENT-CANDIDATE**")
-        .expect("writing Markdown cannot fail");
+    writeln!(markdown, "- verdict: **IMPLEMENT-CANDIDATE**").expect("writing Markdown cannot fail");
     writeln!(markdown, "- recommended surface: **CONTEXTUAL-WORDS**")
         .expect("writing Markdown cannot fail");
-    writeln!(markdown, "- surface candidates: **{}**", surface_findings.len())
-        .expect("writing Markdown cannot fail");
-    writeln!(markdown, "- Rust semantic cases: **{}**", semantic_findings.len())
-        .expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "- surface candidates: **{}**",
+        surface_findings.len()
+    )
+    .expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "- Rust semantic cases: **{}**",
+        semantic_findings.len()
+    )
+    .expect("writing Markdown cannot fail");
     writeln!(markdown, "- compile mismatches: **{compile_mismatches}**")
         .expect("writing Markdown cannot fail");
     writeln!(markdown, "- runtime mismatches: **{runtime_mismatches}**")
         .expect("writing Markdown cannot fail");
-    writeln!(markdown, "- parser has general generic type AST: **{parser_has_generics}**")
-        .expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "- parser has general generic type AST: **{parser_has_generics}**"
+    )
+    .expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(markdown, "```text\n{rustc}\n```").expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
@@ -837,7 +851,10 @@ fn explicit_shared_handle_surface_research_classifies_candidate() {
     assert_eq!(preferred.duplicate_probe.status, ProbeStatus::Pass);
     assert_eq!(preferred.identifiers_remain_identifiers, ProbeStatus::Pass);
     assert_eq!(preferred.type_probe.formatted, preferred.spec.type_spelling);
-    assert_eq!(preferred.create_probe.formatted, preferred.spec.create_spelling);
+    assert_eq!(
+        preferred.create_probe.formatted,
+        preferred.spec.create_spelling
+    );
     assert_eq!(
         preferred.duplicate_probe.formatted,
         preferred.spec.duplicate_spelling
@@ -871,5 +888,11 @@ fn explicit_shared_handle_surface_research_classifies_candidate() {
         "Rust runtime expectations must match every semantic case"
     );
 
-    write_report(&surface_findings, &semantic_findings, &out, &git_sha, &rustc);
+    write_report(
+        &surface_findings,
+        &semantic_findings,
+        &out,
+        &git_sha,
+        &rustc,
+    );
 }
