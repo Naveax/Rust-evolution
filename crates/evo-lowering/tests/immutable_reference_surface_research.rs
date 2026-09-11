@@ -1,4 +1,4 @@
-use evo_lexer::{lex, TokenKind};
+use evo_lexer::{TokenKind, lex};
 use std::env;
 use std::ffi::OsString;
 use std::fmt::Write as _;
@@ -542,12 +542,9 @@ fn write_reports(
 
     let mut json = String::new();
     writeln!(json, "{{").expect("writing JSON cannot fail");
-    writeln!(json, "  \"git_sha\": {},", json_string(git_sha))
-        .expect("writing JSON cannot fail");
-    writeln!(json, "  \"rustc_vv\": {},", json_string(rustc))
-        .expect("writing JSON cannot fail");
-    writeln!(json, "  \"verdict\": {},", json_string(verdict))
-        .expect("writing JSON cannot fail");
+    writeln!(json, "  \"git_sha\": {},", json_string(git_sha)).expect("writing JSON cannot fail");
+    writeln!(json, "  \"rustc_vv\": {},", json_string(rustc)).expect("writing JSON cannot fail");
+    writeln!(json, "  \"verdict\": {},", json_string(verdict)).expect("writing JSON cannot fail");
     writeln!(
         json,
         "  \"recommended_surface\": {},",
@@ -637,8 +634,11 @@ fn write_reports(
         .expect("writing Markdown cannot fail");
     writeln!(markdown, "- semantic cases: **{}**", findings.len())
         .expect("writing Markdown cannot fail");
-    writeln!(markdown, "- compile expectation mismatches: **{mismatches}**")
-        .expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "- compile expectation mismatches: **{mismatches}**"
+    )
+    .expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(markdown, "```text\n{rustc}\n```").expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
@@ -661,19 +661,15 @@ fn write_reports(
     )
     .expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
-    writeln!(markdown, "## Surface candidates")
-        .expect("writing Markdown cannot fail");
+    writeln!(markdown, "## Surface candidates").expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(
         markdown,
         "| Candidate | Added lexer tokens | Reserved identifiers | Chars | Punctuation | Compatibility | Direct Rust |"
     )
     .expect("writing Markdown cannot fail");
-    writeln!(
-        markdown,
-        "| --- | ---: | ---: | ---: | ---: | --- | --- |"
-    )
-    .expect("writing Markdown cannot fail");
+    writeln!(markdown, "| --- | ---: | ---: | ---: | ---: | --- | --- |")
+        .expect("writing Markdown cannot fail");
     for candidate in SURFACE_CANDIDATES {
         let combined = format!(
             "{} {}",
@@ -693,8 +689,7 @@ fn write_reports(
         .expect("writing Markdown cannot fail");
     }
     writeln!(markdown).expect("writing Markdown cannot fail");
-    writeln!(markdown, "## Semantic matrix")
-        .expect("writing Markdown cannot fail");
+    writeln!(markdown, "## Semantic matrix").expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(
         markdown,
@@ -762,7 +757,8 @@ fn immutable_reference_surface_research_selects_bounded_candidate() {
     }
 
     let ampersand_currently_invalid = lex("&").is_err();
-    let keyword_identifiers_available = is_identifier("ref", "ref") && is_identifier("borrow", "borrow");
+    let keyword_identifiers_available =
+        is_identifier("ref", "ref") && is_identifier("borrow", "borrow");
     let generic_ref_identifier_available = is_identifier("Ref", "Ref");
 
     let scratch = env::temp_dir().join(format!(
@@ -829,13 +825,12 @@ fn immutable_reference_surface_research_selects_bounded_candidate() {
         "DEFER"
     };
 
-    let recommended_surface = if verdict.starts_with("SURFACE-CANDIDATE")
-        && punctuation_surface_compatible
-    {
-        "PUNCTUATION-AMPERSAND"
-    } else {
-        "NONE"
-    };
+    let recommended_surface =
+        if verdict.starts_with("SURFACE-CANDIDATE") && punctuation_surface_compatible {
+            "PUNCTUATION-AMPERSAND"
+        } else {
+            "NONE"
+        };
 
     let git_sha = env::var("EVO_GIT_SHA").unwrap_or_else(|_| "local".to_owned());
     let out = env::var_os("EVO_IMMUTABLE_REFERENCE_RESEARCH_OUT")
@@ -862,7 +857,10 @@ fn immutable_reference_surface_research_selects_bounded_candidate() {
         mismatch_count, 0,
         "all pre-registered compile expectations must match"
     );
-    assert!(bounded_last_use_works, "bounded last-use control must compile");
+    assert!(
+        bounded_last_use_works,
+        "bounded last-use control must compile"
+    );
     assert!(
         live_conflicts_rejected,
         "owner move/reinit and move-through-reference conflicts must fail closed"
