@@ -26,18 +26,16 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import re
 
           path = Path("crates/evo-lowering/src/lib.rs")
           text = path.read_text()
 
-          old = '''    fn lower_statements(&mut self, statements: &[SyntaxStmt]) -> Result<Vec<Stmt>, LowerError> {
-              statements
-                  .iter()
-                  .map(|statement| self.lower_statement(statement))
-                  .collect()
-          }
-          '''
-          new = '''    fn lower_statements(&mut self, statements: &[SyntaxStmt]) -> Result<Vec<Stmt>, LowerError> {
+          pattern = re.compile(
+              r"    fn lower_statements\(&mut self, statements: &\[SyntaxStmt\]\) -> Result<Vec<Stmt>, LowerError> \{\n.*?\n    \}\n\n    fn lower_statement",
+              re.S,
+          )
+          replacement = '''    fn lower_statements(&mut self, statements: &[SyntaxStmt]) -> Result<Vec<Stmt>, LowerError> {
               let mut remaining_uses = identifier_uses_in_statements(statements);
               let mut lowered = Vec::with_capacity(statements.len());
               for statement in statements {
@@ -67,13 +65,13 @@ jobs:
                   self.reference_tracker.forget(&name);
               }
           }
-          '''
-          if text.count(old) != 1:
-              raise SystemExit(f"lower_statements anchor count was {text.count(old)}, expected 1")
-          text = text.replace(old, new, 1)
 
-          helper_anchor = '''    fn apply_mutability(&self, statements: &mut [Stmt]) {
-          '''
+          fn lower_statement'''
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f"lower_statements symbol replacement count was {count}, expected 1")
+
+          helper_anchor = "    fn apply_mutability(&self, statements: &mut [Stmt]) {\n"
           helpers = '''fn identifier_uses_in_statements(statements: &[SyntaxStmt]) -> HashMap<String, usize> {
               let mut uses = HashMap::new();
               for statement in statements {
@@ -93,7 +91,8 @@ jobs:
                       continue;
                   };
                   *value = value.saturating_sub(count);
-                  if *value == 0 {
+                  let exhausted = *value == 0;
+                  if exhausted {
                       remaining.remove(&name);
                   }
               }
@@ -175,9 +174,7 @@ jobs:
               raise SystemExit("apply_mutability anchor missing or duplicated")
           text = text.replace(helper_anchor, helpers + helper_anchor, 1)
 
-          test_anchor = '''    #[test]
-              fn rejects_returning_reference_to_local_owner() {
-          '''
+          test_anchor = "    #[test]\n    fn rejects_returning_reference_to_local_owner() {\n"
           tests = '''    #[test]
               fn releases_owner_after_final_reference_use_in_same_block() {
                   lower_source(
