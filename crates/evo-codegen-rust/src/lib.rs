@@ -301,8 +301,9 @@ fn render_expr(expr: &Expr) -> String {
         ),
         ExprKind::InputInt => "__evo_input_int()".to_owned(),
         ExprKind::LogicalNot(inner) => format!("(!{})", render_expr(inner)),
-        ExprKind::UnaryMinus(inner) => format!("(-{})", render_expr(inner)),
-        ExprKind::Binary { left, op, right } => format!(
+    ExprKind::UnaryMinus(inner) => format!("(-{})", render_expr(inner)),
+    ExprKind::SharedBorrow(inner) => format!("&({})", render_expr(inner)),
+    ExprKind::Binary { left, op, right } => format!(
             "({} {} {})",
             render_expr(left),
             render_binary_op(*op),
@@ -382,7 +383,9 @@ fn expr_uses_input_int(expr: &Expr) -> bool {
             fields.iter().any(|field| expr_uses_input_int(&field.value))
         }
         ExprKind::FieldAccess { base, .. } => expr_uses_input_int(base),
-        ExprKind::LogicalNot(inner) | ExprKind::UnaryMinus(inner) => expr_uses_input_int(inner),
+        ExprKind::LogicalNot(inner)
+    | ExprKind::UnaryMinus(inner)
+    | ExprKind::SharedBorrow(inner) => expr_uses_input_int(inner),
         ExprKind::Binary { left, right, .. } => {
             expr_uses_input_int(left) || expr_uses_input_int(right)
         }
@@ -498,6 +501,40 @@ mod tests {
         assert!(generated.contains("__evo_item: &__EvoRecord_Item) -> i64"));
         assert!(generated.contains("return (__evo_item).__evo_field_value;"));
         assert!(!generated.contains("clone()"));
+    }
+
+    #[test]
+    fn explicit_borrow_codegen_uses_plain_safe_rust_reference() {
+        let generated = compile_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nprint r.value\n",
+        );
+        assert!(generated.contains("let __evo_r = &(__evo_item);"));
+        assert!(!generated.contains("unsafe"));
+        assert!(!generated.contains("Rc<"));
+        assert!(!generated.contains("Arc<"));
+    }
+
+    #[test]
+    fn shared_borrow_call_accepts_first_class_reference_without_double_ampersand() {
+        let generated = compile_source(
+            "record Item\nvalue int\nend\nfn read(item Item) int\nreturn item.value\nend\nfn bridge(item &Item) int\nreturn read(item)\nend\n",
+        );
+        assert!(generated.contains("fn __evo_fn_read(__evo_item: &__EvoRecord_Item) -> i64"));
+        assert!(generated.contains("return __evo_fn_read(__evo_item);"));
+        assert!(!generated.contains("__evo_fn_read(&__evo_item)"));
+    }
+
+    #[test]
+    fn nested_reference_return_codegen_relies_on_rust_lifetime_elision() {
+        let generated = compile_source(
+            "record Inner\nvalue int\nend\nrecord Outer\ninner Inner\nend\nfn nested(item &Outer) &Inner\nreturn &item.inner\nend\n",
+        );
+        assert!(generated.contains(
+            "fn __evo_fn_nested(__evo_item: &__EvoRecord_Outer) -> &__EvoRecord_Inner {"
+        ));
+        assert!(generated.contains("return &((__evo_item).__evo_field_inner);"));
+        assert!(!generated.contains("'static"));
+        assert!(!generated.contains("unsafe"));
     }
 
     #[test]
