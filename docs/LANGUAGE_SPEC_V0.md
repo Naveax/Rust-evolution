@@ -263,7 +263,7 @@ Whole nominal record/enum display and equality are not v0 operations.
 
 ## Records v0
 
-Records v0 is the first user-defined product-data model. It is nominal, statically typed, by-value, and ZERO-cost-class.
+Records v0 is the first user-defined product-data model. It is nominal, statically typed, by-value by default, and ZERO-cost-class.
 
 ### Declaration and nominal identity
 
@@ -316,11 +316,11 @@ Accessing a scalar field does not move the containing record. Chained traversal 
 
 Moving a record-valued or otherwise move-only nominal field out of a containing record is deliberately rejected in v0 rather than implemented through an implicit clone.
 
-Records use ordinary by-value move semantics. Reading a record local by value consumes it. Passing or returning a record by value uses the same rule.
+Records use ordinary by-value move semantics by default. Reading a record local by value consumes it. Passing or returning a record by value uses the same rule. The bounded inferred shared-borrow parameter rule described under Functions v0 is the only implemented exception to by-value nominal parameter passing.
 
 A moved record local may be explicitly reinitialized by assigning a new value of the exact same nominal type.
 
-There is no implicit `.clone()`, copy insertion, borrow inference, or reference inference.
+There is no implicit `.clone()`, copy insertion, user-facing reference syntax, or general reference inference.
 
 ### Ownership through control flow
 
@@ -338,7 +338,7 @@ Records v0 adds no hidden heap allocation solely for records, `Box`, `Rc`, `Arc`
 
 ## Enums v0
 
-Enums v0 is the first user-defined nominal sum-data model. It is closed, statically typed, by-value, exhaustively matched, and ZERO-cost-class.
+Enums v0 is the first user-defined nominal sum-data model. It is closed, statically typed, by-value by default, exhaustively matched, and ZERO-cost-class.
 
 ### Declaration and nominal identity
 
@@ -414,7 +414,7 @@ An exhaustive match in a function can satisfy terminal return analysis only when
 
 Enums are move-only nominal values in v0 even when every payload is scalar.
 
-Reading an enum local by value consumes it. Passing an enum argument by value, returning an enum, or performing an owned exhaustive match uses the same by-value ownership model.
+Reading an enum local by value consumes it. Passing an enum argument by value, returning an enum, or performing an owned exhaustive match uses the same by-value ownership model. A qualifying read-only enum function parameter may use the bounded inferred shared-borrow rule described under Functions v0; owned `match` remains consuming and is not redesigned as match-by-reference.
 
 A moved enum local may be explicitly reinitialized by assigning a fresh value of the exact same enum type. CI contains a full native process regression proving reinitialization after a consuming call restores availability.
 
@@ -483,9 +483,58 @@ Top-level locals are not captured. Duplicate parameter and function names are re
 
 Functions v0 always declare a non-unit return type. Every reachable terminal path must return. A terminal `if/else` satisfies this only when both branches return; an exhaustive match satisfies it only when all arms return. Loops are not considered guaranteed-return constructs.
 
-Nominal record/enum parameters and returns participate in the same by-value ownership analysis as other uses.
+Nominal record/enum returns and ordinary `Owned` nominal parameters participate in the by-value ownership analysis. Qualifying read-only nominal parameters may instead use the internal `SharedBorrow` mode below.
 
 Named functions lower to ordinary static Rust functions prefixed by `__evo_fn_`. There is no function registry, VM, vtable, boxing, or dynamic dispatch solely for named functions.
+
+### Inferred shared-borrow nominal parameters v0
+
+Evolution source has no `&` parameter syntax. Lowering internally decides one of two passing modes for each function parameter:
+
+- `Owned`: the existing by-value behavior;
+- `SharedBorrow`: an immutable call-duration borrow lowered directly to ordinary Rust `&T`.
+
+A parameter is inferred `SharedBorrow` only when all of the following are true:
+
+1. its declared type is nominal, meaning a declared record or enum;
+2. its own function body contains at least one direct use classified `Inspect` under the pre-existing body-use rules;
+3. it contains zero `Consume` uses under those same rules;
+4. the parameter is never reinitialized/assigned;
+5. classification does not depend on inferred passing modes of called functions.
+
+Everything else remains `Owned`. Scalar parameters never enter shared-borrow inference.
+
+The v0 rule is deliberately **local and non-transitive**. A nested function call is a consuming boundary while classifying the caller, even when that callee independently qualifies for `SharedBorrow`. Therefore a forwarding function whose parameter is used only as another call argument remains `Owned`; there is no fixpoint or whole-program lifetime propagation.
+
+After parameter modes are decided, call ownership uses the callee's already-decided contract:
+
+- a direct top-level nominal caller local targeting a `SharedBorrow` parameter is inspected rather than moved;
+- a temporary, constructor, or other subexpression keeps ordinary owned evaluation and is borrowed only for the duration of that call;
+- no borrow value is stored as a first-class Evolution value;
+- a completed shared-borrow call does not consume the caller local, so a later shared call, owned move, or exact-type reinitialization remains governed by ordinary ownership rules.
+
+Owned return, owned enum `match`, direct consume in any branch, parameter reinitialization, consume after repeat inspection, and cases requiring stored or escaping references remain `Owned`/fail-closed.
+
+The passing mode exists in semantic/lowered IR before codegen. Rust rendering does not re-infer ownership from function bodies. A qualifying source function such as:
+
+```text
+fn read_value(item Item) int
+    return item.value
+end
+```
+
+lowers conceptually to:
+
+```rust
+fn __evo_fn_read_value(__evo_item: &__EvoRecord_Item) -> i64 {
+    return (__evo_item).__evo_field_value;
+}
+
+let first = __evo_fn_read_value(&__evo_item);
+let second = __evo_fn_read_value(&__evo_item);
+```
+
+The same rule applies in the record-only and enum-integrated executable/codegen paths. It adds no implicit `.clone()`, `Clone`, allocation helper, `Box`, `Rc`, `Arc`, GC/runtime ownership map, reflection metadata, dynamic dispatch, unsafe code, `'static` widening, mutable borrow inference, stored reference, returned reference, or generalized lifetime inference.
 
 ## Logical operators
 
@@ -630,6 +679,7 @@ Runtime-dependent Ubuntu CI gates include:
 - `function-call-v0`;
 - `block-locals-v0`;
 - `records-v0`;
+- `inferred-shared-borrow-v0`;
 - `enums-v0`.
 
 The harness compares correctness, raw timing, normalized LLVM IR, binary size, and exact executable bytes.
@@ -659,6 +709,26 @@ For `block-locals-v0`:
 ### Accepted Records v0 parity evidence
 
 Records v0 has accepted differential evidence with correctness PASS, normalized LLVM equality, byte-identical executables, equal binary size, and final `byte-identical-binary-parity` PASS. Historical raw timing remains retained in benchmark evidence rather than being promoted over identical executable bytes.
+
+### Accepted inferred shared-borrow v0 parity evidence
+
+Corrected implementation/benchmark head `f33b513188add2c6755263f6c7e1079072ec9d7b`, CI #404 / run `34576556404`, produced:
+
+- exact benchmark-reference/generated-Rust lock: PASS;
+- differential stdout/stderr/exit correctness: PASS;
+- normalized LLVM IR equality: true;
+- exact executable equality: true;
+- reference median: 5,305,283 ns;
+- Evolution median: 5,286,876 ns;
+- stable measurement: true;
+- observed median ratio: 0.996530440;
+- timing verdict: PASS;
+- final verdict: PASS;
+- verdict basis: `byte-identical-binary-parity`.
+
+Artifact `evo-bench-inferred-shared-borrow-ubuntu-latest`, id `10189953214`, digest `sha256:8fcee06fa8df815e0aaf156649d787cf59459f0d829151811f19ff9ae48d7955`, retains generated Rust, binaries, IR, JSON/Markdown reports and raw samples.
+
+The earlier benchmark head `64b30b6ddf280adfb04b578ed675331df065c658` is retained as failed evidence. Its manually written reference differed from generated Rust in helper/function source ordering, so correctness/stability passed while binary identity was false and timing ratio `1.006804464` failed. The corrected benchmark now has a committed exact-reference test so that irrelevant code-layout differences cannot masquerade as generated-code runtime regressions.
 
 ### Accepted Enums v0 parity evidence
 
@@ -697,7 +767,7 @@ Not implemented in v0:
 - runtime-produced/owned string semantics beyond the current literal/static string model;
 - whole-record or whole-enum display/equality semantics;
 - partial move of move-only nominal fields;
-- implicit clone/copy/borrow/reference inference;
+- implicit clone/copy insertion or general reference inference beyond the bounded shared-borrow parameter rule;
 - methods / impl blocks;
 - recursive heap/self-referential nominal layouts requiring indirection;
 - generic enums or generic records;
@@ -713,7 +783,9 @@ Not implemented in v0:
 - runtime reflection;
 - traits/generics generally;
 - user-facing ownership/borrow syntax;
-- references/lifetimes;
+- returned/escaping references and generalized lifetime syntax/inference;
+- mutable borrow inference;
+- stored first-class borrow/reference values;
 - collections and collection literals;
 - general ranges/iteration syntax outside `repeat`;
 - `Result` / `Option` sugar;
