@@ -8,10 +8,11 @@ This is the durable project handoff. Always re-read live GitHub issue/PR/Actions
 
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
-- Current verified stable main predecessor for active #102: `3f501b51c79c39241107df1cbe098acb6ec058ad`
+- Current verified stable main: `5e3c111a903dbe717f374fcbe6fb2e93ab6864c1`
 - Rust toolchain: **1.98.0**
-- production flags: edition 2024, opt-level 3, codegen-units 1
-- measured GNU/Linux linker path: `rustc -> cc -> lld`
+- Production flags: edition 2024, opt-level 3, codegen-units 1
+- Measured GNU/Linux linker path: `rustc -> cc -> lld`
+- Natural post-merge validation for current main: CI #457 / run `34609435365` **SUCCESS** on Ubuntu, Windows and macOS, including permanent Ubuntu build/cache/runtime gates and release build.
 
 ## Accepted build / compile sequence
 
@@ -24,121 +25,98 @@ This is the durable project handoff. Always re-read live GitHub issue/PR/Actions
 - #91 / PR #92: compile-memory baseline **DEFER / NO ACTION**.
 - #93 / PR #94: binary-size baseline **DEFER / NO ACTION**; controlled reference/Evolution binaries were byte-identical across the seven-case corpus.
 
-Dependency-build, proc-macro cost and workspace scaling remain deferred until Evolution has a real user-program package/dependency graph.
+Dependency-build, proc-macro cost and workspace scaling remain deferred until Evolution has a real user-program package/dependency graph. Durable reports remain under `docs/` for each accepted/rejected/deferred research step.
 
-Durable reports remain under `docs/` for each accepted/rejected/deferred research step.
+## Ownership-ergonomics chain completed through immutable references v0
 
-## #95 / #97 — bounded shared-borrow work completed
+### #95 / PR #96 — borrow inference feasibility
 
-#95 / PR #96 established a useful local read-only nominal-parameter subset and returned **IMPLEMENT-CANDIDATE**. #97 / PR #99 implemented that bounded rule.
+Research verdict: **IMPLEMENT-CANDIDATE**. A local, deliberately non-transitive classifier can infer call-duration shared borrows for read-only nominal parameters without generalized lifetime solving.
 
-PR #99 squash-merged to main as:
+PR #96 merged as `cfc19e3308a505a45c970e883dffc72a8bf0b81b`.
 
-`355847a23faa29360e1da10bdfb2739eec6f8b6a`
+### #97 / PR #99 — inferred shared-borrow nominal parameters v0
 
-Natural post-merge CI #406 / run `34577783740`: **SUCCESS** on Ubuntu, Windows and macOS.
+Implemented explicit `Owned` / `SharedBorrow` parameter modes. `SharedBorrow` is a call-duration non-owning mode only; it does not create a stored reference or escaping lifetime relation.
 
-Issue #97 is closed/completed.
+PR #99 merged as `355847a23faa29360e1da10bdfb2739eec6f8b6a`; #97 is closed/completed.
 
-### Production shared-borrow contract
+### #100 / PR #101 — lifetime-elision feasibility
 
-The lowering layer has explicit parameter passing modes:
+Verdict: **REFERENCE-SURFACE-FIRST**. Rust 1.98 can elide named lifetimes for deterministic single-source returned-reference signatures, but escaping results remain caller-visible references and ambiguous multi-owner relations fail closed.
 
-- `Owned`: ordinary by-value behavior;
-- `SharedBorrow`: call-duration immutable borrow for a proven read-only nominal parameter.
+PR #101 merged as `3f501b51c79c39241107df1cbe098acb6ec058ad`. Durable report: `docs/LIFETIME_ELISION_RESEARCH.md`.
 
-A parameter can become `SharedBorrow` only when the accepted local/non-transitive classifier proves the nominal parameter is inspected, never consumed and never reinitialized under the current body-use rules. Classification does not recursively depend on callee modes.
+### #102 / PR #103 — immutable reference surface research
 
-Rust codegen emits ordinary `&T` parameters and `&expr` arguments. This feature creates no stored first-class reference value and no returned/escaping reference. No implicit clone/copy, boxing, RC/GC, runtime ownership map, invented lifetime or mutable borrow was added.
-
-## #100 — lifetime elision feasibility completed
-
-Issue #100 / PR #101 established the boundary required before escaping borrowed results.
-
-PR #101 squash-merged to main as:
-
-`3f501b51c79c39241107df1cbe098acb6ec058ad`
-
-Exact-SHA post-merge validation:
-
-- CI #410 / run `34581869543`: **SUCCESS** on Ubuntu, Windows and macOS;
-- Lifetime elision research #4 / run `34581869494`: **SUCCESS**;
-- artifact id `10192045985`;
-- digest `sha256:2a21e3a591a33bcf07fc36bb2b2c29c2bfed15234a4a3e30fdc010e02c8e976e`;
-- aggregate result remains **REFERENCE-SURFACE-FIRST** with zero compile-expectation mismatches.
-
-Issue #100 is complete.
-
-### Meaning of REFERENCE-SURFACE-FIRST
-
-Rust 1.98 can elide named lifetime parameters for useful deterministic single-source returned-reference signatures. That does not make a returned reference an owned value.
-
-Current `T -> T` APIs remain owned. Escaping borrowed results require an explicit caller-visible reference distinction, and ambiguous multi-owner relationships remain outside the bounded subset.
-
-Durable report: `docs/LIFETIME_ELISION_RESEARCH.md`.
-
-## #102 / PR #103 — immutable reference surface research completed
-
-The immutable-reference surface research is complete and merged to `main` as:
-
-`cc7e7002bd1dd9726e0fd6bcf3d73687fddc0e15`
-
-Accepted result: **SURFACE-CANDIDATE / PUNCTUATION-AMPERSAND**. The locked research matrix contains 19 semantic cases with zero compile-expectation mismatches. Durable report: `docs/IMMUTABLE_REFERENCE_SURFACE_RESEARCH.md`.
-
-## Active production — #104 / PR #105 immutable references v0
-
-Issue #104 / draft PR #105 implements the bounded production successor on `feature/immutable-reference-surface-v0`.
-
-### Implemented surface and representation
-
-Production code now has explicit immutable-reference representation across the frontend and lowering pipeline:
+Verdict: **SURFACE-CANDIDATE / PUNCTUATION-AMPERSAND**. The selected source surface is:
 
 ```text
-syntax type:       SharedRef(TypeName)
-syntax expression: SharedBorrow(Expr)
-semantic type:     SharedRef(SemanticType)
-lowered value:     SharedRef(ValueType)
-provenance:        Parameter(name) | LocalOwner(name)
+&T
+&expr
 ```
 
-The accepted source forms are `&T` in nominal-record function contracts and `&expr` for first-class immutable borrows. Existing owned `T` remains owned and inferred `SharedBorrow` remains a separate call-duration passing mode.
+The research matrix retained 19 semantic cases with zero compile-expectation mismatches. Durable report: `docs/IMMUTABLE_REFERENCE_SURFACE_RESEARCH.md`.
 
-### Provenance and liveness contract
+PR #103 merged as `cc7e7002bd1dd9726e0fd6bcf3d73687fddc0e15`.
 
-- A returned reference has one deterministic source reference parameter in v0.
-- Multiple possible reference inputs for a borrowed result fail closed rather than inventing a lifetime relation.
-- Local reference bindings retain provenance from their owner/reference source.
-- Forwarding calls, direct recursion and same-owner branches preserve that source.
-- A reference derived from a function-local owner cannot escape via return.
-- Owner move or reinitialization is rejected while a possibly-live reference points at it.
-- Bounded last-use analysis releases a local reference after its final proven use in the current statement block.
-- An outer reference used inside `if`/`repeat` remains live through the complete control-flow statement and may end afterward when there is no later use.
-- Uncertain/over-approximated cases remain live conservatively; safety is preferred over convenience.
-- Scalar fields may be inspected through a shared reference; moving a nominal record field through a reference is rejected with no implicit clone.
+### #104 / PR #105 — immutable references v0 production implementation
 
-### Code generation
+Issue #104 is closed/completed. PR #105 squash-merged to current `main` as:
 
-The feature lowers directly to safe ordinary Rust references. There is no hidden allocation, wrapper/reference object, RC/GC, runtime borrow map, unsafe lifetime extension, or invented `'static`.
+`5e3c111a903dbe717f374fcbe6fb2e93ab6864c1`
 
-### Permanent validation
+Exact post-merge CI #457 / run `34609435365`: **SUCCESS** on Ubuntu, Windows and macOS.
 
-Permanent tests cover lexer/recovery compatibility, formatter idempotence, parser fail-fast/recovery parity, semantic reference types, direct and local borrowing, live-owner move/reinit rejection, bounded final use, dead-local escape rejection, ambiguous-source rejection, forwarding, nested scalar field reads, recursion, same-owner branches, inferred `SharedBorrow` interoperability, nominal-field move rejection, and direct zero-cost Rust codegen.
+Production behavior now includes:
 
-The historical immutable-reference research workflow is retired. Temporary development bootstrap workflows are removed after each verified source slice and are not part of the production gate.
+- lexer, parser and formatter support for `&T` and `&expr`;
+- explicit immutable-reference syntax, semantic and lowered value types;
+- nominal-record reference parameters and returns;
+- first-class local reference bindings;
+- deterministic single-source provenance across direct/local forwarding, calls, recursion and same-source branches;
+- fail-closed rejection of ambiguous returned-reference sources and dead-local escapes;
+- owner move/reinitialization rejection while a dependent reference may still be live;
+- bounded final-use liveness allowing a later owner move/reinitialization after the final proven reference use;
+- conservative control-flow liveness through branch/repeat statements;
+- scalar field inspection through immutable references;
+- source-native rejection of moving nominal move-only fields through a shared reference;
+- interoperability with inferred call-duration `SharedBorrow` without accidental `&&T`;
+- direct ordinary safe Rust `&T` / `&expr` lowering;
+- no hidden allocation, wrapper reference object, clone, RC/GC, runtime ownership map, unsafe lifetime widening or invented `'static`.
 
-### Explicit non-goals
+Permanent lexer/parser/formatter/lowering/diagnostic/codegen/compatibility tests carry the production proof. Historical immutable-reference research evidence is preserved, while its obsolete main-push research workflow was retired after adoption.
 
-No mutable references, nested references, primitive reference types, reference fields in records/enums, generalized/user-written lifetime syntax, multi-owner lifetime solving, self-referential reference layouts, unsafe widening, hidden clone/copy, allocation, RC/GC, or runtime ownership machinery are approved by #104.
+## Active successor — #106 shared ownership ergonomics research
 
-## Completion gate still open
+Issue #106 is open:
 
-PR #105 remains draft until documentation is synchronized and a clean user-authored exact head receives natural normal CI success across Ubuntu, Windows and macOS, including formatter, Clippy, workspace tests, release build and existing performance gates.
+`P0 research shared ownership ergonomics v0: explicit aliasing without hidden ownership cost`
 
-After merge, the natural exact-SHA `main` CI must succeed before #104 is closed completed.
+Start gate is current verified `main` `5e3c111a903dbe717f374fcbe6fb2e93ab6864c1` after #104 completion.
+
+The research must determine whether the current language is ready for an explicit shared-owner contract and must distinguish:
+
+- owned `T`;
+- borrowed `&T`;
+- one-thread multi-owner `Rc`-like semantics;
+- cross-thread `Arc`-like semantics;
+- interior mutability and synchronization as separate semantic/cost boundaries;
+- `Weak`/cycle behavior and arena/index alternatives.
+
+No production syntax is approved yet. In particular, `SharedBorrow` and `SharedRef` must not be overloaded into shared ownership: both remain non-owning concepts.
+
+The central transparency rule is that ordinary assignment or parameter passing must never silently introduce allocation, reference-count increments, atomic operations, locking, deep clone, GC or runtime ownership tables. Any future shared-ownership mechanism must make its ownership cost caller-visible and lower directly to the equivalent idiomatic Rust mechanism with no extra Evolution runtime layer.
+
+Required final research verdict: `IMPLEMENT-CANDIDATE`, `SPLIT-RESEARCH`, `DEFER`, or `REJECT`.
 
 ## Implemented language / tooling state
 
-`docs/LANGUAGE_SPEC_V0.md` is the implemented-language source of truth. The production core now includes integer/bool/static strings, input/repeat/control flow, functions, lexical block locals, Records v0, Enums v0, by-value ownership/reinitialization, inferred call-duration shared-borrow parameters, first-class bounded immutable references, source-native move/reference diagnostics, source maps, formatter, native check/emit/build/run and verified run/build caches.
+`docs/LANGUAGE_SPEC_V0.md` is the implemented-language source of truth. The production core currently includes integer/bool/static strings, input/repeat/control flow, functions, lexical block locals, Records v0, Enums v0, by-value ownership/reinitialization, inferred call-duration shared-borrow parameters, first-class bounded immutable references, source-native move/reference diagnostics, source maps, formatter, native check/emit/build/run and verified run/build caches.
+
+## Explicit current non-goals
+
+No mutable references, generalized/user-written lifetime solver, implicit shared ownership, hidden clone/allocation, interior-mutability implementation, concurrency runtime design, cyclic/self-referential production structures, GC or silent changes to existing `T` / `&T` contracts are approved by the current ownership work.
 
 ## CI / handoff invariant
 
