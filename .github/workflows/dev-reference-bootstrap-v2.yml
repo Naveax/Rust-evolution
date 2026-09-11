@@ -1,0 +1,565 @@
+name: DEV immutable reference bootstrap v2
+
+on:
+  push:
+    branches:
+      - feature/immutable-reference-surface-v0
+    paths:
+      - .github/workflows/dev-reference-bootstrap-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feature/immutable-reference-surface-v0
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+
+      - name: Apply bounded frontend surface
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one replacement, found {count}\n--- needle ---\n{old}")
+              p.write_text(text.replace(old, new, 1))
+
+          parser = "crates/evo-parser/src/lib.rs"
+          replace_once(parser, """pub enum TypeName {
+              Int,
+              Bool,
+              String,
+              Named(String),
+          }
+          """, """pub enum TypeName {
+              Int,
+              Bool,
+              String,
+              Named(String),
+              SharedRef(Box<TypeName>),
+          }
+          """)
+          replace_once(parser, """    LogicalNot(Box<Expr>),
+              UnaryMinus(Box<Expr>),
+              Binary {
+          """, """    LogicalNot(Box<Expr>),
+              UnaryMinus(Box<Expr>),
+              SharedBorrow(Box<Expr>),
+              Binary {
+          """)
+          replace_once(parser, """            let payload_type = if matches!(self.current().kind, TokenKind::Newline) {
+                          None
+                      } else {
+                          Some(self.parse_type_name()?)
+                      };
+          """, """            let payload_type = if matches!(self.current().kind, TokenKind::Newline) {
+                          None
+                      } else {
+                          if matches!(self.current().kind, TokenKind::Ampersand) {
+                              return Err(self.error_here(
+                                  "immutable reference enum payloads are not supported in v0",
+                              ));
+                          }
+                          Some(self.parse_owned_type_name()?)
+                      };
+          """)
+          replace_once(parser, """            TokenKind::Identifier(name) => Ok(RecordFieldType::Named(name)),
+                      _ => Err(ParseError {
+                          message: "expected record field type".to_owned(),
+          """, """            TokenKind::Identifier(name) => Ok(RecordFieldType::Named(name)),
+                      TokenKind::Ampersand => Err(ParseError {
+                          message: "immutable reference record fields are not supported in v0"
+                              .to_owned(),
+                          span: token.span,
+                      }),
+                      _ => Err(ParseError {
+                          message: "expected record field type".to_owned(),
+          """)
+          replace_once(parser, """            let type_token = self.current().clone();
+                      let type_name = self.parse_type_name()?;
+                      parameters.push(Parameter {
+                          name,
+                          type_name,
+                          span: name_token.span.join(type_token.span),
+                      });
+          """, """            let type_name = self.parse_type_name()?;
+                      let type_end = self.tokens[self.index.saturating_sub(1)].span;
+                      parameters.push(Parameter {
+                          name,
+                          type_name,
+                          span: name_token.span.join(type_end),
+                      });
+          """)
+          replace_once(parser, """    fn parse_type_name(&mut self) -> Result<TypeName, ParseError> {
+                  let token = self.advance();
+                  match token.kind {
+                      TokenKind::TypeInt => Ok(TypeName::Int),
+                      TokenKind::TypeBool => Ok(TypeName::Bool),
+                      TokenKind::TypeString => Ok(TypeName::String),
+                      TokenKind::Identifier(name) => Ok(TypeName::Named(name)),
+                      _ => Err(ParseError {
+                          message: "expected type name".to_owned(),
+                          span: token.span,
+                      }),
+                  }
+              }
+          """, """    fn parse_type_name(&mut self) -> Result<TypeName, ParseError> {
+                  if !matches!(self.current().kind, TokenKind::Ampersand) {
+                      return self.parse_owned_type_name();
+                  }
+
+                  let marker = self.advance().span;
+                  let token = self.advance();
+                  match token.kind {
+                      TokenKind::Identifier(name) if name == "mut" => Err(ParseError {
+                          message: "mutable references are not supported in v0".to_owned(),
+                          span: marker.join(token.span),
+                      }),
+                      TokenKind::Identifier(name) => {
+                          Ok(TypeName::SharedRef(Box::new(TypeName::Named(name))))
+                      }
+                      TokenKind::Ampersand => Err(ParseError {
+                          message: "nested immutable reference types are not supported in v0"
+                              .to_owned(),
+                          span: marker.join(token.span),
+                      }),
+                      TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString => {
+                          Err(ParseError {
+                              message: "immutable reference types require a nominal type in v0"
+                                  .to_owned(),
+                              span: marker.join(token.span),
+                          })
+                      }
+                      _ => Err(ParseError {
+                          message: "expected nominal type name after '&'".to_owned(),
+                          span: marker.join(token.span),
+                      }),
+                  }
+              }
+
+              fn parse_owned_type_name(&mut self) -> Result<TypeName, ParseError> {
+                  let token = self.advance();
+                  match token.kind {
+                      TokenKind::TypeInt => Ok(TypeName::Int),
+                      TokenKind::TypeBool => Ok(TypeName::Bool),
+                      TokenKind::TypeString => Ok(TypeName::String),
+                      TokenKind::Identifier(name) => Ok(TypeName::Named(name)),
+                      _ => Err(ParseError {
+                          message: "expected type name".to_owned(),
+                          span: token.span,
+                      }),
+                  }
+              }
+          """)
+          replace_once(parser, """    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+                  if matches!(self.current().kind, TokenKind::Minus) {
+                      let start = self.advance().span;
+                      let expr = self.parse_unary()?;
+                      let span = start.join(expr.span);
+                      return Ok(Expr {
+                          kind: ExprKind::UnaryMinus(Box::new(expr)),
+                          span,
+                      });
+                  }
+                  self.parse_postfix()
+              }
+          """, """    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+                  if matches!(self.current().kind, TokenKind::Minus) {
+                      let start = self.advance().span;
+                      let expr = self.parse_unary()?;
+                      let span = start.join(expr.span);
+                      return Ok(Expr {
+                          kind: ExprKind::UnaryMinus(Box::new(expr)),
+                          span,
+                      });
+                  }
+                  if matches!(self.current().kind, TokenKind::Ampersand) {
+                      let start = self.advance().span;
+                      if matches!(self.current().kind, TokenKind::Ampersand) {
+                          return Err(self.error_here(
+                              "nested immutable borrow expressions are not supported in v0",
+                          ));
+                      }
+                      let expr = self.parse_unary()?;
+                      let span = start.join(expr.span);
+                      return Ok(Expr {
+                          kind: ExprKind::SharedBorrow(Box::new(expr)),
+                          span,
+                      });
+                  }
+                  self.parse_postfix()
+              }
+          """)
+
+          anchor = """    #[test]
+              fn parses_named_record_types_in_function_signatures() {
+          """
+          tests = """    #[test]
+              fn parses_immutable_reference_contracts_and_borrow_expressions() {
+                  let program = parse_source(
+                      "record Item\\nvalue int\\nend\\nfn view(item &Item) &Item\\nreturn &item\\nend\\n",
+                  );
+                  assert_eq!(
+                      program.functions[0].parameters[0].type_name,
+                      TypeName::SharedRef(Box::new(TypeName::Named("Item".to_owned())))
+                  );
+                  assert_eq!(
+                      program.functions[0].return_type,
+                      TypeName::SharedRef(Box::new(TypeName::Named("Item".to_owned())))
+                  );
+                  let StmtKind::Return(expr) = &program.functions[0].body[0].kind else {
+                      panic!("expected return");
+                  };
+                  assert!(matches!(
+                      expr.kind,
+                      ExprKind::SharedBorrow(ref inner)
+                          if matches!(inner.kind, ExprKind::Identifier(ref name) if name == "item")
+                  ));
+              }
+
+              #[test]
+              fn immutable_borrow_wraps_postfix_field_access() {
+                  let program = parse_source("r = &item.inner\\n");
+                  let StmtKind::Bind { expr, .. } = &program.statements[0].kind else {
+                      panic!("expected binding");
+                  };
+                  assert!(matches!(
+                      expr.kind,
+                      ExprKind::SharedBorrow(ref inner)
+                          if matches!(inner.kind, ExprKind::FieldAccess { ref field, .. } if field == "inner")
+                  ));
+              }
+
+              #[test]
+              fn rejects_out_of_scope_reference_type_surfaces() {
+                  for (source, expected) in [
+                      ("fn nested(item &&Item) Item\\nreturn item\\nend\\n", "nested immutable reference types"),
+                      ("fn mutable(item &mut) Item\\nreturn item\\nend\\n", "mutable references"),
+                      ("fn scalar(item &int) int\\nreturn 1\\nend\\n", "require a nominal type"),
+                      ("record Holder\\nitem &Item\\nend\\n", "reference record fields"),
+                      ("enum MaybeItem\\nSome &Item\\nend\\n", "reference enum payloads"),
+                  ] {
+                      let tokens = lex(source).expect("lexing should succeed");
+                      let error = parse(&tokens).expect_err("surface should be rejected");
+                      assert!(error.message.contains(expected));
+                  }
+              }
+
+              #[test]
+              fn rejects_nested_borrow_expression() {
+                  let tokens = lex("r = &&item\\n").expect("lexing should succeed");
+                  let error = parse(&tokens).expect_err("nested borrow should fail");
+                  assert!(error.message.contains("nested immutable borrow expressions"));
+              }
+
+              #[test]
+              fn recovering_parser_matches_fail_fast_for_reference_surface() {
+                  let source = "record Item\\nvalue int\\nend\\nfn view(item &Item) &Item\\nreturn &item\\nend\\n";
+                  let tokens = lex(source).expect("lexing should succeed");
+                  assert_eq!(
+                      parse_recovering(&tokens).expect("recovery parse should succeed"),
+                      parse(&tokens).expect("fail-fast parse should succeed")
+                  );
+              }
+
+          """
+          replace_once(parser, anchor, tests + anchor)
+
+          borrow = "crates/evo-lowering/src/borrow_inference.rs"
+          replace_once(borrow, """        SyntaxExprKind::LogicalNot(inner) | SyntaxExprKind::UnaryMinus(inner) => {
+                      collect_expr_effects(inner, parameter, UseMode::Consume, effects);
+                  }
+          """, """        SyntaxExprKind::LogicalNot(inner)
+                  | SyntaxExprKind::UnaryMinus(inner)
+                  | SyntaxExprKind::SharedBorrow(inner) => {
+                      collect_expr_effects(inner, parameter, UseMode::Consume, effects);
+                  }
+          """)
+
+          records = "crates/evo-lowering/src/record_environment_records.rs"
+          replace_once(records, """            SyntaxTypeName::Named(name) => {
+                          if self.indices.contains_key(name) {
+                              Ok(SemanticType::Record(name.clone()))
+                          } else {
+                              Err(LowerError {
+                                  message: format!("unknown record type {name:?}"),
+                                  span,
+                              })
+                          }
+                      }
+          """, """            SyntaxTypeName::Named(name) => {
+                          if self.indices.contains_key(name) {
+                              Ok(SemanticType::Record(name.clone()))
+                          } else {
+                              Err(LowerError {
+                                  message: format!("unknown record type {name:?}"),
+                                  span,
+                              })
+                          }
+                      }
+                      SyntaxTypeName::SharedRef(_) => Err(LowerError {
+                          message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+                          span,
+                      }),
+          """)
+
+          suggestions = "crates/evo-lowering/src/source_suggestions.rs"
+          replace_once(suggestions, """            ExprKind::LogicalNot(inner) | ExprKind::UnaryMinus(inner) => {
+                          let _ = self.walk_expr(inner, scopes);
+                          None
+                      }
+          """, """            ExprKind::SharedBorrow(inner) => self.walk_expr(inner, scopes),
+                      ExprKind::LogicalNot(inner) | ExprKind::UnaryMinus(inner) => {
+                          let _ = self.walk_expr(inner, scopes);
+                          None
+                      }
+          """)
+          replace_once(suggestions, """        TypeName::Named(name) => Some(name),
+                  TypeName::Int | TypeName::Bool | TypeName::String => None,
+          """, """        TypeName::Named(name) => Some(name),
+                  TypeName::SharedRef(inner) => named_type(inner),
+                  TypeName::Int | TypeName::Bool | TypeName::String => None,
+          """)
+
+          enum_env = "crates/evo-lowering/src/enum_environment.rs"
+          replace_once(enum_env, """        SyntaxTypeName::Named(name) => Err(LowerError {
+                      message: format!(
+                          "unknown payload type {name:?} for variant {variant_name:?} in enum {enum_name:?}"
+                      ),
+                      span,
+                  }),
+          """, """        SyntaxTypeName::Named(name) => Err(LowerError {
+                      message: format!(
+                          "unknown payload type {name:?} for variant {variant_name:?} in enum {enum_name:?}"
+                      ),
+                      span,
+                  }),
+                  SyntaxTypeName::SharedRef(_) => Err(LowerError {
+                      message: "immutable reference enum payloads are not supported in v0".to_owned(),
+                      span,
+                  }),
+          """)
+          replace_once(enum_env, """        SyntaxExprKind::FieldAccess { base, .. }
+                  | SyntaxExprKind::LogicalNot(base)
+                  | SyntaxExprKind::UnaryMinus(base) => validate_expr_constructor_shapes(base, environment),
+          """, """        SyntaxExprKind::FieldAccess { base, .. }
+                  | SyntaxExprKind::LogicalNot(base)
+                  | SyntaxExprKind::UnaryMinus(base)
+                  | SyntaxExprKind::SharedBorrow(base) => validate_expr_constructor_shapes(base, environment),
+          """)
+          replace_once(enum_env, """        | SyntaxExprKind::Construct { .. }
+                  | SyntaxExprKind::FieldAccess { .. } => None,
+          """, """        | SyntaxExprKind::Construct { .. }
+                  | SyntaxExprKind::FieldAccess { .. }
+                  | SyntaxExprKind::SharedBorrow(_) => None,
+          """)
+
+          enum_typing = "crates/evo-lowering/src/enum_constructor_typing.rs"
+          replace_once(enum_typing, """            SyntaxExprKind::UnaryMinus(inner) => {
+                          let _ = self.infer_expr(inner, scopes)?;
+                          Ok(Some(ResolvedPayloadType::Integer))
+                      }
+                      SyntaxExprKind::Binary { left, op, right } => {
+          """, """            SyntaxExprKind::UnaryMinus(inner) => {
+                          let _ = self.infer_expr(inner, scopes)?;
+                          Ok(Some(ResolvedPayloadType::Integer))
+                      }
+                      SyntaxExprKind::SharedBorrow(_) => Err(LowerError {
+                          message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+                          span: expr.span,
+                      }),
+                      SyntaxExprKind::Binary { left, op, right } => {
+          """)
+          replace_once(enum_typing, """        SyntaxTypeName::Named(name) => Err(LowerError {
+                      message: format!("unknown nominal type {name:?} in function signature"),
+                      span,
+                  }),
+          """, """        SyntaxTypeName::Named(name) => Err(LowerError {
+                      message: format!("unknown nominal type {name:?} in function signature"),
+                      span,
+                  }),
+                  SyntaxTypeName::SharedRef(_) => Err(LowerError {
+                      message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+                      span,
+                  }),
+          """)
+
+          enum_borrow = "crates/evo-lowering/src/enum_borrow_ownership.rs"
+          replace_once(enum_borrow, """            SyntaxExprKind::LogicalNot(inner) | SyntaxExprKind::UnaryMinus(inner) => {
+                          self.use_expr(inner, OwnershipUseMode::Consume, reason)
+                      }
+                      SyntaxExprKind::Binary { left, right, .. } => {
+          """, """            SyntaxExprKind::LogicalNot(inner) | SyntaxExprKind::UnaryMinus(inner) => {
+                          self.use_expr(inner, OwnershipUseMode::Consume, reason)
+                      }
+                      SyntaxExprKind::SharedBorrow(_) => Err(LowerError {
+                          message: "immutable reference ownership lowering is not implemented yet".to_owned(),
+                          span: expr.span,
+                      }),
+                      SyntaxExprKind::Binary { left, right, .. } => {
+          """)
+
+          enum_static = "crates/evo-lowering/src/enum_static_semantics.rs"
+          replace_once(enum_static, """            SyntaxExprKind::UnaryMinus(inner) => {
+                          let inner_type = self.infer_expr(inner, scopes)?;
+                          if inner_type != ResolvedPayloadType::Integer {
+                              return Err(LowerError {
+                                  message: "unary '-' requires an integer operand".to_owned(),
+                                  span: expr.span,
+                              });
+                          }
+                          Ok(ResolvedPayloadType::Integer)
+                      }
+                      SyntaxExprKind::Binary { left, op, right } => {
+          """, """            SyntaxExprKind::UnaryMinus(inner) => {
+                          let inner_type = self.infer_expr(inner, scopes)?;
+                          if inner_type != ResolvedPayloadType::Integer {
+                              return Err(LowerError {
+                                  message: "unary '-' requires an integer operand".to_owned(),
+                                  span: expr.span,
+                              });
+                          }
+                          Ok(ResolvedPayloadType::Integer)
+                      }
+                      SyntaxExprKind::SharedBorrow(_) => Err(LowerError {
+                          message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+                          span: expr.span,
+                      }),
+                      SyntaxExprKind::Binary { left, op, right } => {
+          """)
+          replace_once(enum_static, """        TypeName::Named(name) => Err(LowerError {
+                      message: format!("unknown nominal type {name:?} in function signature"),
+                      span,
+                  }),
+          """, """        TypeName::Named(name) => Err(LowerError {
+                      message: format!("unknown nominal type {name:?} in function signature"),
+                      span,
+                  }),
+                  TypeName::SharedRef(_) => Err(LowerError {
+                      message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+                      span,
+                  }),
+          """)
+
+          enum_ir = "crates/evo-lowering/src/enum_ir.rs"
+          replace_once(enum_ir, """        SyntaxExprKind::FieldAccess { base, .. }
+                  | SyntaxExprKind::LogicalNot(base)
+                  | SyntaxExprKind::UnaryMinus(base) => collect_constructor_expr(base, environment, lowered),
+          """, """        SyntaxExprKind::FieldAccess { base, .. }
+                  | SyntaxExprKind::LogicalNot(base)
+                  | SyntaxExprKind::UnaryMinus(base)
+                  | SyntaxExprKind::SharedBorrow(base) => collect_constructor_expr(base, environment, lowered),
+          """)
+
+          enum_exec = "crates/evo-lowering/src/enum_executable_ir.rs"
+          replace_once(enum_exec, """            SyntaxExprKind::UnaryMinus(inner) => {
+                          ExecutableExprKind::UnaryMinus(Box::new(self.lower_expr(inner)))
+                      }
+                      SyntaxExprKind::Binary { left, op, right } => ExecutableExprKind::Binary {
+          """, """            SyntaxExprKind::UnaryMinus(inner) => {
+                          ExecutableExprKind::UnaryMinus(Box::new(self.lower_expr(inner)))
+                      }
+                      SyntaxExprKind::SharedBorrow(_) => unreachable!(
+                          "immutable reference expressions are rejected before enum executable IR promotion"
+                      ),
+                      SyntaxExprKind::Binary { left, op, right } => ExecutableExprKind::Binary {
+          """)
+          replace_once(enum_exec, """            TypeName::Named(name) => {
+                          debug_assert!(
+                              self.validated
+                                  .records
+                                  .iter()
+                                  .any(|record| record.name == *name)
+                          );
+                          ExecutableValueType::Record(name.clone())
+                      }
+                  }
+          """, """            TypeName::Named(name) => {
+                          debug_assert!(
+                              self.validated
+                                  .records
+                                  .iter()
+                                  .any(|record| record.name == *name)
+                          );
+                          ExecutableValueType::Record(name.clone())
+                      }
+                      TypeName::SharedRef(_) => unreachable!(
+                          "immutable reference types are rejected before enum executable IR promotion"
+                      ),
+                  }
+          """)
+
+          lower = "crates/evo-lowering/src/lib.rs"
+          replace_once(lower, """            SyntaxExprKind::UnaryMinus(inner) => {
+                          let (inner, inner_type) = self.lower_expr(inner)?;
+                          if inner_type != ValueType::Integer {
+                              return Err(LowerError {
+                                  message: "unary '-' requires an integer operand".to_owned(),
+                                  span: expr.span,
+                              });
+                          }
+                          (ExprKind::UnaryMinus(Box::new(inner)), ValueType::Integer)
+                      }
+                      SyntaxExprKind::Binary { left, op, right } => {
+          """, """            SyntaxExprKind::UnaryMinus(inner) => {
+                          let (inner, inner_type) = self.lower_expr(inner)?;
+                          if inner_type != ValueType::Integer {
+                              return Err(LowerError {
+                                  message: "unary '-' requires an integer operand".to_owned(),
+                                  span: expr.span,
+                              });
+                          }
+                          (ExprKind::UnaryMinus(Box::new(inner)), ValueType::Integer)
+                      }
+                      SyntaxExprKind::SharedBorrow(_) => {
+                          return Err(LowerError {
+                              message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+                              span: expr.span,
+                          });
+                      }
+                      SyntaxExprKind::Binary { left, op, right } => {
+          """)
+
+          legacy = "crates/evo-lowering/src/enum_ownership.rs"
+          replace_once(legacy, """            SyntaxExprKind::LogicalNot(inner) | SyntaxExprKind::UnaryMinus(inner) => {
+                          self.use_expr(inner, OwnershipUseMode::Consume, reason)
+                      }
+                      SyntaxExprKind::Binary { left, right, .. } => {
+          """, """            SyntaxExprKind::LogicalNot(inner) | SyntaxExprKind::UnaryMinus(inner) => {
+                          self.use_expr(inner, OwnershipUseMode::Consume, reason)
+                      }
+                      SyntaxExprKind::SharedBorrow(_) => Err(LowerError {
+                          message: "immutable reference ownership lowering is not implemented yet".to_owned(),
+                          span: expr.span,
+                      }),
+                      SyntaxExprKind::Binary { left, right, .. } => {
+          """)
+
+      - name: Format
+        run: cargo +1.98.0 fmt --all
+
+      - name: Clippy
+        run: cargo +1.98.0 clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test workspace
+        run: cargo +1.98.0 test --workspace
+
+      - name: Commit verified frontend slice
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/evo-parser/src/lib.rs crates/evo-lowering/src/
+          git diff --cached --check
+          git commit -m "feat: parse immutable reference surface"
+          git push origin HEAD:feature/immutable-reference-surface-v0
