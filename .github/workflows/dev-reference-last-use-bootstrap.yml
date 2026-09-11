@@ -36,11 +36,11 @@ jobs:
               re.S,
           )
           replacement = '''    fn lower_statements(&mut self, statements: &[SyntaxStmt]) -> Result<Vec<Stmt>, LowerError> {
-              let mut remaining_uses = identifier_uses_in_statements(statements);
+              let mut remaining_uses = Self::identifier_uses_in_statements(statements);
               let mut lowered = Vec::with_capacity(statements.len());
               for statement in statements {
                   lowered.push(self.lower_statement(statement)?);
-                  consume_statement_identifier_uses(statement, &mut remaining_uses);
+                  Self::consume_statement_identifier_uses(statement, &mut remaining_uses);
                   self.release_dead_references_in_current_scope(&remaining_uses);
               }
               Ok(lowered)
@@ -75,7 +75,7 @@ jobs:
           helpers = '''fn identifier_uses_in_statements(statements: &[SyntaxStmt]) -> HashMap<String, usize> {
               let mut uses = HashMap::new();
               for statement in statements {
-                  collect_statement_identifier_uses(statement, &mut uses);
+                  Self::collect_statement_identifier_uses(statement, &mut uses);
               }
               uses
           }
@@ -85,7 +85,7 @@ jobs:
               remaining: &mut HashMap<String, usize>,
           ) {
               let mut consumed = HashMap::new();
-              collect_statement_identifier_uses(statement, &mut consumed);
+              Self::collect_statement_identifier_uses(statement, &mut consumed);
               for (name, count) in consumed {
                   let Some(value) = remaining.get_mut(&name) else {
                       continue;
@@ -105,11 +105,11 @@ jobs:
               match &statement.kind {
                   SyntaxStmtKind::Bind { expr, .. }
                   | SyntaxStmtKind::Print(expr)
-                  | SyntaxStmtKind::Return(expr) => collect_expr_identifier_uses(expr, uses),
+                  | SyntaxStmtKind::Return(expr) => Self::collect_expr_identifier_uses(expr, uses),
                   SyntaxStmtKind::Repeat { count, body } => {
-                      collect_expr_identifier_uses(count, uses);
+                      Self::collect_expr_identifier_uses(count, uses);
                       for statement in body {
-                          collect_statement_identifier_uses(statement, uses);
+                          Self::collect_statement_identifier_uses(statement, uses);
                       }
                   }
                   SyntaxStmtKind::If {
@@ -117,19 +117,19 @@ jobs:
                       then_body,
                       else_body,
                   } => {
-                      collect_expr_identifier_uses(condition, uses);
+                      Self::collect_expr_identifier_uses(condition, uses);
                       for statement in then_body {
-                          collect_statement_identifier_uses(statement, uses);
+                          Self::collect_statement_identifier_uses(statement, uses);
                       }
                       for statement in else_body {
-                          collect_statement_identifier_uses(statement, uses);
+                          Self::collect_statement_identifier_uses(statement, uses);
                       }
                   }
                   SyntaxStmtKind::Match { value, arms } => {
-                      collect_expr_identifier_uses(value, uses);
+                      Self::collect_expr_identifier_uses(value, uses);
                       for arm in arms {
                           for statement in &arm.body {
-                              collect_statement_identifier_uses(statement, uses);
+                              Self::collect_statement_identifier_uses(statement, uses);
                           }
                       }
                   }
@@ -148,23 +148,23 @@ jobs:
                   SyntaxExprKind::Call { arguments, .. }
                   | SyntaxExprKind::EnumConstruct { arguments, .. } => {
                       for argument in arguments {
-                          collect_expr_identifier_uses(argument, uses);
+                          Self::collect_expr_identifier_uses(argument, uses);
                       }
                   }
                   SyntaxExprKind::Construct { fields, .. } => {
                       for field in fields {
-                          collect_expr_identifier_uses(&field.value, uses);
+                          Self::collect_expr_identifier_uses(&field.value, uses);
                       }
                   }
                   SyntaxExprKind::FieldAccess { base, .. }
                   | SyntaxExprKind::LogicalNot(base)
                   | SyntaxExprKind::UnaryMinus(base)
                   | SyntaxExprKind::SharedBorrow(base) => {
-                      collect_expr_identifier_uses(base, uses);
+                      Self::collect_expr_identifier_uses(base, uses);
                   }
                   SyntaxExprKind::Binary { left, right, .. } => {
-                      collect_expr_identifier_uses(left, uses);
-                      collect_expr_identifier_uses(right, uses);
+                      Self::collect_expr_identifier_uses(left, uses);
+                      Self::collect_expr_identifier_uses(right, uses);
                   }
               }
           }
