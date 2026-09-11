@@ -5,7 +5,7 @@ use crate::record_environment::{
     ExecutableRecordFieldValueIr, ExecutableRecordIr, ExecutableStmtIr, ExecutableStmtKind,
     ExecutableValueType,
 };
-use crate::{BinaryOp, Program};
+use crate::{BinaryOp, ParameterPassingMode, Program};
 use evo_lexer::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,6 +176,7 @@ pub enum EnumCodegenExprKindView<'a> {
     Call {
         name: &'a str,
         arguments: EnumCodegenExprListView<'a>,
+        argument_modes: &'a [ParameterPassingMode],
     },
     RecordConstruct {
         name: &'a str,
@@ -397,6 +398,11 @@ impl<'a> EnumCodegenParameterView<'a> {
     }
 
     #[must_use]
+    pub fn passing_mode(self) -> ParameterPassingMode {
+        self.inner.passing_mode
+    }
+
+    #[must_use]
     pub fn mutable(self) -> bool {
         self.inner.mutable
     }
@@ -533,9 +539,14 @@ impl<'a> EnumCodegenExprView<'a> {
                 value_type: value_type_view(value_type),
                 ownership: ownership_mode_view(*ownership),
             },
-            ExecutableExprKind::Call { name, arguments } => EnumCodegenExprKindView::Call {
+            ExecutableExprKind::Call {
+                name,
+                arguments,
+                argument_modes,
+            } => EnumCodegenExprKindView::Call {
                 name,
                 arguments: EnumCodegenExprListView { inner: arguments },
+                argument_modes,
             },
             ExecutableExprKind::RecordConstruct { name, fields } => {
                 EnumCodegenExprKindView::RecordConstruct {

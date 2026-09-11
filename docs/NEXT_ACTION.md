@@ -1,111 +1,112 @@
 # Rust Evolution — NEXT ACTION
 
-Last verified update: **2026-09-10**
+Last verified update: **2026-09-11**
 
-## Stable main before active PR #96
+## Stable predecessor gate
 
-- `733900781ea61f5684209570a35e9f63df71a7d4`
-- PR #94 / #93 binary-size research merge
-- post-merge CI #381 / run `34474194185`: **SUCCESS** on Ubuntu, Windows and macOS
-- post-merge Binary size research #3 / run `34474194189`: **SUCCESS**
-- #93: closed/completed with **DEFER / NO ACTION** for Evolution-specific binary-size optimization
-- Rust toolchain: **1.98.0**
+PR #96 (`research: classify borrow inference feasibility v0`) merged to `main` as:
 
-## Active completion — #95 / PR #96
+`cfc19e3308a505a45c970e883dffc72a8bf0b81b`
 
-Issue **#95 — borrow inference feasibility v0** has reached an accepted research decision.
+Post-merge validation succeeded:
+
+- CI #386 / run `34481370952`: **SUCCESS** on Ubuntu, Windows and macOS;
+- Borrow inference research #5 / run `34481370964`: **SUCCESS**;
+- #95 closed/completed with verdict **IMPLEMENT-CANDIDATE**.
+
+The accepted research rule is local and deliberately non-transitive: nominal parameters may become call-duration shared borrows only when their own body has at least one direct `Inspect`, zero `Consume` uses and no reinitialization. Nested calls remain consuming boundaries while classifying the caller.
+
+## Active completion — #97 / PR #99
+
+Issue #97 implements inferred shared-borrow nominal parameters v0.
 
 PR:
 
-- #96 `research: classify borrow inference feasibility v0`
-- branch: `research/borrow-inference-feasibility-v0`
-- accepted measurement head before documentation synchronization: `b3ef92be7e273bc4a27812d24733b87c12bd81c3`
+- #99 `implement: infer shared-borrow nominal parameters v0`
+- branch: `feature/inferred-shared-borrow-parameters-v0`
+- latest accepted implementation/benchmark head before documentation synchronization: `f33b513188add2c6755263f6c7e1079072ec9d7b`
 
-Accepted validation:
+Implemented contract:
 
-- CI #384 / run `34478349183`: **SUCCESS** on Ubuntu, Windows and macOS;
-- Borrow inference research #3 / run `34478349203`: **SUCCESS**;
-- artifact `evo-borrow-inference-research-ubuntu-24.04`;
-- artifact id `10152500994`;
-- digest `sha256:3ba6965b0ffac03d9e1b74bd82152c4c0cbcf47a5d502f694910483e7f13b6fd`;
-- report JSON validation **PASS**;
-- aggregate verdict **IMPLEMENT-CANDIDATE**.
+- internal parameter modes are `Owned` and `SharedBorrow`;
+- only nominal record/enum parameters satisfying the accepted local classifier become `SharedBorrow`;
+- classification is non-transitive and requires no fixpoint/lifetime solving;
+- a top-level nominal caller local passed to an already-decided `SharedBorrow` parameter is inspected rather than moved;
+- temporaries/subexpressions keep ordinary owned evaluation and are borrowed only at the call boundary;
+- lowered/executable IR carries the passing mode before Rust rendering;
+- Rust codegen emits ordinary `&T` parameters and `&expr` arguments;
+- record-only and enum-integrated paths use the same rule;
+- owned return, owned match, consuming nested calls, reinitialization and unsupported escaping-reference cases remain by-value/fail-closed;
+- no implicit clone/copy, boxing, RC/GC, runtime ownership map, stored borrow value, generalized lifetime or mutable-borrow inference was introduced.
 
-Accepted research result:
+## Targeted correctness evidence
 
-- **6** representative `SAFE-LOCAL-INFERENCE-CANDIDATE` cases;
-- **2** of those reproduce real current move friction;
-- owned return, nested current call boundary, owned match scrutinee, parameter reinitialization and repeat-read-then-owned-return remain **KEEP-BY-VALUE**;
-- returned/escaping borrow requires a lifetime model;
-- mutable borrowing requires an explicit borrow contract;
-- stored/overlapping inferred borrow versus move remains unsupported/ambiguous in v0.
+Committed tests cover:
 
-The accepted rule is deliberately local and non-transitive: a nominal parameter qualifies only when its own body has at least one current `Inspect`, zero current `Consume` uses and no reinitialization. Nested calls remain consuming boundaries while classifying the caller. No fixpoint or generalized lifetime solving is part of v0.
+- repeated calls on one read-only record local;
+- borrow then later owned move;
+- branch/repeat/nested record inspection;
+- temporary call arguments;
+- enum-integrated reuse and temporary calls;
+- owned return/reinitialization boundaries;
+- the deliberately non-transitive forwarding rule;
+- exact benchmark-reference/generated-Rust equality.
 
-Durable report: `docs/BORROW_INFERENCE_RESEARCH.md`.
+Exact head `f33b513188add2c6755263f6c7e1079072ec9d7b` passed workspace tests on Ubuntu, Windows and macOS in CI #404 / run `34576556404`.
+
+## Permanent runtime differential gate
+
+New case: `benchmarks/cases/inferred-shared-borrow-v0`.
+
+The fixture performs 5,000,000 iterations of repeated read-only calls on one nominal value and later reassigns that owned value. The locked reference uses explicit idiomatic Rust shared borrowing. A committed `evo-bench` test requires `reference.rs` to mirror generated Rust exactly, preventing irrelevant source-order/layout differences from becoming timing noise.
+
+Accepted CI #404 Ubuntu evidence on `f33b513188add2c6755263f6c7e1079072ec9d7b`:
+
+- correctness: **PASS**;
+- normalized LLVM IR equal: **true**;
+- exact executable bytes equal: **true**;
+- reference median: **5,305,283 ns**;
+- Evolution median: **5,286,876 ns**;
+- observed ratio: **0.996530440**;
+- stable measurement: **true**;
+- timing verdict: **PASS**;
+- final verdict: **PASS**;
+- verdict basis: `byte-identical-binary-parity`.
+
+Artifact:
+
+- `evo-bench-inferred-shared-borrow-ubuntu-latest`;
+- id `10189953214`;
+- digest `sha256:8fcee06fa8df815e0aaf156649d787cf59459f0d829151811f19ff9ae48d7955`.
+
+All pre-existing Ubuntu runtime gates also remained **PASS** in the same run, and the release build succeeded.
 
 ## Failed-SHA evidence retained
 
-Initial research head `5b3a3ee2b5041bba6010c66ea7264fa3522fd9e9` was not rerun:
+Failed or superseded heads are evidence and are not rerun merely to make history green.
 
-- CI #382 / run `34475611657` failed only `cargo fmt --check` on one research-test formatting difference;
-- Borrow inference research #1 / run `34475611799` successfully executed the semantic test and printed the same `IMPLEMENT-CANDIDATE`, 6-candidate / 2-friction result;
-- that dedicated workflow then failed because report output used a package-relative path while validation/upload expected workspace-root `target/`.
-
-Formatting and artifact-path defects were corrected on new SHAs. Exact accepted head `b3ef92be...` completed test + JSON validation + artifact upload successfully.
+- CI #394 / run `34487001305`: initial enum-integrated head failed rustfmt only.
+- CI #396 / run `34494690100`: formatting passed; Clippy exposed stale API/dead-code integration issues.
+- CI #399 / run `34495384328`: exposed legacy direct-include integration harnesses missing the new crate-root bridge.
+- CI #402 / run `34496493149` on `64b30b6ddf280adfb04b578ed675331df065c658`: all existing Ubuntu runtime gates before the new case passed; the new benchmark had correctness/stability PASS but its manually written Rust reference differed from generated Rust in function/helper ordering. That produced non-identical IR/binaries and a timing-only ratio `1.006804464`, so the gate correctly failed. The SHA was not rerun.
+- The reference was then aligned exactly with generated static Rust and protected by a permanent exact-reference test. The corrected head `f33b513...` produced identical IR/binaries and PASS evidence in CI #404.
 
 ## Immediate sequence
 
-1. Keep PR #96 on one documentation-synchronized final head.
-2. Track only the natural exact-head normal CI and Borrow inference research workflows; do not duplicate them.
-3. Require normal CI green on Ubuntu, Windows and macOS.
-4. Require the final-head borrow-inference workflow green and retain its artifact.
-5. Confirm the final-head artifact still reports `IMPLEMENT-CANDIDATE`, 6 safe local candidates, 2 current move-friction cases and fail-closed negative boundaries.
-6. Update PR #96 / #95 and living meta #40 with exact final-head provenance.
-7. Squash-merge PR #96 using expected-head protection only after both exact-head workflows are green.
-8. Track the natural post-merge `main` CI and Borrow inference research push workflow on the exact merge SHA.
-9. Close #95 completed only after both post-merge gates succeed and the research artifact still supports the accepted decision.
-10. Re-read live main/branch/PR/Actions state and search for duplicate/external #97 work.
-11. Only then create the #97 implementation branch from exact verified main.
+1. Synchronize `LANGUAGE_SPEC_V0`, `BENCHMARKING`, `PROJECT_STATE`, this file, PR #99, #97 and living meta #40 with the accepted `f33b513...` evidence.
+2. Keep the documentation-synchronized PR head fixed and track only its natural CI; do not create duplicate runs.
+3. Require final-head normal CI **SUCCESS** on Ubuntu, Windows and macOS, including the new shared-borrow runtime gate and all existing gates.
+4. Confirm the final-head shared-borrow artifact still reports correctness PASS and byte-identical parity.
+5. Squash-merge PR #99 only from that exact validated head.
+6. Track the natural post-merge `main` CI on the exact merge SHA.
+7. Close #97 completed only after post-merge `main` CI succeeds.
+8. Update #40 with merge/post-merge provenance, then re-read live roadmap/issues before starting a successor.
 
-## Gated successor — #97
+## Production contracts
 
-Issue **#97 — inferred shared-borrow nominal parameters v0** is open but must not start before PR #96 merges and both natural post-merge workflows succeed.
+Rust remains pinned to **1.98.0**, edition 2024, opt-level 3 and codegen-units 1. `build-cache-v0` / `run-cache-v0`, source mapping, diagnostic remapping and the #4 runtime parity-or-better contract remain unchanged.
 
-Bounded implementation contract:
-
-- internal parameter passing modes: `Owned` and `SharedBorrow`;
-- `SharedBorrow` only for locally proven read-only nominal parameters;
-- classification remains non-transitive in v0;
-- call ownership analysis inspects a caller local when the already-decided callee parameter is `SharedBorrow`;
-- semantic IR carries the passing mode before Rust rendering;
-- Rust codegen lowers to ordinary `&T` parameters and `&expr` call arguments;
-- later by-value move after a completed shared-borrow call remains valid;
-- current owned return/match/reinitialization/consume cases remain by-value;
-- no stored or escaping borrow values.
-
-Implementation must add representative differential/runtime evidence and preserve the existing #4 parity-or-better contract.
-
-## Production contracts unchanged by #95 research
-
-PR #96 is research evidence only. It does not change:
-
-- Evolution syntax or accepted-program semantics;
-- current by-value ownership behavior;
-- generated Rust for production programs;
-- Rust 1.98.0;
-- edition 2024;
-- opt-level 3;
-- codegen-units 1;
-- linker behavior;
-- build-cache-v0 / run-cache-v0;
-- source mapping and rustc diagnostic remapping;
-- #4 runtime parity-or-better contract;
-- zero-cost boundary: no hidden clone/copy, allocation, boxing, RC/GC, runtime ownership maps, reflection or dynamic dispatch.
-
-## Build/compile structural deferrals
-
-Dependency-build, proc-macro cost and workspace scaling remain deferred until Evolution user programs have a real package/dependency graph. Current single-file Phase 3.4 work is measured through #93; active P0 work has returned to Phase 3.3 ownership ergonomics.
+The new feature changes only the proven nominal-parameter ownership subset. Explicit Evolution `&` syntax, returned/escaping references, generalized lifetimes, mutable borrow inference, transitive/fixpoint borrow inference, stored references, automatic cloning and ownership runtimes remain outside v0.
 
 ## CI rule
 

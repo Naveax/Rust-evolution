@@ -1,0 +1,21 @@
+record Item
+value int
+end
+
+fn read_value(item Item) int
+return item.value
+end
+
+n = input_int
+seed = input_int
+item = Item(value = seed)
+sum = 0
+repeat n
+sum = sum + read_value(item)
+if item.value > 1000
+item = Item(value = item.value / 2)
+else
+item = Item(value = item.value + 7)
+end
+end
+print sum

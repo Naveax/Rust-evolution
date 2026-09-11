@@ -136,6 +136,35 @@ The report includes the rustc verbose version, host target, sample configuration
 
 `benchmarks/cases/arithmetic-smoke` exists to verify the full harness path across platforms. It is intentionally tiny and therefore **must not be cited as evidence that Evolution is faster than or equal to Rust at runtime**. Process startup and scheduler noise dominate such a case. Meaningful performance acceptance begins once Evolution can express workloads with runtime-dependent input and enough work to measure defensibly.
 
+### Inferred shared-borrow v0 permanent gate
+
+`benchmarks/cases/inferred-shared-borrow-v0` is a permanent Ubuntu runtime differential acceptance gate for the bounded shared-borrow parameter feature implemented by #97.
+
+The fixture performs **5,000,000** repeated read-only calls on one nominal value and later reassigns that same owned value. The locked Rust reference uses ordinary explicit `&Item` / `&item` borrowing. `crates/evo-bench/tests/inferred_shared_borrow_reference.rs` requires the committed `reference.rs` to match generated Rust exactly modulo CRLF normalization, so irrelevant helper/function source ordering cannot create artificial code-layout differences between the two sides.
+
+Accepted exact head `f33b513188add2c6755263f6c7e1079072ec9d7b`, CI #404 / run `34576556404`, produced:
+
+- correctness: **true**;
+- normalized LLVM IR equal: **true**;
+- exact executable bytes equal: **true**;
+- reference median: **5,305,283 ns**;
+- Evolution median: **5,286,876 ns**;
+- observed ratio: **0.996530440**;
+- stable measurement: **true**;
+- timing verdict: **PASS**;
+- final verdict: **PASS**;
+- verdict basis: `byte-identical-binary-parity`.
+
+Accepted artifact:
+
+- `evo-bench-inferred-shared-borrow-ubuntu-latest`;
+- artifact id `10189953214`;
+- digest `sha256:8fcee06fa8df815e0aaf156649d787cf59459f0d829151811f19ff9ae48d7955`.
+
+The earlier benchmark head `64b30b6ddf280adfb04b578ed675331df065c658`, CI #402 / run `34496493149`, is retained as failed evidence rather than rerun. Correctness and stability passed, but its manually written Rust reference placed the input helper/function in a different order than generated Rust. That made normalized IR and binaries differ and produced a timing-only ratio of `1.006804464`, so the gate correctly failed. The corrected permanent reference lock prevents that irrelevant structural mismatch from returning.
+
+The CI benchmark step has an explicit step id and the artifact upload uses `always()` with a non-skipped guard. Therefore a future failed shared-borrow gate still preserves its generated Rust, binaries, IR, reports, and raw samples instead of deleting the evidence precisely when it becomes interesting.
+
 ## Developer-turnaround evidence
 
 Developer edit-run latency is a different metric from generated-program runtime parity. Tooling changes such as the verified `evo run` compile cache must not use a faster development loop to excuse a runtime regression, and the `T_evolution <= T_reference_rust` invariant does not claim that compiler/tooling latency equals program runtime.
@@ -269,10 +298,13 @@ Accepted artifact: `evo-build-latency-ubuntu-latest`, id `10046420977`, digest `
 - A noisy CI result is not a PASS merely because its median happened to be favorable.
 - Developer-turnaround evidence must stay separate from generated-program runtime parity evidence.
 - Build-latency evidence must stay separate from generated-program runtime parity evidence.
+- When a benchmark intends code-generation parity, lock the Rust reference to generated Rust so irrelevant source ordering cannot masquerade as a runtime difference.
 
 ## CI design
 
 Correctness tests run on normal PR CI. Performance workflows should use as controlled an environment as practical and store artifacts. Reference Rust and Evolution must be measured in the same run whenever possible.
+
+Permanent runtime gates currently include runtime-repeat, control-flow branch, logical operators, function calls, block locals, records, inferred shared-borrow parameters, and enums on the controlled Ubuntu PR CI path. Failed performance steps should preserve their artifacts with guarded `always()` uploads when practical.
 
 Do not start duplicate GitHub Actions for the same SHA/workflow/input. Track the active run ID and continue independent work while it executes.
 

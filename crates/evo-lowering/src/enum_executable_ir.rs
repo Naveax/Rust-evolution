@@ -1,3 +1,4 @@
+use crate::ParameterPassingMode;
 use evo_lexer::Span;
 use evo_parser::{
     Expr as SyntaxExpr, ExprKind as SyntaxExprKind, FunctionDef as SyntaxFunction,
@@ -58,6 +59,7 @@ pub(crate) struct ExecutableRecordIr {
 pub(crate) struct ExecutableParameterIr {
     pub(crate) name: String,
     pub(crate) value_type: ExecutableValueType,
+    pub(crate) passing_mode: ParameterPassingMode,
     pub(crate) mutable: bool,
     pub(crate) span: Span,
 }
@@ -150,6 +152,7 @@ pub(crate) enum ExecutableExprKind {
     Call {
         name: String,
         arguments: Vec<ExecutableExprIr>,
+        argument_modes: Vec<ParameterPassingMode>,
     },
     RecordConstruct {
         name: String,
@@ -186,6 +189,24 @@ pub(crate) struct ExecutableEnumProgramIr {
 pub(super) fn lower_executable_enum_program(
     syntax: &SyntaxProgram,
     validated: &EnumProgramIr,
+) -> ExecutableEnumProgramIr {
+    let parameter_modes: HashMap<String, Vec<ParameterPassingMode>> = syntax
+        .functions
+        .iter()
+        .map(|function| {
+            (
+                function.name.clone(),
+                crate::borrow_inference::classify_function_parameters(syntax, function),
+            )
+        })
+        .collect();
+    lower_executable_enum_program_with_parameter_modes(syntax, validated, &parameter_modes)
+}
+
+pub(super) fn lower_executable_enum_program_with_parameter_modes(
+    syntax: &SyntaxProgram,
+    validated: &EnumProgramIr,
+    parameter_modes: &HashMap<String, Vec<ParameterPassingMode>>,
 ) -> ExecutableEnumProgramIr {
     let enums = validated
         .enums
@@ -224,10 +245,10 @@ pub(super) fn lower_executable_enum_program(
 
     let mut functions = Vec::with_capacity(syntax.functions.len());
     for function in &syntax.functions {
-        functions.push(BodyPromoter::new(validated).lower_function(function));
+        functions.push(BodyPromoter::new(validated, parameter_modes).lower_function(function));
     }
 
-    let mut top_level = BodyPromoter::new(validated);
+    let mut top_level = BodyPromoter::new(validated, parameter_modes);
     let mut statements = top_level.lower_statements(&syntax.statements);
     top_level.apply_mutability(&mut statements);
 
@@ -241,26 +262,37 @@ pub(super) fn lower_executable_enum_program(
 
 struct BodyPromoter<'a> {
     validated: &'a EnumProgramIr,
+    parameter_modes: &'a HashMap<String, Vec<ParameterPassingMode>>,
     scopes: Vec<HashMap<String, usize>>,
     mutable_declarations: HashSet<usize>,
 }
 
 impl<'a> BodyPromoter<'a> {
-    fn new(validated: &'a EnumProgramIr) -> Self {
+    fn new(
+        validated: &'a EnumProgramIr,
+        parameter_modes: &'a HashMap<String, Vec<ParameterPassingMode>>,
+    ) -> Self {
         Self {
             validated,
+            parameter_modes,
             scopes: vec![HashMap::new()],
             mutable_declarations: HashSet::new(),
         }
     }
 
     fn lower_function(&mut self, function: &SyntaxFunction) -> ExecutableFunctionIr {
+        let modes = self
+            .parameter_modes
+            .get(&function.name)
+            .expect("validated function must have precomputed parameter modes");
+        debug_assert_eq!(modes.len(), function.parameters.len());
         let mut parameters = Vec::with_capacity(function.parameters.len());
-        for parameter in &function.parameters {
+        for (parameter, passing_mode) in function.parameters.iter().zip(modes) {
             self.define_binding(parameter.name.clone(), parameter.span.start);
             parameters.push(ExecutableParameterIr {
                 name: parameter.name.clone(),
                 value_type: self.lower_type_name(&parameter.type_name),
+                passing_mode: *passing_mode,
                 mutable: false,
                 span: parameter.span,
             });
@@ -419,12 +451,18 @@ impl<'a> BodyPromoter<'a> {
                         fields: Vec::new(),
                     }
                 } else {
+                    let argument_modes = self
+                        .parameter_modes
+                        .get(name)
+                        .expect("validated function call must have precomputed parameter modes");
+                    debug_assert_eq!(argument_modes.len(), arguments.len());
                     ExecutableExprKind::Call {
                         name: name.clone(),
                         arguments: arguments
                             .iter()
                             .map(|argument| self.lower_expr(argument))
                             .collect(),
+                        argument_modes: argument_modes.clone(),
                     }
                 }
             }
@@ -594,6 +632,7 @@ mod tests {
         ExecutableExprKind, ExecutableOwnershipMode, ExecutableStmtKind, ExecutableValueType,
         lower_executable_enum_program,
     };
+    use crate::ParameterPassingMode;
     use evo_lexer::lex;
     use evo_parser::parse;
 
@@ -626,6 +665,10 @@ mod tests {
         assert_eq!(
             lowered.functions[0].parameters[0].value_type,
             ExecutableValueType::Enum("Inner".to_owned())
+        );
+        assert_eq!(
+            lowered.functions[0].parameters[0].passing_mode,
+            ParameterPassingMode::Owned
         );
         assert_eq!(
             lowered.functions[0].return_type,

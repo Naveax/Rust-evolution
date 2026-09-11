@@ -1,11 +1,11 @@
 use crate::{GeneratedRust, SourceMapping};
 use evo_lexer::Span;
-use evo_lowering::BinaryOp;
 use evo_lowering::enum_codegen_view::{
     EnumCodegenExprKindView, EnumCodegenExprView, EnumCodegenFunctionView, EnumCodegenMatchArmView,
     EnumCodegenProgramView, EnumCodegenRecordView, EnumCodegenStmtKindView, EnumCodegenStmtView,
     EnumCodegenValueType,
 };
+use evo_lowering::{BinaryOp, ParameterPassingMode};
 
 pub(super) fn generate_enum_rust(program: EnumCodegenProgramView<'_>) -> GeneratedRust {
     EnumGenerator::new().generate(program)
@@ -118,6 +118,10 @@ impl EnumGenerator {
             }
             signature.push_str(&generated_identifier(parameter.name()));
             signature.push_str(": ");
+            if parameter.passing_mode() == ParameterPassingMode::SharedBorrow {
+                debug_assert!(!parameter.mutable());
+                signature.push('&');
+            }
             signature.push_str(&rust_type(parameter.value_type()));
         }
         signature.push_str(") -> ");
@@ -272,10 +276,23 @@ fn render_expr(expr: EnumCodegenExprView<'_>) -> String {
         EnumCodegenExprKindView::String(value) => format!("{value:?}"),
         EnumCodegenExprKindView::Bool(value) => value.to_string(),
         EnumCodegenExprKindView::Local { name, .. } => generated_identifier(name),
-        EnumCodegenExprKindView::Call { name, arguments } => {
+        EnumCodegenExprKindView::Call {
+            name,
+            arguments,
+            argument_modes,
+        } => {
+            debug_assert_eq!(arguments.len(), argument_modes.len());
             let arguments = arguments
                 .iter()
-                .map(render_expr)
+                .zip(argument_modes)
+                .map(|(argument, passing_mode)| {
+                    let rendered = render_expr(argument);
+                    if *passing_mode == ParameterPassingMode::SharedBorrow {
+                        format!("&{rendered}")
+                    } else {
+                        rendered
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("{}({arguments})", generated_function_name(name))
