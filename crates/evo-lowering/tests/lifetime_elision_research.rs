@@ -375,13 +375,7 @@ fn csv_cell(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\"").replace('\n', "\\n"))
 }
 
-fn write_reports(
-    findings: &[Finding],
-    verdict: &str,
-    out: &Path,
-    git_sha: &str,
-    rustc: &str,
-) {
+fn write_reports(findings: &[Finding], verdict: &str, out: &Path, git_sha: &str, rustc: &str) {
     fs::create_dir_all(out)
         .unwrap_or_else(|error| panic!("failed to create {}: {error}", out.display()));
 
@@ -391,7 +385,9 @@ fn write_reports(
         .count();
     let elision_candidates = findings
         .iter()
-        .filter(|item| item.spec.classification == Classification::ElisionCandidateRequiresReferenceType)
+        .filter(|item| {
+            item.spec.classification == Classification::ElisionCandidateRequiresReferenceType
+        })
         .count();
     let explicit_relations = findings
         .iter()
@@ -402,7 +398,9 @@ fn write_reports(
         .filter(|item| item.spec.classification == Classification::UnsafeOrUnrepresentable)
         .count();
 
-    let mut csv = String::from("case,classification,possible_owner_sources,result_escapes,result_stored,owner_overlap,rust_lifetime_names_elided,evolution_requires_reference_distinction,expected_rust_compile,rust_compiled,compile_expectation_matched,reason,stderr_summary\n");
+    let mut csv = String::from(
+        "case,classification,possible_owner_sources,result_escapes,result_stored,owner_overlap,rust_lifetime_names_elided,evolution_requires_reference_distinction,expected_rust_compile,rust_compiled,compile_expectation_matched,reason,stderr_summary\n",
+    );
     for item in findings {
         writeln!(
             csv,
@@ -431,10 +429,23 @@ fn write_reports(
     writeln!(json, "  \"git_sha\": {},", json_string(git_sha)).expect("writing JSON cannot fail");
     writeln!(json, "  \"rustc_vv\": {},", json_string(rustc)).expect("writing JSON cannot fail");
     writeln!(json, "  \"verdict\": {},", json_string(verdict)).expect("writing JSON cannot fail");
-    writeln!(json, "  \"compile_expectation_mismatches\": {mismatches},").expect("writing JSON cannot fail");
-    writeln!(json, "  \"elision_candidate_case_count\": {elision_candidates},").expect("writing JSON cannot fail");
-    writeln!(json, "  \"explicit_lifetime_relation_case_count\": {explicit_relations},").expect("writing JSON cannot fail");
-    writeln!(json, "  \"unsafe_or_unrepresentable_case_count\": {unsafe_cases},").expect("writing JSON cannot fail");
+    writeln!(json, "  \"compile_expectation_mismatches\": {mismatches},")
+        .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"elision_candidate_case_count\": {elision_candidates},"
+    )
+    .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"explicit_lifetime_relation_case_count\": {explicit_relations},"
+    )
+    .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"unsafe_or_unrepresentable_case_count\": {unsafe_cases},"
+    )
+    .expect("writing JSON cannot fail");
     writeln!(json, "  \"decision_basis\": \"REFERENCE-SURFACE-FIRST when useful single-source borrowed returns compile with Rust lifetime elision, but every such escaping result still requires a caller-visible borrowed/reference distinction; multiple-source and invalid-owner cases must fail closed\",").expect("writing JSON cannot fail");
     writeln!(json, "  \"cases\": [").expect("writing JSON cannot fail");
     for (index, item) in findings.iter().enumerate() {
@@ -468,17 +479,36 @@ fn write_reports(
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(markdown, "- git_sha: `{git_sha}`").expect("writing Markdown cannot fail");
     writeln!(markdown, "- aggregate verdict: **{verdict}**").expect("writing Markdown cannot fail");
-    writeln!(markdown, "- compile expectation mismatches: **{mismatches}**").expect("writing Markdown cannot fail");
-    writeln!(markdown, "- elision-candidate/reference-type cases: **{elision_candidates}**").expect("writing Markdown cannot fail");
-    writeln!(markdown, "- explicit-lifetime-relation cases: **{explicit_relations}**").expect("writing Markdown cannot fail");
-    writeln!(markdown, "- unsafe/unrepresentable cases: **{unsafe_cases}**").expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "- compile expectation mismatches: **{mismatches}**"
+    )
+    .expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "- elision-candidate/reference-type cases: **{elision_candidates}**"
+    )
+    .expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "- explicit-lifetime-relation cases: **{explicit_relations}**"
+    )
+    .expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "- unsafe/unrepresentable cases: **{unsafe_cases}**"
+    )
+    .expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(markdown, "```text\n{rustc}\n```").expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(markdown, "| Case | Classification | Owners | Escapes | Stored | Rust elides names | Evolution ref distinction | Rust compile | Expected | Match |")
         .expect("writing Markdown cannot fail");
-    writeln!(markdown, "| --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- |")
-        .expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "| --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- |"
+    )
+    .expect("writing Markdown cannot fail");
     for item in findings {
         writeln!(
             markdown,
@@ -515,7 +545,10 @@ fn lifetime_elision_research_classifies_single_source_borrowed_returns() {
     let rustc = rustc_version();
     if env::var_os("EVO_REQUIRE_PINNED_RUSTC").is_some() {
         assert!(
-            rustc.lines().next().is_some_and(|line| line.contains("rustc 1.98.0")),
+            rustc
+                .lines()
+                .next()
+                .is_some_and(|line| line.contains("rustc 1.98.0")),
             "research workflow must use pinned Rust 1.98.0, got: {rustc}"
         );
     }
@@ -570,7 +603,9 @@ fn lifetime_elision_research_classifies_single_source_borrowed_returns() {
         .count();
     let all_borrowed_results_require_reference_distinction = findings
         .iter()
-        .filter(|item| item.spec.classification == Classification::ElisionCandidateRequiresReferenceType)
+        .filter(|item| {
+            item.spec.classification == Classification::ElisionCandidateRequiresReferenceType
+        })
         .all(|item| item.spec.evolution_requires_reference_distinction);
 
     let verdict = if mismatch_count == 0
@@ -599,11 +634,29 @@ fn lifetime_elision_research_classifies_single_source_borrowed_returns() {
         });
     write_reports(&findings, verdict, &out, &git_sha, &rustc);
 
-    assert_eq!(mismatch_count, 0, "all pre-registered Rust compile expectations must match");
-    assert!(successful_single_source_elisions >= 4, "need several useful single-source elision cases");
-    assert!(overlap_rejections >= 2, "stored borrowed results must retain move/reinit conflict enforcement");
-    assert!(explicit_relation_rejections >= 2, "multiple-owner lifetime relationships must fail closed without an explicit relation");
-    assert!(unsafe_rejections >= 1, "temporary-derived borrowed returns must fail closed");
-    assert!(all_borrowed_results_require_reference_distinction, "escaping borrowed results must never be conflated with owned T results");
+    assert_eq!(
+        mismatch_count, 0,
+        "all pre-registered Rust compile expectations must match"
+    );
+    assert!(
+        successful_single_source_elisions >= 4,
+        "need several useful single-source elision cases"
+    );
+    assert!(
+        overlap_rejections >= 2,
+        "stored borrowed results must retain move/reinit conflict enforcement"
+    );
+    assert!(
+        explicit_relation_rejections >= 2,
+        "multiple-owner lifetime relationships must fail closed without an explicit relation"
+    );
+    assert!(
+        unsafe_rejections >= 1,
+        "temporary-derived borrowed returns must fail closed"
+    );
+    assert!(
+        all_borrowed_results_require_reference_distinction,
+        "escaping borrowed results must never be conflated with owned T results"
+    );
     assert_eq!(verdict, "REFERENCE-SURFACE-FIRST");
 }
