@@ -54,6 +54,7 @@ pub enum TokenKind {
     Minus,
     Star,
     Slash,
+    Ampersand,
     Equal,
     EqualEqual,
     BangEqual,
@@ -145,6 +146,7 @@ impl<'a> Lexer<'a> {
                 '-' => tokens.push(self.single(TokenKind::Minus)),
                 '*' => tokens.push(self.single(TokenKind::Star)),
                 '/' => tokens.push(self.single(TokenKind::Slash)),
+                '&' => tokens.push(self.single(TokenKind::Ampersand)),
                 '=' => tokens.push(self.optional_equal(TokenKind::Equal, TokenKind::EqualEqual)),
                 '!' => tokens.push(self.bang_equal()?),
                 '<' => tokens.push(self.optional_equal(TokenKind::Less, TokenKind::LessEqual)),
@@ -205,6 +207,7 @@ impl<'a> Lexer<'a> {
                 '-' => tokens.push(self.single(TokenKind::Minus)),
                 '*' => tokens.push(self.single(TokenKind::Star)),
                 '/' => tokens.push(self.single(TokenKind::Slash)),
+                '&' => tokens.push(self.single(TokenKind::Ampersand)),
                 '=' => tokens.push(self.optional_equal(TokenKind::Equal, TokenKind::EqualEqual)),
                 '!' => match self.bang_equal() {
                     Ok(token) => tokens.push(token),
@@ -577,6 +580,43 @@ mod tests {
         ] {
             assert!(tokens.contains(&expected), "missing {expected:?}");
         }
+    }
+
+    #[test]
+    fn tokenizes_immutable_reference_marker_in_fail_fast_and_recovering_paths() {
+        let source = "fn view(item &Item) &Item\nreturn &item\nend\n";
+        let fail_fast = lex(source).expect("reference marker should lex");
+        let recovering = lex_recovering(source).expect("reference marker should recover cleanly");
+        assert_eq!(recovering, fail_fast);
+        assert_eq!(
+            fail_fast
+                .iter()
+                .filter(|token| matches!(token.kind, TokenKind::Ampersand))
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn reference_related_words_remain_identifiers() {
+        let tokens = kinds("ref = 1\nborrow = 2\nRef = 3\n");
+        for name in ["ref", "borrow", "Ref"] {
+            assert!(tokens.contains(&TokenKind::Identifier(name.to_owned())));
+        }
+    }
+
+    #[test]
+    fn adjacent_ampersands_are_individual_tokens_not_a_hidden_operator() {
+        assert_eq!(
+            kinds("&&Item\n"),
+            vec![
+                TokenKind::Ampersand,
+                TokenKind::Ampersand,
+                TokenKind::Identifier("Item".to_owned()),
+                TokenKind::Newline,
+                TokenKind::Eof,
+            ]
+        );
     }
 
     #[test]

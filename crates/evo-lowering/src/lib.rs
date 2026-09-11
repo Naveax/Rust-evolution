@@ -4,6 +4,7 @@ mod record_environment;
 mod record_ir;
 mod record_ownership;
 mod record_resolution;
+mod reference_state;
 
 use evo_lexer::Span;
 pub use evo_parser::BinaryOp;
@@ -16,6 +17,9 @@ use record_environment::{ConstructorFieldInput, RecordEnvironment, SemanticType}
 pub use record_ir::{RecordFieldIr, RecordIr, RecordType};
 use record_ownership::MoveTracker;
 use record_resolution::{CallNameResolution, resolve_call_name};
+use reference_state::{
+    OwnerOperation, ReferenceProvenance, ReferenceTracker,
+};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
@@ -132,6 +136,7 @@ pub enum ExprKind {
     InputInt,
     LogicalNot(Box<Expr>),
     UnaryMinus(Box<Expr>),
+    SharedBorrow(Box<Expr>),
     Binary {
         left: Box<Expr>,
         op: BinaryOp,
@@ -163,6 +168,7 @@ pub enum ValueType {
     String,
     Bool,
     Record(String),
+    SharedRef(Box<ValueType>),
 }
 
 #[derive(Debug, Clone)]
@@ -176,6 +182,7 @@ struct FunctionSignature {
     parameter_types: Vec<ValueType>,
     parameter_modes: Vec<ParameterPassingMode>,
     return_type: ValueType,
+    reference_source_parameter: Option<usize>,
 }
 
 pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
@@ -204,7 +211,7 @@ pub fn lower(program: &SyntaxProgram) -> Result<Program, LowerError> {
         functions.push(lower_function(function, &signatures, &record_environment)?);
     }
 
-    let mut top_level = Analyzer::new(&signatures, None, &record_environment);
+    let mut top_level = Analyzer::new(&signatures, None, None, &record_environment);
     let mut statements = top_level.lower_statements(&program.statements)?;
     top_level.apply_mutability(&mut statements);
 
@@ -247,16 +254,49 @@ fn collect_function_signatures(
 
         let return_type =
             record_environment.resolve_type_name(&function.return_type, function.span)?;
+        let return_type = lowered_value_type(&return_type);
+        let reference_source_parameter =
+            reference_source_parameter_index(&parameter_types, &return_type, function.span)?;
         signatures.insert(
             function.name.clone(),
             FunctionSignature {
                 parameter_types,
                 parameter_modes,
-                return_type: lowered_value_type(&return_type),
+                return_type,
+                reference_source_parameter,
             },
         );
     }
     Ok(signatures)
+}
+
+fn reference_source_parameter_index(
+    parameter_types: &[ValueType],
+    return_type: &ValueType,
+    span: Span,
+) -> Result<Option<usize>, LowerError> {
+    if !matches!(return_type, ValueType::SharedRef(_)) {
+        return Ok(None);
+    }
+
+    let sources: Vec<usize> = parameter_types
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value_type)| {
+            matches!(value_type, ValueType::SharedRef(_)).then_some(index)
+        })
+        .collect();
+    if let [index] = sources.as_slice() {
+        return Ok(Some(*index));
+    }
+
+    Err(LowerError {
+        message: format!(
+            "immutable reference return requires exactly one reference parameter source in v0; found {}",
+            sources.len()
+        ),
+        span,
+    })
 }
 
 fn lower_function(
@@ -268,7 +308,15 @@ fn lower_function(
         .get(&function.name)
         .expect("function signatures are collected before lowering bodies");
     let return_type = signature.return_type.clone();
-    let mut analyzer = Analyzer::new(signatures, Some(return_type.clone()), record_environment);
+    let expected_reference_source = signature
+        .reference_source_parameter
+        .map(|index| function.parameters[index].name.clone());
+    let mut analyzer = Analyzer::new(
+        signatures,
+        Some(return_type.clone()),
+        expected_reference_source,
+        record_environment,
+    );
     let mut parameters = Vec::with_capacity(function.parameters.len());
 
     for ((parameter, parameter_type), passing_mode) in function
@@ -283,6 +331,11 @@ fn lower_function(
             parameter_type.clone(),
             parameter.span.start,
         );
+        if matches!(parameter_type, ValueType::SharedRef(_)) {
+            analyzer
+                .reference_tracker
+                .define_parameter(parameter.name.clone(), parameter.span);
+        }
         parameters.push(Parameter {
             name: parameter.name.clone(),
             value_type: parameter_type,
@@ -349,6 +402,9 @@ fn semantic_type(value_type: &ValueType) -> SemanticType {
         ValueType::Bool => SemanticType::Bool,
         ValueType::String => SemanticType::String,
         ValueType::Record(name) => SemanticType::Record(name.clone()),
+        ValueType::SharedRef(inner) => {
+            SemanticType::SharedRef(Box::new(semantic_type(inner)))
+        }
     }
 }
 
@@ -358,15 +414,19 @@ fn lowered_value_type(value_type: &SemanticType) -> ValueType {
         SemanticType::Bool => ValueType::Bool,
         SemanticType::String => ValueType::String,
         SemanticType::Record(name) => ValueType::Record(name.clone()),
+        SemanticType::SharedRef(inner) => {
+            ValueType::SharedRef(Box::new(lowered_value_type(inner)))
+        }
     }
 }
 
-fn type_label(value_type: &ValueType) -> &str {
+fn type_label(value_type: &ValueType) -> String {
     match value_type {
-        ValueType::Integer => "int",
-        ValueType::Bool => "bool",
-        ValueType::String => "string",
-        ValueType::Record(name) => name,
+        ValueType::Integer => "int".to_owned(),
+        ValueType::Bool => "bool".to_owned(),
+        ValueType::String => "string".to_owned(),
+        ValueType::Record(name) => name.clone(),
+        ValueType::SharedRef(inner) => format!("&{}", type_label(inner)),
     }
 }
 
@@ -375,14 +435,17 @@ struct Analyzer<'a> {
     mutable_declarations: HashSet<usize>,
     function_signatures: &'a HashMap<String, FunctionSignature>,
     expected_return: Option<ValueType>,
+    expected_reference_source: Option<String>,
     record_environment: &'a RecordEnvironment,
     move_tracker: MoveTracker,
+    reference_tracker: ReferenceTracker,
 }
 
 impl<'a> Analyzer<'a> {
     fn new(
         function_signatures: &'a HashMap<String, FunctionSignature>,
         expected_return: Option<ValueType>,
+        expected_reference_source: Option<String>,
         record_environment: &'a RecordEnvironment,
     ) -> Self {
         Self {
@@ -390,8 +453,10 @@ impl<'a> Analyzer<'a> {
             mutable_declarations: HashSet::new(),
             function_signatures,
             expected_return,
+            expected_reference_source,
             record_environment,
             move_tracker: MoveTracker::default(),
+            reference_tracker: ReferenceTracker::default(),
         }
     }
 
@@ -426,22 +491,70 @@ impl<'a> Analyzer<'a> {
             .expect("child scope must be present after lowering");
         for name in locals.keys() {
             self.move_tracker.forget(name);
+            self.reference_tracker.forget(name);
         }
         result
     }
 
     fn lower_statements(&mut self, statements: &[SyntaxStmt]) -> Result<Vec<Stmt>, LowerError> {
-        statements
-            .iter()
-            .map(|statement| self.lower_statement(statement))
-            .collect()
+    let mut remaining_uses = Self::identifier_uses_in_statements(statements);
+    let mut lowered = Vec::with_capacity(statements.len());
+    for statement in statements {
+        lowered.push(self.lower_statement(statement)?);
+        Self::consume_statement_identifier_uses(statement, &mut remaining_uses);
+        self.release_dead_references_in_current_scope(&remaining_uses);
     }
+    Ok(lowered)
+}
 
-    fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError> {
+fn release_dead_references_in_current_scope(
+    &mut self,
+    remaining_uses: &HashMap<String, usize>,
+) {
+    let dead: Vec<String> = self
+        .scopes
+        .last()
+        .expect("analyzer always has a lexical scope")
+        .keys()
+        .filter(|name| {
+            self.reference_tracker.provenance(name).is_some()
+                && !remaining_uses.contains_key(*name)
+        })
+        .cloned()
+        .collect();
+    for name in dead {
+        self.reference_tracker.forget(&name);
+    }
+}
+
+fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError> {
         let kind = match &statement.kind {
-            SyntaxStmtKind::Bind { name, expr } => {
-                let (expr, expression_type) = self.lower_expr(expr)?;
+            SyntaxStmtKind::Bind {
+                name,
+                expr: syntax_expr,
+            } => {
+                let (expr, expression_type) = self.lower_expr(syntax_expr)?;
+                let reference_provenance = if matches!(
+                    &expression_type,
+                    ValueType::SharedRef(_)
+                ) {
+                    Some(self.reference_provenance(syntax_expr)?.ok_or_else(|| LowerError {
+                        message: "immutable reference expression has no deterministic provenance"
+                            .to_owned(),
+                        span: syntax_expr.span,
+                    })?)
+                } else {
+                    None
+                };
                 if let Some(binding) = self.visible_binding(name) {
+                    if matches!(&binding.value_type, ValueType::SharedRef(_)) {
+                        return Err(LowerError {
+                            message: format!(
+                                "reassigning immutable reference local {name:?} is not supported in v0"
+                            ),
+                            span: statement.span,
+                        });
+                    }
                     if binding.value_type != expression_type {
                         return Err(LowerError {
                             message: format!(
@@ -449,6 +562,13 @@ impl<'a> Analyzer<'a> {
                             ),
                             span: statement.span,
                         });
+                    }
+                    if matches!(&binding.value_type, ValueType::Record(_)) {
+                        self.reference_tracker.ensure_owner_operation_allowed(
+                            name,
+                            OwnerOperation::Reinitialize,
+                            statement.span,
+                        )?;
                     }
                     self.move_tracker.reinitialize(
                         name,
@@ -462,6 +582,10 @@ impl<'a> Analyzer<'a> {
                     }
                 } else {
                     self.define_binding(name.clone(), expression_type, statement.span.start);
+                    if let Some(provenance) = reference_provenance {
+                        self.reference_tracker
+                            .define_reference(name.clone(), provenance);
+                    }
                     StmtKind::Let {
                         name: name.clone(),
                         mutable: false,
@@ -471,7 +595,10 @@ impl<'a> Analyzer<'a> {
             }
             SyntaxStmtKind::Print(expr) => {
                 let (expr, expression_type) = self.lower_expr(expr)?;
-                if matches!(&expression_type, ValueType::Record(_)) {
+                if matches!(
+            &expression_type,
+            ValueType::Record(_) | ValueType::SharedRef(_)
+        ) {
                     return Err(LowerError {
                         message: "printing whole record values is not supported in Records v0"
                             .to_owned(),
@@ -480,12 +607,12 @@ impl<'a> Analyzer<'a> {
                 }
                 StmtKind::Print(expr)
             }
-            SyntaxStmtKind::Return(expr) => {
+            SyntaxStmtKind::Return(syntax_expr) => {
                 let expected_return = self.expected_return.clone().ok_or_else(|| LowerError {
                     message: "return is only valid inside a function".to_owned(),
                     span: statement.span,
                 })?;
-                let (expr, actual_type) = self.lower_expr(expr)?;
+                let (expr, actual_type) = self.lower_expr(syntax_expr)?;
                 if actual_type != expected_return {
                     return Err(LowerError {
                         message: format!(
@@ -495,6 +622,24 @@ impl<'a> Analyzer<'a> {
                         ),
                         span: statement.span,
                     });
+                }
+                if matches!(&expected_return, ValueType::SharedRef(_)) {
+                    let provenance = self
+                        .reference_provenance(syntax_expr)?
+                        .ok_or_else(|| LowerError {
+                            message: "returned immutable reference has no deterministic provenance"
+                                .to_owned(),
+                            span: syntax_expr.span,
+                        })?;
+                    let expected_source = self
+                        .expected_reference_source
+                        .as_deref()
+                        .expect("reference return signatures have one source parameter");
+                    self.reference_tracker.validate_return_provenance(
+                        &provenance,
+                        expected_source,
+                        statement.span,
+                    )?;
                 }
                 StmtKind::Return(expr)
             }
@@ -585,6 +730,16 @@ impl<'a> Analyzer<'a> {
             SyntaxExprKind::String(value) => (ExprKind::String(value.clone()), ValueType::String),
             SyntaxExprKind::Bool(value) => (ExprKind::Bool(*value), ValueType::Bool),
             SyntaxExprKind::Identifier(name) => {
+                if self
+                    .visible_binding(name)
+                    .is_some_and(|binding| matches!(binding.value_type, ValueType::Record(_)))
+                {
+                    self.reference_tracker.ensure_owner_operation_allowed(
+                        name,
+                        OwnerOperation::Move,
+                        expr.span,
+                    )?;
+                }
                 let value_type = self.move_tracker.consume_value(name, expr.span)?;
                 (
                     ExprKind::Local(name.clone()),
@@ -620,35 +775,40 @@ impl<'a> Analyzer<'a> {
                             });
                         }
                         let mut lowered_arguments = Vec::with_capacity(arguments.len());
-                        for (index, ((argument, expected_type), passing_mode)) in arguments
-                            .iter()
-                            .zip(&signature.parameter_types)
-                            .zip(&signature.parameter_modes)
-                            .enumerate()
-                        {
-                            let (argument, actual_type) =
-                                self.lower_call_argument(argument, *passing_mode)?;
-                            if &actual_type != expected_type {
-                                return Err(LowerError {
-                                    message: format!(
-                                        "argument {} for function {name:?} expects {}, found {}",
-                                        index + 1,
-                                        type_label(expected_type),
-                                        type_label(&actual_type)
-                                    ),
-                                    span: argument.span,
-                                });
-                            }
-                            lowered_arguments.push(argument);
-                        }
-                        (
-                            ExprKind::Call {
-                                name: name.clone(),
-                                arguments: lowered_arguments,
-                                argument_modes: signature.parameter_modes.clone(),
-                            },
-                            signature.return_type,
-                        )
+                let mut argument_modes = Vec::with_capacity(arguments.len());
+                for (index, ((argument, expected_type), passing_mode)) in arguments
+                    .iter()
+                    .zip(&signature.parameter_types)
+                    .zip(&signature.parameter_modes)
+                    .enumerate()
+                {
+                    let (argument, actual_type, effective_mode) = self.lower_call_argument(
+                        argument,
+                        expected_type,
+                        *passing_mode,
+                    )?;
+                    if &actual_type != expected_type {
+                        return Err(LowerError {
+                            message: format!(
+                                "argument {} for function {name:?} expects {}, found {}",
+                                index + 1,
+                                type_label(expected_type),
+                                type_label(&actual_type)
+                            ),
+                            span: argument.span,
+                        });
+                    }
+                    lowered_arguments.push(argument);
+                    argument_modes.push(effective_mode);
+                }
+                (
+                    ExprKind::Call {
+                        name: name.clone(),
+                        arguments: lowered_arguments,
+                        argument_modes,
+                    },
+                    signature.return_type,
+                )
                     }
                 }
             }
@@ -721,6 +881,16 @@ impl<'a> Analyzer<'a> {
                     });
                 }
                 (ExprKind::UnaryMinus(Box::new(inner)), ValueType::Integer)
+            }
+            SyntaxExprKind::SharedBorrow(inner) => {
+                let (inner, inner_type) = self.lower_reference_target(inner, expr.span)?;
+                let ValueType::Record(name) = inner_type else {
+                    unreachable!("reference target validation returns a nominal record type")
+                };
+                (
+                    ExprKind::SharedBorrow(Box::new(inner)),
+                    ValueType::SharedRef(Box::new(ValueType::Record(name))),
+                )
             }
             SyntaxExprKind::Binary { left, op, right } => {
                 let (left, left_type) = self.lower_expr(left)?;
@@ -804,24 +974,159 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
+    fn lower_reference_target(
+        &mut self,
+        target: &SyntaxExpr,
+        span: Span,
+    ) -> Result<(Expr, ValueType), LowerError> {
+        if !matches!(
+            &target.kind,
+            SyntaxExprKind::Identifier(_) | SyntaxExprKind::FieldAccess { .. }
+        ) {
+            return Err(LowerError {
+                message: "immutable reference target must be a local record or nominal field in v0"
+                    .to_owned(),
+                span,
+            });
+        }
+
+        let (expr, value_type) = self.lower_field_base(target)?;
+        match value_type {
+            ValueType::Record(_) => Ok((expr, value_type)),
+            ValueType::SharedRef(_) => Err(LowerError {
+                message: "nested immutable references are not supported in v0".to_owned(),
+                span,
+            }),
+            ValueType::Integer | ValueType::Bool | ValueType::String => Err(LowerError {
+                message: "immutable references require a nominal record target in v0"
+                    .to_owned(),
+                span,
+            }),
+        }
+    }
+
+    fn reference_provenance(
+        &self,
+        expr: &SyntaxExpr,
+    ) -> Result<Option<ReferenceProvenance>, LowerError> {
+        match &expr.kind {
+            SyntaxExprKind::Identifier(name) => {
+                Ok(self.reference_tracker.provenance(name).cloned())
+            }
+            SyntaxExprKind::SharedBorrow(inner) => {
+                self.borrow_provenance(inner, expr.span).map(Some)
+            }
+            SyntaxExprKind::Call { name, arguments } => {
+                let signature = self.function_signatures.get(name).ok_or_else(|| LowerError {
+                    message: format!("unknown function {name:?}"),
+                    span: expr.span,
+                })?;
+                let Some(index) = signature.reference_source_parameter else {
+                    return Ok(None);
+                };
+                let source = arguments.get(index).ok_or_else(|| LowerError {
+                    message: format!(
+                        "reference-returning function {name:?} is missing its provenance source argument"
+                    ),
+                    span: expr.span,
+                })?;
+                self.reference_provenance(source)?.map(Some).ok_or_else(|| LowerError {
+                    message: format!(
+                        "reference-returning call {name:?} has no deterministic source provenance"
+                    ),
+                    span: source.span,
+                })
+            }
+            SyntaxExprKind::Integer(_)
+            | SyntaxExprKind::String(_)
+            | SyntaxExprKind::Bool(_)
+            | SyntaxExprKind::Construct { .. }
+            | SyntaxExprKind::EnumConstruct { .. }
+            | SyntaxExprKind::FieldAccess { .. }
+            | SyntaxExprKind::InputInt
+            | SyntaxExprKind::LogicalNot(_)
+            | SyntaxExprKind::UnaryMinus(_)
+            | SyntaxExprKind::Binary { .. } => Ok(None),
+        }
+    }
+
+    fn borrow_provenance(
+        &self,
+        target: &SyntaxExpr,
+        origin_span: Span,
+    ) -> Result<ReferenceProvenance, LowerError> {
+        match &target.kind {
+            SyntaxExprKind::Identifier(name) => {
+                let binding = self.visible_binding(name).ok_or_else(|| LowerError {
+                    message: format!(
+                        "use of local {name:?} before definition or outside its scope"
+                    ),
+                    span: target.span,
+                })?;
+                match binding.value_type {
+                    ValueType::Record(_) => Ok(ReferenceProvenance::local_owner(
+                        name.clone(),
+                        origin_span,
+                    )),
+                    ValueType::SharedRef(_) => self
+                        .reference_tracker
+                        .provenance(name)
+                        .cloned()
+                        .ok_or_else(|| LowerError {
+                            message: format!(
+                                "immutable reference local {name:?} has no recorded provenance"
+                            ),
+                            span: target.span,
+                        }),
+                    ValueType::Integer | ValueType::Bool | ValueType::String => {
+                        Err(LowerError {
+                            message: "immutable references require a nominal record target in v0"
+                                .to_owned(),
+                            span: target.span,
+                        })
+                    }
+                }
+            }
+            SyntaxExprKind::FieldAccess { base, .. } => {
+                self.borrow_provenance(base, origin_span)
+            }
+            _ => Err(LowerError {
+                message: "immutable reference target must have deterministic local provenance"
+                    .to_owned(),
+                span: target.span,
+            }),
+        }
+    }
+
     fn lower_call_argument(
         &mut self,
         argument: &SyntaxExpr,
+        expected_type: &ValueType,
         passing_mode: ParameterPassingMode,
-    ) -> Result<(Expr, ValueType), LowerError> {
-        if passing_mode == ParameterPassingMode::SharedBorrow
+    ) -> Result<(Expr, ValueType, ParameterPassingMode), LowerError> {
+        let (argument, actual_type) = if passing_mode == ParameterPassingMode::SharedBorrow
             && let SyntaxExprKind::Identifier(name) = &argument.kind
         {
             let value_type = self.move_tracker.inspect_value(name, argument.span)?;
-            return Ok((
+            (
                 Expr {
                     kind: ExprKind::Local(name.clone()),
                     span: argument.span,
                 },
                 lowered_value_type(&value_type),
-            ));
+            )
+        } else {
+            self.lower_expr(argument)?
+        };
+
+        if passing_mode == ParameterPassingMode::SharedBorrow
+            && let ValueType::SharedRef(inner) = &actual_type
+            && inner.as_ref() == expected_type
+        {
+            return Ok((argument, expected_type.clone(), ParameterPassingMode::Owned));
         }
-        self.lower_expr(argument)
+
+        Ok((argument, actual_type, passing_mode))
     }
 
     fn lower_field_access(
@@ -900,6 +1205,103 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+fn identifier_uses_in_statements(statements: &[SyntaxStmt]) -> HashMap<String, usize> {
+    let mut uses = HashMap::new();
+    for statement in statements {
+        Self::collect_statement_identifier_uses(statement, &mut uses);
+    }
+    uses
+}
+
+fn consume_statement_identifier_uses(
+    statement: &SyntaxStmt,
+    remaining: &mut HashMap<String, usize>,
+) {
+    let mut consumed = HashMap::new();
+    Self::collect_statement_identifier_uses(statement, &mut consumed);
+    for (name, count) in consumed {
+        let Some(value) = remaining.get_mut(&name) else {
+            continue;
+        };
+        *value = value.saturating_sub(count);
+        let exhausted = *value == 0;
+        if exhausted {
+            remaining.remove(&name);
+        }
+    }
+}
+
+fn collect_statement_identifier_uses(
+    statement: &SyntaxStmt,
+    uses: &mut HashMap<String, usize>,
+) {
+    match &statement.kind {
+        SyntaxStmtKind::Bind { expr, .. }
+        | SyntaxStmtKind::Print(expr)
+        | SyntaxStmtKind::Return(expr) => Self::collect_expr_identifier_uses(expr, uses),
+        SyntaxStmtKind::Repeat { count, body } => {
+            Self::collect_expr_identifier_uses(count, uses);
+            for statement in body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+        }
+        SyntaxStmtKind::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            Self::collect_expr_identifier_uses(condition, uses);
+            for statement in then_body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+            for statement in else_body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+        }
+        SyntaxStmtKind::Match { value, arms } => {
+            Self::collect_expr_identifier_uses(value, uses);
+            for arm in arms {
+                for statement in &arm.body {
+                    Self::collect_statement_identifier_uses(statement, uses);
+                }
+            }
+        }
+    }
+}
+
+fn collect_expr_identifier_uses(expr: &SyntaxExpr, uses: &mut HashMap<String, usize>) {
+    match &expr.kind {
+        SyntaxExprKind::Integer(_)
+        | SyntaxExprKind::String(_)
+        | SyntaxExprKind::Bool(_)
+        | SyntaxExprKind::InputInt => {}
+        SyntaxExprKind::Identifier(name) => {
+            *uses.entry(name.clone()).or_insert(0) += 1;
+        }
+        SyntaxExprKind::Call { arguments, .. }
+        | SyntaxExprKind::EnumConstruct { arguments, .. } => {
+            for argument in arguments {
+                Self::collect_expr_identifier_uses(argument, uses);
+            }
+        }
+        SyntaxExprKind::Construct { fields, .. } => {
+            for field in fields {
+                Self::collect_expr_identifier_uses(&field.value, uses);
+            }
+        }
+        SyntaxExprKind::FieldAccess { base, .. }
+        | SyntaxExprKind::LogicalNot(base)
+        | SyntaxExprKind::UnaryMinus(base)
+        | SyntaxExprKind::SharedBorrow(base) => {
+            Self::collect_expr_identifier_uses(base, uses);
+        }
+        SyntaxExprKind::Binary { left, right, .. } => {
+            Self::collect_expr_identifier_uses(left, uses);
+            Self::collect_expr_identifier_uses(right, uses);
+        }
+    }
+}
+
     fn apply_mutability(&self, statements: &mut [Stmt]) {
         for statement in statements {
             match &mut statement.kind {
@@ -963,6 +1365,179 @@ mod tests {
             program.functions[0].return_type,
             ValueType::Record("Point".to_owned())
         );
+    }
+
+    #[test]
+    fn lowers_single_source_immutable_reference_contracts() {
+        let program = lower_source(
+            "record Item\nvalue int\nend\nfn identity(item &Item) &Item\nreturn item\nend\n",
+        )
+        .expect("single-source immutable reference contract should lower");
+        let function = &program.functions[0];
+        assert_eq!(
+            function.parameters[0].value_type,
+            ValueType::SharedRef(Box::new(ValueType::Record("Item".to_owned())))
+        );
+        assert_eq!(
+            function.return_type,
+            ValueType::SharedRef(Box::new(ValueType::Record("Item".to_owned())))
+        );
+        assert_eq!(
+            function.parameters[0].passing_mode,
+            super::ParameterPassingMode::Owned,
+            "explicit reference parameters must not receive an additional inferred SharedBorrow"
+        );
+        let StmtKind::Return(expr) = &function.body[0].kind else {
+            panic!("expected return");
+        };
+        assert!(matches!(expr.kind, ExprKind::Local(ref name) if name == "item"));
+    }
+
+    #[test]
+    fn lowers_explicit_borrow_into_first_class_reference_local() {
+        let program = lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nprint r.value\n",
+        )
+        .expect("stored immutable reference should lower");
+        let StmtKind::Let { expr, .. } = &program.statements[1].kind else {
+            panic!("expected reference binding");
+        };
+        assert!(matches!(expr.kind, ExprKind::SharedBorrow(_)));
+    }
+
+    #[test]
+    fn rejects_owner_move_and_reinitialization_while_reference_is_live() {
+        let moved = lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nmoved = item\nprint r.value\n",
+        )
+        .expect_err("owner move while reference is live must fail");
+        assert!(moved.message.contains("cannot move record local"));
+        assert!(moved.message.contains("immutable reference"));
+
+        let reinitialized = lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nitem = Item(value = 2)\nprint r.value\n",
+        )
+        .expect_err("owner reinitialization while reference is live must fail");
+        assert!(reinitialized.message.contains("cannot reinitialize record local"));
+    }
+
+    #[test]
+    fn releases_owner_after_final_reference_use_in_same_block() {
+        lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nprint r.value\nmoved = item\nprint moved.value\n",
+        )
+        .expect("owner move after the final reference use should lower");
+
+        lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nprint r.value\nitem = Item(value = 2)\nprint item.value\n",
+        )
+        .expect("owner reinitialization after the final reference use should lower");
+    }
+
+    #[test]
+    fn unused_reference_does_not_pin_owner_to_scope_end() {
+        lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nmoved = item\nprint moved.value\n",
+        )
+        .expect("an unused reference should stop borrowing after its definition");
+    }
+
+    #[test]
+    fn releases_outer_reference_after_final_control_flow_use() {
+        lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nif true\nprint r.value\nend\nmoved = item\nprint moved.value\n",
+        )
+        .expect("reference use inside a completed branch should not pin the owner afterward");
+
+        lower_source(
+            "record Item\nvalue int\nend\nitem = Item(value = 1)\nr = &item\nrepeat 2\nprint r.value\nend\nmoved = item\nprint moved.value\n",
+        )
+        .expect("reference use inside a completed repeat should not pin the owner afterward");
+    }
+
+    #[test]
+    fn rejects_returning_reference_to_local_owner() {
+        let error = lower_source(
+            "record Item\nvalue int\nend\nfn bad(input &Item) &Item\nlocal = Item(value = 1)\nreturn &local\nend\n",
+        )
+        .expect_err("reference to local owner must not escape");
+        assert!(error.message.contains("cannot return immutable reference derived from local owner"));
+    }
+
+    #[test]
+    fn propagates_reference_provenance_through_forwarding_calls_and_nested_fields() {
+        let program = lower_source(
+            "record Inner\nvalue int\nend\nrecord Outer\ninner Inner\nend\nfn identity(item &Outer) &Outer\nreturn item\nend\nfn nested(item &Outer) &Inner\nreturn &item.inner\nend\nfn forward(item &Outer) &Outer\nreturn identity(item)\nend\n",
+        )
+        .expect("single-source forwarding should preserve provenance");
+        assert_eq!(program.functions.len(), 3);
+    }
+
+    #[test]
+    fn first_class_reference_passes_through_inferred_shared_borrow_without_double_borrow() {
+        let program = lower_source(
+            "record Item\nvalue int\nend\nfn read(item Item) int\nreturn item.value\nend\nfn bridge(item &Item) int\nreturn read(item)\nend\n",
+        )
+        .expect("reference should interoperate with call-duration SharedBorrow");
+        let StmtKind::Return(expr) = &program.functions[1].body[0].kind else {
+            panic!("expected return");
+        };
+        let ExprKind::Call { argument_modes, .. } = &expr.kind else {
+            panic!("expected call");
+        };
+        assert_eq!(argument_modes, &[super::ParameterPassingMode::Owned]);
+    }
+
+    #[test]
+    fn rejects_ambiguous_reference_return_signatures_before_codegen() {
+        let zero = lower_source(
+            "record Item\nvalue int\nend\nfn bad() &Item\nreturn Item(value = 1)\nend\n",
+        )
+        .expect_err("reference return without a reference source must fail");
+        assert!(zero.message.contains("exactly one reference parameter source"));
+        assert!(zero.message.contains("found 0"));
+
+        let multiple = lower_source(
+            "record Item\nvalue int\nend\nfn choose(a &Item, b &Item) &Item\nreturn a\nend\n",
+        )
+        .expect_err("multiple possible reference sources must fail closed");
+        assert!(multiple.message.contains("exactly one reference parameter source"));
+        assert!(multiple.message.contains("found 2"));
+    }
+
+    #[test]
+    fn reads_scalar_fields_through_reference_parameters() {
+        let program = lower_source(
+            "record Item\nvalue int\nend\nfn value(item &Item) int\nreturn item.value\nend\n",
+        )
+        .expect("scalar field read through immutable reference should lower");
+        assert_eq!(program.functions[0].return_type, ValueType::Integer);
+    }
+
+    #[test]
+    fn same_owner_branches_preserve_reference_source() {
+        lower_source(
+            "record Item\nvalue int\nend\nfn choose_same(item &Item, flag bool) &Item\nr = item\nif flag\nreturn item\nelse\nreturn r\nend\nend\n",
+        )
+        .expect("both branches derive the returned reference from the same source");
+    }
+
+    #[test]
+    fn recursive_reference_forwarding_preserves_source() {
+        lower_source(
+            "record Item\nvalue int\nend\nfn recurse(item &Item, n int) &Item\nif n <= 0\nreturn item\nelse\nreturn recurse(item, n - 1)\nend\nend\n",
+        )
+        .expect("recursive forwarding through the sole reference source should lower");
+    }
+
+    #[test]
+    fn rejects_nominal_field_move_through_immutable_reference() {
+        let error = lower_source(
+            "record Inner\nvalue int\nend\nrecord Outer\ninner Inner\nend\nfn bad(item &Outer) Inner\nreturn item.inner\nend\n",
+        )
+        .expect_err("moving a nominal field through an immutable reference must fail");
+        assert!(error.message.contains("record-valued field"));
+        assert!(error.message.contains("no implicit clone"));
     }
 
     #[test]

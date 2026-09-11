@@ -77,140 +77,68 @@ Current `T -> T` APIs remain owned. Escaping borrowed results require an explici
 
 Durable report: `docs/LIFETIME_ELISION_RESEARCH.md`.
 
-## Active research — #102 / PR #103 immutable reference surface v0
+## #102 / PR #103 — immutable reference surface research completed
 
-Issue #102 is the next Phase 3.3 ownership-ergonomics slice. It researches the first explicit immutable reference / borrowed-result surface and its bounded ownership model before production implementation.
+The immutable-reference surface research is complete and merged to `main` as:
 
-PR #103: `research: classify immutable reference surface v0`  
-Branch: `research/immutable-reference-surface-v0`
+`cc7e7002bd1dd9726e0fd6bcf3d73687fddc0e15`
 
-Accepted research code/evidence head before documentation synchronization:
+Accepted result: **SURFACE-CANDIDATE / PUNCTUATION-AMPERSAND**. The locked research matrix contains 19 semantic cases with zero compile-expectation mismatches. Durable report: `docs/IMMUTABLE_REFERENCE_SURFACE_RESEARCH.md`.
 
-`7664d28dc0865ef4442063ed702875302271087c`
+## Active production — #104 / PR #105 immutable references v0
 
-The PR is research-only. It adds a dedicated workflow and research harness, not production syntax or semantics.
+Issue #104 / draft PR #105 implements the bounded production successor on `feature/immutable-reference-surface-v0`.
 
-### Dedicated research evidence
+### Implemented surface and representation
 
-Immutable reference surface research #3 / run `34598646494`: **SUCCESS** on Ubuntu 24.04 / Rust 1.98.0.
-
-Artifact:
-
-- `evo-immutable-reference-surface-research-ubuntu-24.04`;
-- id `10263292508`;
-- digest `sha256:59535a36276e7c5903d37c1b271128bf54de9e0af894d61ecb7052f52428d1f8`.
-
-Normal exact-head CI #413 / run `34598646488`: **SUCCESS** on Ubuntu, Windows and macOS.
-
-Observed result:
-
-- aggregate verdict: **SURFACE-CANDIDATE**;
-- recommended surface: **PUNCTUATION-AMPERSAND**;
-- semantic cases: **19**;
-- compile-expectation mismatches: **0**.
-
-### Surface decision
-
-The bounded candidate is explicit punctuation syntax:
-
-```text
-&T
-&expr
-```
-
-Reasons supported by the locked comparison:
-
-- `&` currently occupies invalid Evolution source space, so one new token does not reserve an existing identifier;
-- keyword `ref` / `borrow` syntax would reserve two current ordinary identifiers;
-- generic-like `Ref(...)` collides with current nominal/call-shaped identifier space;
-- `&T` / `&expr` maps directly to safe Rust shared-reference syntax.
-
-### Ownership/liveness result
-
-The matrix establishes the required semantic boundary:
-
-- existing owned `T -> T` remains owned;
-- one deterministic owner source can back a first-class immutable reference result without user-written lifetime names;
-- a reference can be stored in a local;
-- owner move/reinitialization while a later reference use remains is rejected;
-- owner move after the final reference use is valid;
-- move-only nominal data cannot be moved through an immutable reference, while scalar reads are allowed;
-- forwarding, recursion and branches are representable when every returned reference retains the same owner source;
-- multiple possible owner sources fail closed;
-- references derived from a dead local owner fail closed;
-- the new first-class reference model can interoperate with the existing non-escaping `SharedBorrow` call boundary.
-
-Durable report: `docs/IMMUTABLE_REFERENCE_SURFACE_RESEARCH.md`.
-
-### Recommended production-successor representation
-
-This is a design recommendation, not current implemented behavior.
-
-Current parser `TypeName` and semantic `SemanticType` encode owned values only. The bounded implementation should add explicit immutable-reference variants instead of changing the meaning of existing owned nodes.
-
-Recommended shape:
+Production code now has explicit immutable-reference representation across the frontend and lowering pipeline:
 
 ```text
 syntax type:       SharedRef(TypeName)
 syntax expression: SharedBorrow(Expr)
 semantic type:     SharedRef(SemanticType)
-provenance:        one deterministic owner/source identity for v0
+lowered value:     SharedRef(ValueType)
+provenance:        Parameter(name) | LocalOwner(name)
 ```
 
-Function signatures should expose `&T` explicitly. Local reference bindings may infer the produced reference type, but semantic IR/ownership analysis must retain reference-ness and owner provenance.
+The accepted source forms are `&T` in nominal-record function contracts and `&expr` for first-class immutable borrows. Existing owned `T` remains owned and inferred `SharedBorrow` remains a separate call-duration passing mode.
 
-The existing inferred `SharedBorrow` parameter mode remains a separate call-duration mechanism. It must not silently become a stored/escaping reference.
+### Provenance and liveness contract
 
-For liveness, the production successor should attempt bounded local final-use analysis and conservatively keep a reference live where control flow cannot prove an earlier end. Safety wins over convenience when the bounded analysis is uncertain.
+- A returned reference has one deterministic source reference parameter in v0.
+- Multiple possible reference inputs for a borrowed result fail closed rather than inventing a lifetime relation.
+- Local reference bindings retain provenance from their owner/reference source.
+- Forwarding calls, direct recursion and same-owner branches preserve that source.
+- A reference derived from a function-local owner cannot escape via return.
+- Owner move or reinitialization is rejected while a possibly-live reference points at it.
+- Bounded last-use analysis releases a local reference after its final proven use in the current statement block.
+- An outer reference used inside `if`/`repeat` remains live through the complete control-flow statement and may end afterward when there is no later use.
+- Uncertain/over-approximated cases remain live conservatively; safety is preferred over convenience.
+- Scalar fields may be inspected through a shared reference; moving a nominal record field through a reference is rejected with no implicit clone.
+
+### Code generation
+
+The feature lowers directly to safe ordinary Rust references. There is no hidden allocation, wrapper/reference object, RC/GC, runtime borrow map, unsafe lifetime extension, or invented `'static`.
+
+### Permanent validation
+
+Permanent tests cover lexer/recovery compatibility, formatter idempotence, parser fail-fast/recovery parity, semantic reference types, direct and local borrowing, live-owner move/reinit rejection, bounded final use, dead-local escape rejection, ambiguous-source rejection, forwarding, nested scalar field reads, recursion, same-owner branches, inferred `SharedBorrow` interoperability, nominal-field move rejection, and direct zero-cost Rust codegen.
+
+The historical immutable-reference research workflow is retired. Temporary development bootstrap workflows are removed after each verified source slice and are not part of the production gate.
 
 ### Explicit non-goals
 
-The #102 result does not approve:
-
-- mutable references;
-- generalized/user-written lifetime syntax;
-- multi-owner lifetime relation solving;
-- reference fields in records/enums;
-- self-referential/cyclic reference structures;
-- unsafe lifetime widening or invented `'static`;
-- hidden clone/copy;
-- boxing, RC/GC or runtime ownership maps.
-
-### Failed-SHA evidence retained
-
-Initial head `6f9f9f10c61f2b01ca44ac02a46106c8af5c604c` produced successful dedicated evidence, but CI #411 / run `34583343742` failed only rustfmt. It was not rerun.
-
-Format-only head `733f7efe154422ac0e5c84ce500204b62cf84f51` produced immutable-reference research #2 / run `34583596906`: **SUCCESS**, but normal CI #412 / run `34583596924` failed Clippy on the research-only `write_reports` helper because it had 9 parameters under `-D warnings`.
-
-Head `7664d28dc0865ef4442063ed702875302271087c` scopes a justified `clippy::too_many_arguments` allowance to that report writer only. It does not relax workspace lint policy or alter research semantics. Dedicated research #3 and normal CI #413 are both green.
+No mutable references, nested references, primitive reference types, reference fields in records/enums, generalized/user-written lifetime syntax, multi-owner lifetime solving, self-referential reference layouts, unsafe widening, hidden clone/copy, allocation, RC/GC, or runtime ownership machinery are approved by #104.
 
 ## Completion gate still open
 
-The research code/evidence head is accepted. PR #103 must not merge until this documentation-synchronized head receives natural **SUCCESS** from both normal CI and Immutable reference surface research, and its final artifact still reports the same surface/verdict/mismatch counts.
+PR #105 remains draft until documentation is synchronized and a clean user-authored exact head receives natural normal CI success across Ubuntu, Windows and macOS, including formatter, Clippy, workspace tests, release build and existing performance gates.
 
-After merge, natural exact-SHA `main` CI and research push workflow must both succeed before #102 is closed completed.
-
-## Required successor direction after #102 completion
-
-Only after the post-merge gate should a production implementation issue be atomized from the accepted bounded design:
-
-- lexer/parser support for `&` type and borrow expression;
-- explicit syntax and semantic reference types;
-- first-class immutable-reference local bindings;
-- deterministic single-source provenance;
-- source-native move/reinit/dead-owner/multi-owner diagnostics;
-- bounded final-use liveness;
-- direct safe Rust `&T` / `&expr` codegen;
-- compatibility tests proving existing owned programs are unchanged;
-- differential/runtime proof under the existing performance contract.
-
-Generalized/mutable/multi-owner lifetime machinery remains a later research problem.
+After merge, the natural exact-SHA `main` CI must succeed before #104 is closed completed.
 
 ## Implemented language / tooling state
 
-`docs/LANGUAGE_SPEC_V0.md` remains the implemented-language source of truth. Current accepted production core includes integer/bool/static strings, input/repeat/control flow, functions, lexical block locals, Records v0, Enums v0, by-value ownership/reinitialization, bounded inferred shared-borrow nominal parameters, source-native move diagnostics, source maps, formatter, native check/emit/build/run and verified run/build caches.
-
-There is still **no production user-facing first-class reference syntax/value or returned/escaping reference feature** on the active research branch.
+`docs/LANGUAGE_SPEC_V0.md` is the implemented-language source of truth. The production core now includes integer/bool/static strings, input/repeat/control flow, functions, lexical block locals, Records v0, Enums v0, by-value ownership/reinitialization, inferred call-duration shared-borrow parameters, first-class bounded immutable references, source-native move/reference diagnostics, source maps, formatter, native check/emit/build/run and verified run/build caches.
 
 ## CI / handoff invariant
 

@@ -307,6 +307,10 @@ fn resolve_payload_type(
             ),
             span,
         }),
+        SyntaxTypeName::SharedRef(_) => Err(LowerError {
+            message: "immutable reference enum payloads are not supported in v0".to_owned(),
+            span,
+        }),
     }
 }
 
@@ -406,7 +410,8 @@ fn validate_expr_constructor_shapes(
         }
         SyntaxExprKind::FieldAccess { base, .. }
         | SyntaxExprKind::LogicalNot(base)
-        | SyntaxExprKind::UnaryMinus(base) => validate_expr_constructor_shapes(base, environment),
+        | SyntaxExprKind::UnaryMinus(base)
+        | SyntaxExprKind::SharedBorrow(base) => validate_expr_constructor_shapes(base, environment),
         SyntaxExprKind::Binary { left, right, .. } => {
             validate_expr_constructor_shapes(left, environment)?;
             validate_expr_constructor_shapes(right, environment)
@@ -440,7 +445,8 @@ fn obvious_expr_type(expr: &SyntaxExpr) -> Option<ResolvedPayloadType> {
         SyntaxExprKind::Identifier(_)
         | SyntaxExprKind::Call { .. }
         | SyntaxExprKind::Construct { .. }
-        | SyntaxExprKind::FieldAccess { .. } => None,
+        | SyntaxExprKind::FieldAccess { .. }
+        | SyntaxExprKind::SharedBorrow(_) => None,
     }
 }
 

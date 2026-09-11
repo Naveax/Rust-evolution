@@ -283,7 +283,9 @@ fn collect_expr_effects(expr: &Expr, parameter: &str, mode: UseMode, effects: &m
         ExprKind::FieldAccess { base, .. } => {
             collect_expr_effects(base, parameter, UseMode::Inspect, effects);
         }
-        ExprKind::LogicalNot(inner) | ExprKind::UnaryMinus(inner) => {
+        ExprKind::LogicalNot(inner)
+        | ExprKind::UnaryMinus(inner)
+        | ExprKind::SharedBorrow(inner) => {
             collect_expr_effects(inner, parameter, UseMode::Consume, effects);
         }
         ExprKind::Binary { left, right, .. } => {

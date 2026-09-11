@@ -11,6 +11,7 @@ pub(crate) enum SemanticType {
     Bool,
     String,
     Record(String),
+    SharedRef(Box<SemanticType>),
 }
 
 impl SemanticType {
@@ -67,6 +68,9 @@ impl RecordEnvironment {
                     })
                 }
             }
+            SyntaxTypeName::SharedRef(inner) => self
+                .resolve_type_name(inner, span)
+                .map(|inner| SemanticType::SharedRef(Box::new(inner))),
         }
     }
 
@@ -144,11 +148,25 @@ impl RecordEnvironment {
         field_name: &str,
         access_span: Span,
     ) -> Result<SemanticType, LowerError> {
-        let SemanticType::Record(record_name) = base_type else {
-            return Err(LowerError {
-                message: "field access requires a record value".to_owned(),
-                span: access_span,
-            });
+        let record_name = match base_type {
+            SemanticType::Record(name) => name,
+            SemanticType::SharedRef(inner) => match inner.as_ref() {
+                SemanticType::Record(name) => name,
+                _ => {
+                    return Err(LowerError {
+                        message: "field access requires a record value or immutable record reference"
+                            .to_owned(),
+                        span: access_span,
+                    });
+                }
+            },
+            _ => {
+                return Err(LowerError {
+                    message: "field access requires a record value or immutable record reference"
+                        .to_owned(),
+                    span: access_span,
+                });
+            }
         };
 
         let schema = self
@@ -349,6 +367,7 @@ fn semantic_type_label(value_type: &SemanticType) -> String {
         SemanticType::Bool => "bool".to_owned(),
         SemanticType::String => "string".to_owned(),
         SemanticType::Record(name) => name.clone(),
+        SemanticType::SharedRef(inner) => format!("&{}", semantic_type_label(inner)),
     }
 }
 
@@ -447,6 +466,37 @@ mod tests {
             .resolve_type_name(&TypeName::Named("Missing".to_owned()), test_span(9))
             .expect_err("unknown record type should fail");
         assert_eq!(error.span.line, 9);
+    }
+
+    #[test]
+    fn resolves_immutable_reference_signature_types() {
+        let program = parse_source("record Point\nx int\nend\n");
+        let environment = collect_record_environment(&program).expect("environment should build");
+        let resolved = environment
+            .resolve_type_name(
+                &TypeName::SharedRef(Box::new(TypeName::Named("Point".to_owned()))),
+                test_span(1),
+            )
+            .expect("known immutable record reference should resolve");
+        assert_eq!(
+            resolved,
+            SemanticType::SharedRef(Box::new(SemanticType::Record("Point".to_owned())))
+        );
+        assert!(resolved.is_trivially_reusable_v0());
+    }
+
+    #[test]
+    fn field_access_accepts_immutable_record_references() {
+        let program = parse_source("record Point\nx int\nend\n");
+        let environment = collect_record_environment(&program).expect("environment should build");
+        let point_ref =
+            SemanticType::SharedRef(Box::new(SemanticType::Record("Point".to_owned())));
+        assert_eq!(
+            environment
+                .field_type(&point_ref, "x", test_span(2))
+                .expect("scalar field read through immutable reference should resolve"),
+            SemanticType::Integer
+        );
     }
 
     #[test]

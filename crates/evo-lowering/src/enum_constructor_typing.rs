@@ -151,6 +151,10 @@ impl<'a> EnumTypeEnvironment<'a> {
                 let _ = self.infer_expr(inner, scopes)?;
                 Ok(Some(ResolvedPayloadType::Integer))
             }
+            SyntaxExprKind::SharedBorrow(_) => Err(LowerError {
+                message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+                span: expr.span,
+            }),
             SyntaxExprKind::Binary { left, op, right } => {
                 let _ = self.infer_expr(left, scopes)?;
                 let _ = self.infer_expr(right, scopes)?;
@@ -382,6 +386,10 @@ fn resolve_signature_type(
         }
         SyntaxTypeName::Named(name) => Err(LowerError {
             message: format!("unknown nominal type {name:?} in function signature"),
+            span,
+        }),
+        SyntaxTypeName::SharedRef(_) => Err(LowerError {
+            message: "immutable reference semantic lowering is not implemented yet".to_owned(),
             span,
         }),
     }

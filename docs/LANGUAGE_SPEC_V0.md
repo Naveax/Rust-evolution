@@ -57,6 +57,7 @@ Accepted source lowers to ordinary static Rust constructs and native code.
 - String literals use double quotes.
 - Supported string escapes are `\n`, `\r`, `\t`, `\"`, and `\\`.
 - Arithmetic/assignment/grouping operators are `+`, `-`, `*`, `/`, `=`, `(`, and `)`.
+- `&` is the immutable-reference type/borrow marker. It is not a binary operator.
 - Comparison operators are `==`, `!=`, `<`, `<=`, `>`, and `>=`.
 - Logical operators are keyword operators `and`, `or`, and `not`.
 - `.` is postfix field access and the qualifier separator for enum variants.
@@ -100,7 +101,7 @@ function_definition := "fn" IDENTIFIER "(" parameters? ")" type_name NEWLINE+
                        function_block "end"
 parameters          := parameter ("," parameter)*
 parameter           := IDENTIFIER type_name
-type_name           := "int" | "bool" | "string" | IDENTIFIER
+type_name           := "int" | "bool" | "string" | IDENTIFIER | "&" IDENTIFIER
 
 function_block      := (NEWLINE* function_statement (NEWLINE+ | EOF))* NEWLINE*
 function_statement  := statement | return_statement
@@ -137,7 +138,7 @@ comparison          := additive (comparison_operator additive)?
 comparison_operator := "==" | "!=" | "<" | "<=" | ">" | ">="
 additive            := multiplicative (("+" | "-") multiplicative)*
 multiplicative      := unary (("*" | "/") unary)*
-unary               := "-" unary | postfix
+unary               := "-" unary | "&" unary | postfix
 postfix             := primary ("." IDENTIFIER)*
 primary             := INTEGER
                      | STRING
@@ -186,8 +187,9 @@ From lowest to highest:
 5. `+` / `-`
 6. `*` / `/`
 7. unary numeric `-`
-8. postfix qualification/field access
-9. primary/call/constructor/grouping
+8. unary immutable borrow `&`
+9. postfix qualification/field access
+10. primary/call/constructor/grouping
 
 `not` is recursive. Comparison precedence remains below arithmetic. Chained comparisons such as `1 < 2 < 3` are explicitly rejected rather than given Python-style semantics.
 
@@ -243,7 +245,27 @@ The semantic layer recognizes:
 - static/literal string;
 - boolean;
 - nominal record types by declared name;
-- nominal enum types by declared name.
+- nominal enum types by declared name;
+- first-class immutable references to nominal record values (`&T`).
+
+### Immutable references v0
+
+The production immutable-reference subset is deliberately bounded:
+
+- `&T` is accepted in function parameter and return contracts when `T` is a nominal record type;
+- `&expr` creates a first-class immutable reference to a nominal record value;
+- reference locals may store and forward a reference without changing its owner provenance;
+- returning `&T` requires exactly one deterministic reference-parameter source in v0; signatures with multiple possible reference sources fail closed;
+- forwarding and direct recursion may return a reference when provenance stays tied to that sole source;
+- branches may return different reference locals only when they retain the same source provenance;
+- returning a reference derived from a function-local owner is rejected before codegen;
+- moving or reinitializing an owner while a possibly-live reference still points to it is rejected source-natively;
+- bounded statement/block last-use analysis ends a local borrow after its final proven use, including after a completed `if` or `repeat` statement; uncertain cases remain live conservatively;
+- scalar fields may be read through `&Record`; moving a record-valued field through an immutable reference is rejected and no implicit clone is inserted;
+- an existing inferred `SharedBorrow` parameter is still a call-duration passing mode, not a first-class reference value; passing a first-class `&T` through such a call does not add a second `&`;
+- codegen uses ordinary safe Rust `&T` / `&expr` and relies on Rust lifetime elision only for the already-proven single-source contracts.
+
+Explicit v0 exclusions: mutable references, nested `&&T`/`&&expr`, primitive reference types such as `&int`, reference fields in records/enums, generalized or user-written lifetime parameters, multi-owner lifetime solving, hidden clone/copy, allocation, RC/GC, runtime borrow tables, unsafe lifetime widening, and invented `'static` lifetimes.
 
 Scalar rules:
 

@@ -72,6 +72,7 @@ pub enum TypeName {
     Bool,
     String,
     Named(String),
+    SharedRef(Box<TypeName>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,6 +158,7 @@ pub enum ExprKind {
     InputInt,
     LogicalNot(Box<Expr>),
     UnaryMinus(Box<Expr>),
+    SharedBorrow(Box<Expr>),
     Binary {
         left: Box<Expr>,
         op: BinaryOp,
@@ -519,6 +521,10 @@ impl<'a> Parser<'a> {
             TokenKind::TypeBool => Ok(RecordFieldType::Bool),
             TokenKind::TypeString => Ok(RecordFieldType::String),
             TokenKind::Identifier(name) => Ok(RecordFieldType::Named(name)),
+            TokenKind::Ampersand => Err(ParseError {
+                message: "immutable reference record fields are not supported in v0".to_owned(),
+                span: token.span,
+            }),
             _ => Err(ParseError {
                 message: "expected record field type".to_owned(),
                 span: token.span,
@@ -557,7 +563,11 @@ impl<'a> Parser<'a> {
             let payload_type = if matches!(self.current().kind, TokenKind::Newline) {
                 None
             } else {
-                Some(self.parse_type_name()?)
+                if matches!(self.current().kind, TokenKind::Ampersand) {
+                    return Err(self
+                        .error_here("immutable reference enum payloads are not supported in v0"));
+                }
+                Some(self.parse_owned_type_name()?)
             };
             let span = if payload_type.is_some() {
                 variant_name_token.span.join(payload_token.span)
@@ -633,12 +643,12 @@ impl<'a> Parser<'a> {
                     span: name_token.span,
                 });
             };
-            let type_token = self.current().clone();
             let type_name = self.parse_type_name()?;
+            let type_end = self.tokens[self.index.saturating_sub(1)].span;
             parameters.push(Parameter {
                 name,
                 type_name,
-                span: name_token.span.join(type_token.span),
+                span: name_token.span.join(type_end),
             });
             if !matches!(self.current().kind, TokenKind::Comma) {
                 break;
@@ -652,6 +662,34 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type_name(&mut self) -> Result<TypeName, ParseError> {
+        if !matches!(self.current().kind, TokenKind::Ampersand) {
+            return self.parse_owned_type_name();
+        }
+
+        let marker = self.advance().span;
+        let token = self.advance();
+        match token.kind {
+            TokenKind::Identifier(name) if name == "mut" => Err(ParseError {
+                message: "mutable references are not supported in v0".to_owned(),
+                span: marker.join(token.span),
+            }),
+            TokenKind::Identifier(name) => Ok(TypeName::SharedRef(Box::new(TypeName::Named(name)))),
+            TokenKind::Ampersand => Err(ParseError {
+                message: "nested immutable reference types are not supported in v0".to_owned(),
+                span: marker.join(token.span),
+            }),
+            TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString => Err(ParseError {
+                message: "immutable reference types require a nominal type in v0".to_owned(),
+                span: marker.join(token.span),
+            }),
+            _ => Err(ParseError {
+                message: "expected nominal type name after '&'".to_owned(),
+                span: marker.join(token.span),
+            }),
+        }
+    }
+
+    fn parse_owned_type_name(&mut self) -> Result<TypeName, ParseError> {
         let token = self.advance();
         match token.kind {
             TokenKind::TypeInt => Ok(TypeName::Int),
@@ -1120,6 +1158,20 @@ impl<'a> Parser<'a> {
                 span,
             });
         }
+        if matches!(self.current().kind, TokenKind::Ampersand) {
+            let start = self.advance().span;
+            if matches!(self.current().kind, TokenKind::Ampersand) {
+                return Err(
+                    self.error_here("nested immutable borrow expressions are not supported in v0")
+                );
+            }
+            let expr = self.parse_unary()?;
+            let span = start.join(expr.span);
+            return Ok(Expr {
+                kind: ExprKind::SharedBorrow(Box::new(expr)),
+                span,
+            });
+        }
         self.parse_postfix()
     }
 
@@ -1550,6 +1602,93 @@ mod tests {
             parse_source("print add(2, 3)\nfn add(a int, b int) int\nreturn a + b\nend\n");
         assert_eq!(program.functions.len(), 1);
         assert_eq!(program.statements.len(), 1);
+    }
+
+    #[test]
+    fn parses_immutable_reference_contracts_and_borrow_expressions() {
+        let program = parse_source(
+            "record Item\nvalue int\nend\nfn view(item &Item) &Item\nreturn &item\nend\n",
+        );
+        assert_eq!(
+            program.functions[0].parameters[0].type_name,
+            TypeName::SharedRef(Box::new(TypeName::Named("Item".to_owned())))
+        );
+        assert_eq!(
+            program.functions[0].return_type,
+            TypeName::SharedRef(Box::new(TypeName::Named("Item".to_owned())))
+        );
+        let StmtKind::Return(expr) = &program.functions[0].body[0].kind else {
+            panic!("expected return");
+        };
+        assert!(matches!(
+            expr.kind,
+            ExprKind::SharedBorrow(ref inner)
+                if matches!(inner.kind, ExprKind::Identifier(ref name) if name == "item")
+        ));
+    }
+
+    #[test]
+    fn immutable_borrow_wraps_postfix_field_access() {
+        let program = parse_source("r = &item.inner\n");
+        let StmtKind::Bind { expr, .. } = &program.statements[0].kind else {
+            panic!("expected binding");
+        };
+        assert!(matches!(
+            expr.kind,
+            ExprKind::SharedBorrow(ref inner)
+                if matches!(inner.kind, ExprKind::FieldAccess { ref field, .. } if field == "inner")
+        ));
+    }
+
+    #[test]
+    fn rejects_out_of_scope_reference_type_surfaces() {
+        for (source, expected) in [
+            (
+                "fn nested(item &&Item) Item\nreturn item\nend\n",
+                "nested immutable reference types",
+            ),
+            (
+                "fn mutable(item &mut) Item\nreturn item\nend\n",
+                "mutable references",
+            ),
+            (
+                "fn scalar(item &int) int\nreturn 1\nend\n",
+                "require a nominal type",
+            ),
+            (
+                "record Holder\nitem &Item\nend\n",
+                "reference record fields",
+            ),
+            (
+                "enum MaybeItem\nSome &Item\nend\n",
+                "reference enum payloads",
+            ),
+        ] {
+            let tokens = lex(source).expect("lexing should succeed");
+            let error = parse(&tokens).expect_err("surface should be rejected");
+            assert!(error.message.contains(expected));
+        }
+    }
+
+    #[test]
+    fn rejects_nested_borrow_expression() {
+        let tokens = lex("r = &&item\n").expect("lexing should succeed");
+        let error = parse(&tokens).expect_err("nested borrow should fail");
+        assert!(
+            error
+                .message
+                .contains("nested immutable borrow expressions")
+        );
+    }
+
+    #[test]
+    fn recovering_parser_matches_fail_fast_for_reference_surface() {
+        let source = "record Item\nvalue int\nend\nfn view(item &Item) &Item\nreturn &item\nend\n";
+        let tokens = lex(source).expect("lexing should succeed");
+        assert_eq!(
+            parse_recovering(&tokens).expect("recovery parse should succeed"),
+            parse(&tokens).expect("fail-fast parse should succeed")
+        );
     }
 
     #[test]
