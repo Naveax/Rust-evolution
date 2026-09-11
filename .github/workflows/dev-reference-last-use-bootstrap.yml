@@ -1,0 +1,237 @@
+name: DEV immutable reference last-use bootstrap
+
+on:
+  push:
+    branches:
+      - feature/immutable-reference-surface-v0
+    paths:
+      - .github/workflows/dev-reference-last-use-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feature/immutable-reference-surface-v0
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+
+      - name: Apply bounded last-use liveness
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("crates/evo-lowering/src/lib.rs")
+          text = path.read_text()
+
+          old = '''    fn lower_statements(&mut self, statements: &[SyntaxStmt]) -> Result<Vec<Stmt>, LowerError> {
+              statements
+                  .iter()
+                  .map(|statement| self.lower_statement(statement))
+                  .collect()
+          }
+          '''
+          new = '''    fn lower_statements(&mut self, statements: &[SyntaxStmt]) -> Result<Vec<Stmt>, LowerError> {
+              let mut remaining_uses = identifier_uses_in_statements(statements);
+              let mut lowered = Vec::with_capacity(statements.len());
+              for statement in statements {
+                  lowered.push(self.lower_statement(statement)?);
+                  consume_statement_identifier_uses(statement, &mut remaining_uses);
+                  self.release_dead_references_in_current_scope(&remaining_uses);
+              }
+              Ok(lowered)
+          }
+
+          fn release_dead_references_in_current_scope(
+              &mut self,
+              remaining_uses: &HashMap<String, usize>,
+          ) {
+              let dead: Vec<String> = self
+                  .scopes
+                  .last()
+                  .expect("analyzer always has a lexical scope")
+                  .keys()
+                  .filter(|name| {
+                      self.reference_tracker.provenance(name).is_some()
+                          && !remaining_uses.contains_key(*name)
+                  })
+                  .cloned()
+                  .collect();
+              for name in dead {
+                  self.reference_tracker.forget(&name);
+              }
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f"lower_statements anchor count was {text.count(old)}, expected 1")
+          text = text.replace(old, new, 1)
+
+          helper_anchor = '''    fn apply_mutability(&self, statements: &mut [Stmt]) {
+          '''
+          helpers = '''fn identifier_uses_in_statements(statements: &[SyntaxStmt]) -> HashMap<String, usize> {
+              let mut uses = HashMap::new();
+              for statement in statements {
+                  collect_statement_identifier_uses(statement, &mut uses);
+              }
+              uses
+          }
+
+          fn consume_statement_identifier_uses(
+              statement: &SyntaxStmt,
+              remaining: &mut HashMap<String, usize>,
+          ) {
+              let mut consumed = HashMap::new();
+              collect_statement_identifier_uses(statement, &mut consumed);
+              for (name, count) in consumed {
+                  let Some(value) = remaining.get_mut(&name) else {
+                      continue;
+                  };
+                  *value = value.saturating_sub(count);
+                  if *value == 0 {
+                      remaining.remove(&name);
+                  }
+              }
+          }
+
+          fn collect_statement_identifier_uses(
+              statement: &SyntaxStmt,
+              uses: &mut HashMap<String, usize>,
+          ) {
+              match &statement.kind {
+                  SyntaxStmtKind::Bind { expr, .. }
+                  | SyntaxStmtKind::Print(expr)
+                  | SyntaxStmtKind::Return(expr) => collect_expr_identifier_uses(expr, uses),
+                  SyntaxStmtKind::Repeat { count, body } => {
+                      collect_expr_identifier_uses(count, uses);
+                      for statement in body {
+                          collect_statement_identifier_uses(statement, uses);
+                      }
+                  }
+                  SyntaxStmtKind::If {
+                      condition,
+                      then_body,
+                      else_body,
+                  } => {
+                      collect_expr_identifier_uses(condition, uses);
+                      for statement in then_body {
+                          collect_statement_identifier_uses(statement, uses);
+                      }
+                      for statement in else_body {
+                          collect_statement_identifier_uses(statement, uses);
+                      }
+                  }
+                  SyntaxStmtKind::Match { value, arms } => {
+                      collect_expr_identifier_uses(value, uses);
+                      for arm in arms {
+                          for statement in &arm.body {
+                              collect_statement_identifier_uses(statement, uses);
+                          }
+                      }
+                  }
+              }
+          }
+
+          fn collect_expr_identifier_uses(expr: &SyntaxExpr, uses: &mut HashMap<String, usize>) {
+              match &expr.kind {
+                  SyntaxExprKind::Integer(_)
+                  | SyntaxExprKind::String(_)
+                  | SyntaxExprKind::Bool(_)
+                  | SyntaxExprKind::InputInt => {}
+                  SyntaxExprKind::Identifier(name) => {
+                      *uses.entry(name.clone()).or_insert(0) += 1;
+                  }
+                  SyntaxExprKind::Call { arguments, .. }
+                  | SyntaxExprKind::EnumConstruct { arguments, .. } => {
+                      for argument in arguments {
+                          collect_expr_identifier_uses(argument, uses);
+                      }
+                  }
+                  SyntaxExprKind::Construct { fields, .. } => {
+                      for field in fields {
+                          collect_expr_identifier_uses(&field.value, uses);
+                      }
+                  }
+                  SyntaxExprKind::FieldAccess { base, .. }
+                  | SyntaxExprKind::LogicalNot(base)
+                  | SyntaxExprKind::UnaryMinus(base)
+                  | SyntaxExprKind::SharedBorrow(base) => {
+                      collect_expr_identifier_uses(base, uses);
+                  }
+                  SyntaxExprKind::Binary { left, right, .. } => {
+                      collect_expr_identifier_uses(left, uses);
+                      collect_expr_identifier_uses(right, uses);
+                  }
+              }
+          }
+
+          '''
+          if text.count(helper_anchor) != 1:
+              raise SystemExit("apply_mutability anchor missing or duplicated")
+          text = text.replace(helper_anchor, helpers + helper_anchor, 1)
+
+          test_anchor = '''    #[test]
+              fn rejects_returning_reference_to_local_owner() {
+          '''
+          tests = '''    #[test]
+              fn releases_owner_after_final_reference_use_in_same_block() {
+                  lower_source(
+                      "record Item\\nvalue int\\nend\\nitem = Item(value = 1)\\nr = &item\\nprint r.value\\nmoved = item\\nprint moved.value\\n",
+                  )
+                  .expect("owner move after the final reference use should lower");
+
+                  lower_source(
+                      "record Item\\nvalue int\\nend\\nitem = Item(value = 1)\\nr = &item\\nprint r.value\\nitem = Item(value = 2)\\nprint item.value\\n",
+                  )
+                  .expect("owner reinitialization after the final reference use should lower");
+              }
+
+              #[test]
+              fn unused_reference_does_not_pin_owner_to_scope_end() {
+                  lower_source(
+                      "record Item\\nvalue int\\nend\\nitem = Item(value = 1)\\nr = &item\\nmoved = item\\nprint moved.value\\n",
+                  )
+                  .expect("an unused reference should stop borrowing after its definition");
+              }
+
+              #[test]
+              fn releases_outer_reference_after_final_control_flow_use() {
+                  lower_source(
+                      "record Item\\nvalue int\\nend\\nitem = Item(value = 1)\\nr = &item\\nif true\\nprint r.value\\nend\\nmoved = item\\nprint moved.value\\n",
+                  )
+                  .expect("reference use inside a completed branch should not pin the owner afterward");
+
+                  lower_source(
+                      "record Item\\nvalue int\\nend\\nitem = Item(value = 1)\\nr = &item\\nrepeat 2\\nprint r.value\\nend\\nmoved = item\\nprint moved.value\\n",
+                  )
+                  .expect("reference use inside a completed repeat should not pin the owner afterward");
+              }
+
+          '''
+          if text.count(test_anchor) != 1:
+              raise SystemExit("reference test anchor missing or duplicated")
+          text = text.replace(test_anchor, tests + test_anchor, 1)
+          path.write_text(text)
+
+      - name: Format
+        run: cargo +1.98.0 fmt --all
+
+      - name: Clippy
+        run: cargo +1.98.0 clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test workspace
+        run: cargo +1.98.0 test --workspace
+
+      - name: Commit verified last-use slice
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/evo-lowering/src/lib.rs
+          git diff --cached --check
+          git commit -m "feat: end immutable borrows after bounded last use"
+          git push origin HEAD:feature/immutable-reference-surface-v0
