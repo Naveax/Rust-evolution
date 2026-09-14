@@ -151,7 +151,7 @@ Implemented behavior includes:
 
 Permanent production coverage now includes contextual compatibility, scalar/nested/storage boundaries, branch/repeat ownership behavior, reference/source-handle interactions and generated-Rust operation-shape checks. The historical surface research workflow has been retired while its report/artifacts remain preserved.
 
-Separate final validation lanes cover category-conversion rejection, source-native diagnostics and an equivalent-`Rc` differential performance gate. These must be integrated and validated on the final feature head before the main PR is considered complete.
+Separate final validation lanes cover category-conversion rejection, source-native diagnostics and equivalent-`Rc` differential performance. The performance component is accepted on exact head `c83d42dbe0e346021f1f524cf9d65f67fdbc66d3`: Explicit shared owner performance #7 / run `34824865453` succeeded; artifact id `10339932088`, digest `sha256:a490d5a0bc5d2cfe15c4da01b89cb45eb9e4d8aa51d8309d865a926dc60d6721`; correctness, normalized LLVM IR and executable-byte parity all passed, both binaries were 2,267,304 bytes, stable median ratio `0.992969173`, final verdict PASS via `byte-identical-binary-parity`. All component lanes still require combined final-head validation before the main PR is complete.
 
 ## Current architecture facts relevant to #112
 

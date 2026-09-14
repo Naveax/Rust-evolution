@@ -22,6 +22,12 @@ Production branch: `feature/explicit-shared-handle-v0`.
 
 The bounded one-thread immutable shared-owner implementation is present and now in final integration/validation. It uses contextual `shared Item`, `share expr`, and `dup expr`, direct safe `Rc<T>` codegen, move-only handles and existing bounded immutable-reference provenance/final-use rules.
 
+## Accepted component performance evidence
+
+Exact performance component head `c83d42dbe0e346021f1f524cf9d65f67fdbc66d3` passed Explicit shared owner performance #7 / run `34824865453`. Artifact `evo-bench-explicit-shared-owner-ubuntu-24.04`, id `10339932088`, digest `sha256:a490d5a0bc5d2cfe15c4da01b89cb45eb9e4d8aa51d8309d865a926dc60d6721`. Correctness passed, normalized LLVM IR matched, executable bytes were identical at 2,267,304 bytes each, the stable observed median ratio was `0.992969173`, and the final verdict was PASS via `byte-identical-binary-parity`.
+
+This evidence validates the component benchmark/reference lock. The final combined feature head must still pass the same permanent performance workflow after all remaining gates/docs are integrated.
+
 ## Remaining completion sequence
 
 1. Integrate the permanent no-implicit-conversion boundary tests.
