@@ -1,51 +1,85 @@
 # Cross-thread shared ownership v0 research
 
-Status: **RESEARCH IN PROGRESS**
+Status: **SPLIT-RESEARCH**
 
 Parent: #123
 
-This track isolates immutable cross-thread owner sharing from one-thread `Rc`, dynamic interior mutability, synchronization, weak edges, and payload cloning.
+This track isolates immutable cross-thread owner sharing from one-thread `Rc`, dynamic interior mutability, synchronization, weak edges, and payload cloning. It does not add Evolution production syntax or runtime ownership machinery.
 
-## Core distinction
+## Decision
 
-`Arc<T>` changes the ownership mechanism itself: strong/weak count maintenance is atomic and the payload must satisfy Rust's thread-transfer/share capability rules for the intended use. `Mutex`, `RwLock`, and atomic payloads add separate synchronization semantics. None of these costs may appear implicitly.
+The evidence supports **explicit Arc-like immutable cross-thread ownership as a distinct candidate**, but it does not support one generic shared-ownership mode.
 
-## Executable matrix
+Accepted classification:
 
-The pinned Rust 1.98 corpus covers:
+- `ARC-CANDIDATE` for explicit atomic reference-counted immutable ownership;
+- `RC/OWNED-INSTEAD` where cross-thread shared ownership buys nothing;
+- `REQUIRES-SEND-SYNC-CAPABILITY-DESIGN` for payload/thread capability rules;
+- `REQUIRES-SYNCHRONIZATION-DESIGN` for `Mutex`, `RwLock`, atomics, and shared mutation;
+- `REQUIRES-WEAK-CYCLE-MODEL` for `Weak` edges;
+- `REJECT-HIDDEN-COST` for implicit atomic upgrades, duplication, synchronization, or payload cloning.
 
-- owned thread transfer when shared ownership is unnecessary;
-- `Rc<T>` cross-thread rejection;
-- `Arc<T>` explicit clone/read/join and count lifecycle;
-- by-value Arc forwarding and explicit duplicate-before-forwarding;
-- final-owner destruction;
-- ordinary references derived from an Arc handle inside one thread;
-- rejection of Arc thread transfer when the payload does not satisfy Rust's thread-safety requirements;
-- `Arc<Mutex<T>>`, `Arc<RwLock<T>>`, and Arc plus atomic payload as synchronization boundaries;
-- Arc `Weak` as a separate weak-edge model;
-- owner-handle duplication versus payload deep clone;
-- single-thread cases where atomic ownership cost is unjustified.
+A future Arc-like surface therefore remains separate from locks, mutable shared state, Weak edges, and the existing one-thread `shared T` / `Rc<T>` contract.
 
-## Decision classes
+## Exact executable evidence
 
-- `ARC-CANDIDATE`
-- `RC/OWNED-INSTEAD`
-- `REQUIRES-SEND-SYNC-CAPABILITY-DESIGN`
-- `REQUIRES-SYNCHRONIZATION-DESIGN`
-- `REQUIRES-WEAK-CYCLE-MODEL`
-- `REJECT-HIDDEN-COST`
+Validated research source head:
 
-The aggregate remains `SPLIT-RESEARCH` until exact-head evidence justifies any narrower production successor.
+`188f804aad3e2844c9932339711908c956ae55de`
+
+Dedicated Cross-thread shared ownership research run `34842039994`: **SUCCESS** on pinned Rust 1.98.0.
+
+Artifact:
+
+- name: `evo-cross-thread-shared-ownership-research-ubuntu-24.04`;
+- id: `10346138106`;
+- digest: `sha256:7b154b27662af87ccfa97f366c41286c622024d1fffa3a0087be26bdd9627d65`;
+- report `git_sha`: exact match to the validated source head;
+- cases: **15**;
+- expectation mismatches: **0**.
+
+Observed classification counts:
+
+- `ARC-CANDIDATE`: **6**;
+- `RC/OWNED-INSTEAD`: **2**;
+- Send/Sync-capability boundary: **2**;
+- synchronization boundary: **3**;
+- Weak/cycle boundary: **1**;
+- hidden-cost rejection: **1**.
+
+The later branch-only Clippy cleanup only marks captured case stdout as diagnostic-only; it does not alter the Rust cases, classifications, expected compile/runtime behavior, or aggregate decision. Final PR merge still requires exact-head normal CI and dedicated research on the final docs head.
+
+## Matrix boundary
+
+The pinned Rust 1.98 corpus proves:
+
+- an ordinary owned Send value can simply move to another thread without shared ownership;
+- `Rc<T>` cannot silently cross the thread boundary;
+- `Arc<T>` explicit clone/read/join and atomic strong-count lifecycle work as a distinct ownership model;
+- by-value Arc forwarding moves the handle; retaining the caller copy requires explicit duplication;
+- final strong-owner drop destroys the payload;
+- ordinary references borrowed from an Arc remain normal local references;
+- wrapping a non-Send/non-Sync payload in Arc does not manufacture thread safety;
+- `Arc<Mutex<T>>`, `Arc<RwLock<T>>`, and Arc plus atomic payload introduce synchronization semantics beyond ownership;
+- Arc `Weak` is a separate edge model;
+- owner-handle cloning is not payload deep cloning;
+- single-thread aliasing should keep the cheaper `Rc`/owned model rather than pay atomic count work.
 
 ## Non-negotiable boundaries
+
+Any later production candidate must preserve all of these:
 
 - no silent `Rc -> Arc` upgrade;
 - no implicit atomic refcounting;
 - no hidden lock or atomic payload conversion;
 - no hidden owner duplication;
 - no deep clone masquerading as an owner clone;
-- no bypass of Rust thread-safety rules;
+- no bypass or fabrication of Rust thread-transfer/share capability rules;
+- no implicit Weak edge semantics;
 - no GC/runtime ownership registry;
-- runtime comparison must use equivalent idiomatic `Arc` work.
+- no unsafe emulation;
+- performance comparison only against equivalent idiomatic `Arc` work.
 
-The branch intentionally remains research-only until the #112 production gate has merged and passed its natural exact-main validation.
+## Successor boundary
+
+This result is **not** permission to implement cross-thread mutation or generic concurrency. A production-plausible successor must first define an explicit Arc-like source surface together with a bounded capability model sufficient to reject payloads that Rust itself cannot safely transfer/share. Synchronization remains a separate later track.
