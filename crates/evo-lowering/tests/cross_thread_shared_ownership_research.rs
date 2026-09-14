@@ -45,7 +45,7 @@ struct Finding {
     compiled: bool,
     ran: bool,
     expectation_matched: bool,
-    stdout: String,
+    _stdout: String,
     stderr_summary: String,
 }
 
@@ -382,7 +382,7 @@ fn run_case(spec: &'static CaseSpec, root: &Path) -> Finding {
             compiled: false,
             ran: false,
             expectation_matched: !spec.expected_compile,
-            stdout: String::new(),
+            _stdout: String::new(),
             stderr_summary: summarize(&compile.stderr),
         };
     }
@@ -393,7 +393,7 @@ fn run_case(spec: &'static CaseSpec, root: &Path) -> Finding {
             compiled: true,
             ran: false,
             expectation_matched: false,
-            stdout: String::new(),
+            _stdout: String::new(),
             stderr_summary: String::new(),
         };
     }
@@ -412,7 +412,7 @@ fn run_case(spec: &'static CaseSpec, root: &Path) -> Finding {
         compiled: true,
         ran: run.status.success(),
         expectation_matched,
-        stdout,
+        _stdout: stdout,
         stderr_summary: summarize(&run.stderr),
     }
 }
