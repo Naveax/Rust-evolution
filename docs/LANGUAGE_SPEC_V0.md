@@ -142,7 +142,9 @@ additive            := multiplicative (("+" | "-") multiplicative)*
 multiplicative      := unary (("*" | "/") unary)*
 unary               := "-" unary | "&" unary | contextual_shared_prefix | postfix
 contextual_shared_prefix
-                    := "share" unary | "dup" unary
+                    := ("share" | "dup") identifier_led_unary
+identifier_led_unary
+                    := unary   # accepted only when the operand begins with IDENTIFIER
 postfix             := primary ("." IDENTIFIER)*
 primary             := INTEGER
                      | STRING
@@ -293,6 +295,8 @@ print owner.value + moved.value
 
 The three source words stay contextual rather than becoming lexer keywords:
 
+The contextual prefix recognizer is intentionally narrower than a general unary operator: after `share` or `dup`, the operand must begin with an identifier token. This covers the production forms used by the slice, including locals and identifier-led calls/constructors, while grouped, literal, or operator-leading operands are not captured as shared-owner prefixes.
+
 - `shared Item` is accepted only in function parameter/return type positions in this slice;
 - `share expr` explicitly creates the first shared owner and is accepted only when `expr` produces an owned nominal record;
 - `dup expr` explicitly duplicates one available shared-owner handle;
@@ -319,6 +323,8 @@ dup expr    -> std::rc::Rc::clone(&expr)
 Payload references through a shared owner lower to an ordinary reference to the payload, using stable safe `Rc` dereference/as-ref behavior. Evolution adds no wrapper object, runtime ownership table, hidden deep clone, `Arc`, `RefCell`, lock, GC, unsafe code, or invented `'static` lifetime.
 
 Shared-owner record fields and enum payloads, nested/general `shared` type algebra, `Weak`, cycle solving, cross-thread ownership, interior mutability, synchronization, mutable references, and generalized lifetime/generic machinery remain outside this slice.
+
+Shared-owner v0 is currently a record-only executable path. A program containing enum declarations uses the Enums v0 integrated semantic pipeline, which currently rejects explicit shared-owner/reference contracts and expressions before executable IR/codegen. Shared ownership therefore does not yet compose with enum-bearing programs; this is an explicit fail-closed boundary rather than an implicit conversion or runtime fallback.
 
 Scalar rules:
 
