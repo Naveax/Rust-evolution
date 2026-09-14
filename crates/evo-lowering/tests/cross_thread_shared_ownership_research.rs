@@ -436,27 +436,65 @@ fn write_reports(findings: &[Finding], out: &Path, git_sha: &str, rustc: &str) {
     writeln!(json, "  \"git_sha\": {git_sha:?},").expect("writing JSON cannot fail");
     writeln!(json, "  \"verdict\": \"SPLIT-RESEARCH\",").expect("writing JSON cannot fail");
     writeln!(json, "  \"case_count\": {},", findings.len()).expect("writing JSON cannot fail");
-    writeln!(json, "  \"expectation_mismatches\": {mismatches},").expect("writing JSON cannot fail");
-    writeln!(json, "  \"arc_candidate_count\": {},", count(Classification::ArcCandidate)).expect("writing JSON cannot fail");
-    writeln!(json, "  \"rc_owned_instead_count\": {},", count(Classification::RcOwnedInstead)).expect("writing JSON cannot fail");
-    writeln!(json, "  \"send_sync_boundary_count\": {},", count(Classification::RequiresSendSyncDesign)).expect("writing JSON cannot fail");
-    writeln!(json, "  \"synchronization_boundary_count\": {},", count(Classification::RequiresSynchronizationDesign)).expect("writing JSON cannot fail");
-    writeln!(json, "  \"weak_cycle_boundary_count\": {},", count(Classification::RequiresWeakCycleModel)).expect("writing JSON cannot fail");
-    writeln!(json, "  \"hidden_cost_rejection_count\": {},", count(Classification::RejectHiddenCost)).expect("writing JSON cannot fail");
+    writeln!(json, "  \"expectation_mismatches\": {mismatches},")
+        .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"arc_candidate_count\": {},",
+        count(Classification::ArcCandidate)
+    )
+    .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"rc_owned_instead_count\": {},",
+        count(Classification::RcOwnedInstead)
+    )
+    .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"send_sync_boundary_count\": {},",
+        count(Classification::RequiresSendSyncDesign)
+    )
+    .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"synchronization_boundary_count\": {},",
+        count(Classification::RequiresSynchronizationDesign)
+    )
+    .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"weak_cycle_boundary_count\": {},",
+        count(Classification::RequiresWeakCycleModel)
+    )
+    .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"hidden_cost_rejection_count\": {},",
+        count(Classification::RejectHiddenCost)
+    )
+    .expect("writing JSON cannot fail");
     writeln!(json, "  \"rustc_vv\": {rustc:?}").expect("writing JSON cannot fail");
     writeln!(json, "}}").expect("writing JSON cannot fail");
     fs::write(out.join("report.json"), json).expect("report JSON should be writable");
 
     let mut markdown = String::from("# Cross-thread shared ownership research\n\n");
     writeln!(markdown, "- git_sha: `{git_sha}`").expect("writing Markdown cannot fail");
-    writeln!(markdown, "- aggregate verdict: **SPLIT-RESEARCH**").expect("writing Markdown cannot fail");
+    writeln!(markdown, "- aggregate verdict: **SPLIT-RESEARCH**")
+        .expect("writing Markdown cannot fail");
     writeln!(markdown, "- cases: **{}**", findings.len()).expect("writing Markdown cannot fail");
-    writeln!(markdown, "- expectation mismatches: **{mismatches}**").expect("writing Markdown cannot fail");
+    writeln!(markdown, "- expectation mismatches: **{mismatches}**")
+        .expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(markdown, "```text\n{rustc}\n```").expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
-    writeln!(markdown, "| Case | Classification | Ownership model | Operations | Compiled | Ran | Match |").expect("writing Markdown cannot fail");
-    writeln!(markdown, "| --- | --- | --- | --- | --- | --- | --- |").expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "| Case | Classification | Ownership model | Operations | Compiled | Ran | Match |"
+    )
+    .expect("writing Markdown cannot fail");
+    writeln!(markdown, "| --- | --- | --- | --- | --- | --- | --- |")
+        .expect("writing Markdown cannot fail");
     for finding in findings {
         writeln!(
             markdown,
@@ -471,8 +509,13 @@ fn write_reports(findings: &[Finding], out: &Path, git_sha: &str, rustc: &str) {
         )
         .expect("writing Markdown cannot fail");
         if !finding.stderr_summary.is_empty() {
-            writeln!(markdown, "  - `{}` stderr: `{}`", finding.spec.name, finding.stderr_summary.replace('`', "'"))
-                .expect("writing Markdown cannot fail");
+            writeln!(
+                markdown,
+                "  - `{}` stderr: `{}`",
+                finding.spec.name,
+                finding.stderr_summary.replace('`', "'")
+            )
+            .expect("writing Markdown cannot fail");
         }
     }
     fs::write(out.join("report.md"), &markdown).expect("report Markdown should be writable");
