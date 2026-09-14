@@ -2,15 +2,15 @@ case,classification,expected_compile,expected_runtime,ownership_model,allocation
 owned-tree-control,OWNED-CONTROL,true,12,single-owner-tree,stack-or-inline,move
 borrow-only-traversal,BORROW-INSTEAD,true,12,single-owner-shared-borrow,stack-or-inline,borrow
 rc-dag-explicit,STRONG-RC-DAG,true,12,single-thread-reference-counted-DAG,Rc-node-allocations,explicit-strong-clone-drop
-rc-strong-cycle,REJECT-STRONG-CYCLE,true,cycle-retained,strong-only-reference-count-cycle,Rc-node-allocations,strong-clone-cycle
-weak-back-edge,WEAK-EDGE-CANDIDATE,true,cycle-broken,strong-owner-plus-weak-back-edge,Rc-node-allocations,downgrade-upgrade-weak-drop
+rc-strong-cycle,REJECT-STRONG-CYCLE,true,retained,strong-only-reference-count-cycle,Rc-node-allocations,strong-clone-cycle
+weak-back-edge,WEAK-EDGE-CANDIDATE,true,"5 1 1",strong-owner-plus-weak-back-edge,Rc-node-allocations,downgrade-upgrade-weak-drop
 weak-upgrade-after-drop,WEAK-EDGE-CANDIDATE,true,dead,strong-owner-plus-nonowning-weak-edge,one-Rc-allocation,downgrade-drop-upgrade
-strong-weak-counts,WEAK-EDGE-CANDIDATE,true,counts-match,strong-plus-weak-reference-counting,one-Rc-allocation,strong-weak-count-maintenance
+strong-weak-counts,WEAK-EDGE-CANDIDATE,true,"1 1 2 1",strong-plus-weak-reference-counting,one-Rc-allocation,strong-weak-count-maintenance
 arena-index-dag,ARENA-INDEX-CANDIDATE,true,12,container-owned-index-edges,Vec-allocation,index-copy
-arena-index-cycle,ARENA-INDEX-CANDIDATE,true,12,container-owned-cyclic-index-edges,Vec-allocation,index-copy
+arena-index-cycle,ARENA-INDEX-CANDIDATE,true,24,container-owned-cyclic-index-edges,Vec-allocation,index-copy
 arena-generation-stale,ARENA-INDEX-CANDIDATE,true,stale,container-owned-generational-handles,arena-storage,generation-check
-traversal-parity,PARITY-CONTROL,true,24,equivalent-Rc-and-arena-traversal,multiple-controlled,model-specific-explicit-work
-edge-vs-deep-clone,REJECT-HIDDEN-COST,true,distinct,alias-edge-vs-independent-payload-copy,Rc-plus-deep-copy,clone-handle-vs-clone-payload
+traversal-parity,PARITY-CONTROL,true,"12 12",equivalent-Rc-and-arena-traversal,multiple-controlled,model-specific-explicit-work
+edge-vs-deep-clone,REJECT-HIDDEN-COST,true,"2 1 false",alias-edge-vs-independent-payload-copy,Rc-plus-deep-copy,clone-handle-vs-clone-payload
 rc-refcell-contrast,REQUIRES-INTERIOR-MUTABILITY-DESIGN,true,8,reference-counted-plus-runtime-borrow-state,Rc-allocation,refcount-plus-RefCell-borrow
 arc-thread-contrast,REQUIRES-CONCURRENCY-DESIGN,true,7,atomic-reference-counted-cross-thread,Arc-allocation,atomic-clone-thread-transfer
 self-reference-move-conflict,SELF-REFERENTIAL-SEPARATE,false,,address-sensitive-borrow-into-self,stack-only,self-borrow-then-move
