@@ -37,7 +37,7 @@ const CASES: &[Case] = &[
         class: Class::WeakSurfaceCandidate,
         compile: true,
         stdout: Some("2 1 0"),
-        source: r#"use std::rc::Rc; fn main(){ let x=Rc::new(7); let a=Rc::downgrade(&x); let b=a.clone(); println!("{} {}",Rc::weak_count(&x),{drop(a);Rc::weak_count(&x)},{drop(b);Rc::weak_count(&x)}); }"#,
+        source: r#"use std::rc::Rc; fn main(){ let x=Rc::new(7); let a=Rc::downgrade(&x); let b=a.clone(); println!("{} {} {}",Rc::weak_count(&x),{drop(a);Rc::weak_count(&x)},{drop(b);Rc::weak_count(&x)}); }"#,
     },
     Case {
         name: "upgrade-live-succeeds",
@@ -201,7 +201,16 @@ fn weak_edge_surface_research_classifies_explicit_weak_semantics() {
     }
     fs::create_dir_all(&scratch).expect("mkdir");
     let matches: Vec<_> = CASES.iter().map(|c| run_case(c, &scratch)).collect();
-    assert!(matches.iter().all(|x| *x));
+    let mismatches: Vec<_> = CASES
+        .iter()
+        .zip(matches.iter())
+        .filter(|(_, matched)| !**matched)
+        .map(|(case, _)| case.name)
+        .collect();
+    assert!(
+        mismatches.is_empty(),
+        "Weak research mismatches: {mismatches:?}"
+    );
     let count = |class| CASES.iter().filter(|c| c.class == class).count();
     let out = env::var_os("EVO_WEAK_EDGE_RESEARCH_OUT")
         .map(PathBuf::from)
