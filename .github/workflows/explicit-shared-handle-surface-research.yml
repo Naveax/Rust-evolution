@@ -1,0 +1,82 @@
+name: Explicit shared handle surface research
+
+on:
+  pull_request:
+    paths:
+      - 'crates/evo-formatter/tests/explicit_shared_handle_surface_research.rs'
+      - '.github/workflows/explicit-shared-handle-surface-research.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'crates/evo-formatter/tests/explicit_shared_handle_surface_research.rs'
+      - '.github/workflows/explicit-shared-handle-surface-research.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Show toolchain
+        run: rustc -Vv
+
+      - name: Run explicit shared handle surface research
+        env:
+          EVO_REQUIRE_PINNED_RUSTC: '1'
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_EXPLICIT_SHARED_HANDLE_RESEARCH_OUT: ${{ github.workspace }}/target/evo-explicit-shared-handle-surface-research
+        run: >-
+          cargo test -p evo-formatter --test explicit_shared_handle_surface_research
+          explicit_shared_handle_surface_research_classifies_candidate
+          -- --ignored --exact --nocapture
+
+      - name: Validate research report
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path('target/evo-explicit-shared-handle-surface-research/report.json')
+          data = json.loads(report_path.read_text())
+          assert data['git_sha'] == os.environ['EXPECTED_GIT_SHA'], data
+          assert data['verdict'] == 'IMPLEMENT-CANDIDATE', data
+          assert data['recommended_surface'] == 'CONTEXTUAL-WORDS', data
+          assert data['surface_count'] >= 4, data
+          assert data['semantic_case_count'] >= 15, data
+          assert data['compile_expectation_mismatches'] == 0, data
+          assert data['runtime_expectation_mismatches'] == 0, data
+          assert data['parser_has_general_generic_type_ast'] is False, data
+          assert data['generic_angle_formatter_rewrite_observed'] is True, data
+          assert data['punctuation_requires_lexer_token'] is True, data
+          assert data['preferred_type_probe'] == 'PASS', data
+          assert data['preferred_create_probe'] == 'PASS', data
+          assert data['preferred_duplicate_probe'] == 'PASS', data
+          assert data['preferred_identifier_probe'] == 'PASS', data
+          assert data['preferred_formatted_type'] == 'shared Item', data
+          assert data['preferred_formatted_create'] == 'share owner', data
+          assert data['preferred_formatted_duplicate'] == 'dup owner', data
+          print(json.dumps(data, indent=2))
+          PY
+
+      - name: Upload research evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-explicit-shared-handle-surface-research-ubuntu-24.04
+          path: target/evo-explicit-shared-handle-surface-research
+          if-no-files-found: error
+          retention-days: 30
