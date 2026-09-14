@@ -14,9 +14,7 @@ const ITEM: &str = "record Item\nvalue int\nend\n";
 
 #[test]
 fn shared_owner_signatures_lower_directly_to_std_rc_by_value() {
-    let source = format!(
-        "{ITEM}fn forward(item shared Item) shared Item\nreturn item\nend\n"
-    );
+    let source = format!("{ITEM}fn forward(item shared Item) shared Item\nreturn item\nend\n");
     let generated = compile_source(&source);
     assert!(generated.contains(
         "fn __evo_fn_forward(__evo_item: std::rc::Rc<__EvoRecord_Item>) -> std::rc::Rc<__EvoRecord_Item> {"
@@ -35,16 +33,12 @@ fn share_maps_to_one_rc_new_and_dup_maps_to_one_rc_clone() {
     assert!(generated.contains(
         "let __evo_owner = std::rc::Rc::new(__EvoRecord_Item { __evo_field_value: 1 });"
     ));
-    assert!(generated.contains(
-        "let __evo_alias = std::rc::Rc::clone(&(__evo_owner));"
-    ));
+    assert!(generated.contains("let __evo_alias = std::rc::Rc::clone(&(__evo_owner));"));
 }
 
 #[test]
 fn ordinary_handle_move_does_not_insert_hidden_rc_clone() {
-    let source = format!(
-        "{ITEM}owner = share Item(value = 1)\nmoved = owner\nprint moved.value\n"
-    );
+    let source = format!("{ITEM}owner = share Item(value = 1)\nmoved = owner\nprint moved.value\n");
     let generated = compile_source(&source);
     assert!(generated.contains("let __evo_moved = __evo_owner;"));
     assert_eq!(generated.matches("std::rc::Rc::clone(").count(), 0);
@@ -58,9 +52,10 @@ fn duplicated_owner_forwarding_has_only_the_explicit_clone() {
     );
     let generated = compile_source(&source);
     assert_eq!(generated.matches("std::rc::Rc::clone(").count(), 1);
-    assert!(generated.contains(
-        "let __evo_kept = __evo_fn_forward(std::rc::Rc::clone(&(__evo_owner)));"
-    ));
+    assert!(
+        generated
+            .contains("let __evo_kept = __evo_fn_forward(std::rc::Rc::clone(&(__evo_owner)));")
+    );
 }
 
 #[test]
@@ -92,9 +87,8 @@ fn payload_reference_from_shared_owner_is_a_reference_to_payload_not_rc_wrapper(
 
 #[test]
 fn shared_owner_codegen_adds_no_hidden_deep_clone_or_custom_runtime() {
-    let source = format!(
-        "{ITEM}owner = share Item(value = 1)\nalias = dup owner\nprint alias.value\n"
-    );
+    let source =
+        format!("{ITEM}owner = share Item(value = 1)\nalias = dup owner\nprint alias.value\n");
     let generated = compile_source(&source);
     assert!(!generated.contains("derive(Clone"));
     assert!(!generated.contains("Box<"));
