@@ -29,6 +29,17 @@ for path in [
     p.write_text(text)
 
 replace_once(
+    "crates/evo-lowering/src/move_state.rs",
+    "    pub(super) fn value_type(&self, name: &str) -> Option<T> {",
+    """    #[allow(
+        dead_code,
+        reason = "the shared move-state source is included by ownership analyzers that do not need type lookup"
+    )]
+    pub(super) fn value_type(&self, name: &str) -> Option<T> {""",
+    "shared move-state optional type lookup",
+)
+
+replace_once(
     "crates/evo-lowering/src/source_suggestions.rs",
     "            ExprKind::SharedBorrow(inner) => self.walk_expr(inner, scopes),",
     """            ExprKind::SharedBorrow(inner)
@@ -61,4 +72,20 @@ replace_once(
             collect_constructor_expr(base, environment, lowered);
         }""",
     "enum IR shared expression traversal",
+)
+replace_once(
+    "crates/evo-lowering/tests/borrow_inference_research.rs",
+    """        ExprKind::LogicalNot(inner)
+        | ExprKind::UnaryMinus(inner)
+        | ExprKind::SharedBorrow(inner) => {
+            collect_expr_effects(inner, parameter, UseMode::Consume, effects);
+        }""",
+    """        ExprKind::LogicalNot(inner)
+        | ExprKind::UnaryMinus(inner)
+        | ExprKind::SharedBorrow(inner)
+        | ExprKind::SharedAlloc(inner)
+        | ExprKind::SharedDuplicate(inner) => {
+            collect_expr_effects(inner, parameter, UseMode::Consume, effects);
+        }""",
+    "borrow inference historical research exhaustive traversal",
 )
