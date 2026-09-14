@@ -1,4 +1,4 @@
-name: Dev Weak research clippy fix
+name: Dev Weak research fix
 
 on:
   push:
@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: dev-weak-research-fix
+  cancel-in-progress: true
+
 jobs:
   patch:
     runs-on: macos-latest
@@ -16,15 +20,25 @@ jobs:
         with:
           ref: research/weak-edge-surface-v0
 
-      - name: Remove unused label helper
+      - name: Fix Weak research controls
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path('crates/evo-formatter/tests/weak_edge_surface_research.rs')
           s = p.read_text()
-          start = s.index('impl Class {')
-          end = s.index('\n}\n\nstruct Case', start) + 3
-          s = s[:start] + s[end:]
+          if 'impl Class {' in s:
+              start = s.index('impl Class {')
+              end = s.index('\n}\n\nstruct Case', start) + 3
+              s = s[:start] + s[end:]
+          bad = 'println!("{} {}",Rc::weak_count(&x),{drop(a);Rc::weak_count(&x)},{drop(b);Rc::weak_count(&x)});'
+          good = 'println!("{} {} {}",Rc::weak_count(&x),{drop(a);Rc::weak_count(&x)},{drop(b);Rc::weak_count(&x)});'
+          if bad not in s:
+              raise SystemExit('weak-count lifecycle format control not found')
+          s = s.replace(bad, good)
+          old = 'assert!(matches.iter().all(|x| *x));'
+          new = '''let mismatches: Vec<_> = CASES\n        .iter()\n        .zip(matches.iter())\n        .filter(|(_, matched)| !**matched)\n        .map(|(case, _)| case.name)\n        .collect();\n    assert!(mismatches.is_empty(), "Weak research mismatches: {mismatches:?}");'''
+          if old in s:
+              s = s.replace(old, new)
           p.write_text(s)
           PY
           rustup toolchain install 1.98.0 --profile minimal --component rustfmt
@@ -36,5 +50,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add crates/evo-formatter/tests/weak_edge_surface_research.rs
-          git commit -m "test: satisfy Clippy in Weak edge research"
+          git commit -m "test: correct Weak edge research controls"
           git push origin HEAD:research/weak-edge-surface-v0
