@@ -11,13 +11,14 @@ pub(crate) enum SemanticType {
     Bool,
     String,
     Record(String),
+    SharedOwner(String),
     SharedRef(Box<SemanticType>),
 }
 
 impl SemanticType {
     #[must_use]
     pub(crate) fn is_trivially_reusable_v0(&self) -> bool {
-        !matches!(self, Self::Record(_))
+        !matches!(self, Self::Record(_) | Self::SharedOwner(_))
     }
 }
 
@@ -64,6 +65,16 @@ impl RecordEnvironment {
                 } else {
                     Err(LowerError {
                         message: format!("unknown record type {name:?}"),
+                        span,
+                    })
+                }
+            }
+            SyntaxTypeName::SharedOwner(name) => {
+                if self.indices.contains_key(name) {
+                    Ok(SemanticType::SharedOwner(name.clone()))
+                } else {
+                    Err(LowerError {
+                        message: format!("unknown record type {name:?} for shared owner"),
                         span,
                     })
                 }
@@ -149,7 +160,7 @@ impl RecordEnvironment {
         access_span: Span,
     ) -> Result<SemanticType, LowerError> {
         let record_name = match base_type {
-            SemanticType::Record(name) => name,
+            SemanticType::Record(name) | SemanticType::SharedOwner(name) => name,
             SemanticType::SharedRef(inner) => match inner.as_ref() {
                 SemanticType::Record(name) => name,
                 _ => {
@@ -367,6 +378,7 @@ fn semantic_type_label(value_type: &SemanticType) -> String {
         SemanticType::Bool => "bool".to_owned(),
         SemanticType::String => "string".to_owned(),
         SemanticType::Record(name) => name.clone(),
+        SemanticType::SharedOwner(name) => format!("shared {name}"),
         SemanticType::SharedRef(inner) => format!("&{}", semantic_type_label(inner)),
     }
 }

@@ -137,7 +137,9 @@ fn collect_expr_effects(
         }
         SyntaxExprKind::LogicalNot(inner)
         | SyntaxExprKind::UnaryMinus(inner)
-        | SyntaxExprKind::SharedBorrow(inner) => {
+        | SyntaxExprKind::SharedBorrow(inner)
+        | SyntaxExprKind::SharedAlloc(inner)
+        | SyntaxExprKind::SharedDuplicate(inner) => {
             collect_expr_effects(inner, parameter, UseMode::Consume, effects);
         }
         SyntaxExprKind::Binary { left, right, .. } => {

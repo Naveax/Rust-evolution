@@ -31,7 +31,8 @@ fn shared_owner_function_parameters_and_returns_are_owned_moves() {
     let source = format!(
         "{ITEM}fn forward(item shared Item) shared Item\nreturn item\nend\nowner = share Item(value = 1)\nkept = forward(dup owner)\nprint owner.value\nprint kept.value\n"
     );
-    let program = lower_source(&source).expect("duplicate then forward should retain original owner");
+    let program =
+        lower_source(&source).expect("duplicate then forward should retain original owner");
     let function = &program.functions[0];
     assert_eq!(
         function.parameters[0].value_type,
@@ -41,14 +42,15 @@ fn shared_owner_function_parameters_and_returns_are_owned_moves() {
         function.return_type,
         ValueType::SharedOwner("Item".to_owned())
     );
-    assert_eq!(function.parameters[0].passing_mode, ParameterPassingMode::Owned);
+    assert_eq!(
+        function.parameters[0].passing_mode,
+        ParameterPassingMode::Owned
+    );
 }
 
 #[test]
 fn ordinary_assignment_moves_shared_handle_and_reuse_is_rejected() {
-    let source = format!(
-        "{ITEM}owner = share Item(value = 1)\nmoved = owner\nprint owner.value\n"
-    );
+    let source = format!("{ITEM}owner = share Item(value = 1)\nmoved = owner\nprint owner.value\n");
     let error = lower_source(&source).expect_err("ordinary assignment must move a shared handle");
     assert!(error.message.contains("moved shared handle"));
 }
@@ -81,7 +83,8 @@ fn scalar_payload_reads_are_allowed_but_nominal_payload_moves_are_rejected() {
         "owner = share Outer(inner = Inner(value = 1))\n",
         "moved = owner.inner\n",
     );
-    let error = lower_source(nominal).expect_err("nominal payload must not move through shared owner");
+    let error =
+        lower_source(nominal).expect_err("nominal payload must not move through shared owner");
     assert!(error.message.contains("record-valued field"));
     assert!(error.message.contains("no implicit clone"));
 }
@@ -101,17 +104,18 @@ fn dup_requires_shared_owner_and_share_requires_owned_record() {
 
 #[test]
 fn live_payload_reference_blocks_only_its_source_shared_handle() {
-    let blocked = format!(
-        "{ITEM}owner = share Item(value = 1)\nr = &owner\nmoved = owner\nprint r.value\n"
-    );
-    let error = lower_source(&blocked).expect_err("source handle move with live payload reference must fail");
+    let blocked =
+        format!("{ITEM}owner = share Item(value = 1)\nr = &owner\nmoved = owner\nprint r.value\n");
+    let error = lower_source(&blocked)
+        .expect_err("source handle move with live payload reference must fail");
     assert!(error.message.contains("cannot move shared handle local"));
     assert!(error.message.contains("immutable reference"));
 
     let independent = format!(
         "{ITEM}owner = share Item(value = 1)\nalias = dup owner\nr = &owner\nmoved = alias\nprint r.value\nprint moved.value\n"
     );
-    lower_source(&independent).expect("a different duplicated handle may move while original is borrowed");
+    lower_source(&independent)
+        .expect("a different duplicated handle may move while original is borrowed");
 }
 
 #[test]

@@ -296,7 +296,9 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
             SyntaxExprKind::LogicalNot(inner) | SyntaxExprKind::UnaryMinus(inner) => {
                 self.use_expr(inner, OwnershipUseMode::Consume, reason)
             }
-            SyntaxExprKind::SharedBorrow(_) => Err(LowerError {
+            SyntaxExprKind::SharedBorrow(_)
+            | SyntaxExprKind::SharedAlloc(_)
+            | SyntaxExprKind::SharedDuplicate(_) => Err(LowerError {
                 message: "immutable reference ownership lowering is not implemented yet".to_owned(),
                 span: expr.span,
             }),

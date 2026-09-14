@@ -316,7 +316,9 @@ impl<'a> StaticEnvironment<'a> {
                 }
                 Ok(ResolvedPayloadType::Integer)
             }
-            SyntaxExprKind::SharedBorrow(_) => Err(LowerError {
+            SyntaxExprKind::SharedBorrow(_)
+            | SyntaxExprKind::SharedAlloc(_)
+            | SyntaxExprKind::SharedDuplicate(_) => Err(LowerError {
                 message: "immutable reference semantic lowering is not implemented yet".to_owned(),
                 span: expr.span,
             }),
@@ -644,7 +646,7 @@ fn resolve_type_name(
             message: format!("unknown nominal type {name:?} in function signature"),
             span,
         }),
-        TypeName::SharedRef(_) => Err(LowerError {
+        TypeName::SharedRef(_) | TypeName::SharedOwner(_) => Err(LowerError {
             message: "immutable reference semantic lowering is not implemented yet".to_owned(),
             span,
         }),

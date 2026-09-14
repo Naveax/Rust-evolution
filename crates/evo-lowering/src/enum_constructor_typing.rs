@@ -151,7 +151,9 @@ impl<'a> EnumTypeEnvironment<'a> {
                 let _ = self.infer_expr(inner, scopes)?;
                 Ok(Some(ResolvedPayloadType::Integer))
             }
-            SyntaxExprKind::SharedBorrow(_) => Err(LowerError {
+            SyntaxExprKind::SharedBorrow(_)
+            | SyntaxExprKind::SharedAlloc(_)
+            | SyntaxExprKind::SharedDuplicate(_) => Err(LowerError {
                 message: "immutable reference semantic lowering is not implemented yet".to_owned(),
                 span: expr.span,
             }),
@@ -388,7 +390,7 @@ fn resolve_signature_type(
             message: format!("unknown nominal type {name:?} in function signature"),
             span,
         }),
-        SyntaxTypeName::SharedRef(_) => Err(LowerError {
+        SyntaxTypeName::SharedRef(_) | SyntaxTypeName::SharedOwner(_) => Err(LowerError {
             message: "immutable reference semantic lowering is not implemented yet".to_owned(),
             span,
         }),

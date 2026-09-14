@@ -38,9 +38,10 @@ impl MoveTracker {
     }
 
     pub(crate) fn inspect_value(&self, name: &str, span: Span) -> Result<SemanticType, LowerError> {
+        let value_type = self.state.value_type(name);
         self.state
             .inspect(name)
-            .map_err(|error| record_read_error(name, span, error))
+            .map_err(|error| record_read_error(name, span, value_type.as_ref(), error))
     }
 
     pub(crate) fn consume_value(
@@ -48,6 +49,7 @@ impl MoveTracker {
         name: &str,
         span: Span,
     ) -> Result<SemanticType, LowerError> {
+        let value_type = self.state.value_type(name);
         self.state
             .consume(
                 name,
@@ -55,7 +57,7 @@ impl MoveTracker {
                 MoveReason::Direct,
                 SemanticType::is_trivially_reusable_v0,
             )
-            .map_err(|error| record_read_error(name, span, error))
+            .map_err(|error| record_read_error(name, span, value_type.as_ref(), error))
     }
 
     pub(crate) fn reinitialize(
@@ -105,8 +107,9 @@ impl MoveTracker {
         {
             Ok(()) => Ok(()),
             Err(MoveStateError::RepeatWouldConsume { name, provenance }) => {
+                let kind = move_only_kind(self.state.value_type(&name).as_ref());
                 let message = format!(
-                    "record local {name:?} is moved by repeat body and would be unavailable on a later iteration"
+                    "{kind} local {name:?} is moved by repeat body and would be unavailable on a later iteration"
                 );
                 set_related_location(&message, span, provenance.reason.note(), provenance.span);
                 Err(LowerError { message, span })
@@ -126,10 +129,11 @@ impl MoveTracker {
         field_name: &str,
         span: Span,
     ) -> Result<SemanticType, LowerError> {
+        let value_type = self.state.value_type(base_name);
         let base_type = self
             .state
             .inspect(base_name)
-            .map_err(|error| record_read_error(base_name, span, error))?;
+            .map_err(|error| record_read_error(base_name, span, value_type.as_ref(), error))?;
 
         let field_type = records.field_type(&base_type, field_name, span)?;
         if !field_type.is_trivially_reusable_v0() {
@@ -144,14 +148,26 @@ impl MoveTracker {
     }
 }
 
-fn record_read_error(name: &str, span: Span, error: MoveStateError) -> LowerError {
+fn move_only_kind(value_type: Option<&SemanticType>) -> &'static str {
+    match value_type {
+        Some(SemanticType::SharedOwner(_)) => "shared handle",
+        _ => "record",
+    }
+}
+
+fn record_read_error(
+    name: &str,
+    span: Span,
+    value_type: Option<&SemanticType>,
+    error: MoveStateError,
+) -> LowerError {
     match error {
         MoveStateError::MissingBinding => LowerError {
             message: format!("use of local {name:?} before definition or outside its scope"),
             span,
         },
         MoveStateError::UnavailableBinding(provenance) => {
-            let message = format!("use of moved record local {name:?}");
+            let message = format!("use of moved {} local {name:?}", move_only_kind(value_type));
             set_related_location(&message, span, provenance.reason.note(), provenance.span);
             LowerError { message, span }
         }
