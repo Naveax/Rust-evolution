@@ -135,7 +135,7 @@ fn main() {
         dynamic_operations: "shared guard remains live; conflicting exclusive borrow",
         expected_run_success: false,
         expected_stdout: None,
-        expected_stderr_contains: Some("BorrowMutError"),
+        expected_stderr_contains: Some("already borrowed"),
         reason: "RefCell conflict is a runtime failure and must not be disguised as compile-time borrowing",
         rust_source: r#"
 use std::cell::RefCell;
@@ -155,7 +155,7 @@ fn main() {
         dynamic_operations: "exclusive guard remains live; conflicting shared borrow",
         expected_run_success: false,
         expected_stdout: None,
-        expected_stderr_contains: Some("BorrowError"),
+        expected_stderr_contains: Some("already mutably borrowed"),
         reason: "an active exclusive dynamic borrow rejects later shared access at runtime",
         rust_source: r#"
 use std::cell::RefCell;
@@ -578,7 +578,22 @@ fn interior_mutability_research_classifies_dynamic_borrow_boundaries() {
 
     let findings: Vec<_> = CASES.iter().map(|spec| run_case(spec, &scratch)).collect();
     assert!(CASES.len() >= 15);
-    assert!(findings.iter().all(|finding| finding.expectation_matched));
+    let mismatches: Vec<_> = findings
+        .iter()
+        .filter(|finding| !finding.expectation_matched)
+        .map(|finding| {
+            (
+                finding.spec.name,
+                finding.rust_ran_successfully,
+                finding.stdout.as_str(),
+                finding.stderr_summary.as_str(),
+            )
+        })
+        .collect();
+    assert!(
+        mismatches.is_empty(),
+        "research expectation mismatches: {mismatches:?}"
+    );
 
     let out = env::var_os("EVO_INTERIOR_MUTABILITY_RESEARCH_OUT")
         .map(PathBuf::from)
