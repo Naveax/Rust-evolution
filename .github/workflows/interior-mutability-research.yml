@@ -1,0 +1,81 @@
+name: Interior mutability research
+
+on:
+  pull_request:
+    paths:
+      - 'crates/evo-lowering/tests/interior_mutability_research.rs'
+      - 'research/interior-mutability-v0/**'
+      - '.github/workflows/interior-mutability-research.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'crates/evo-lowering/tests/interior_mutability_research.rs'
+      - 'research/interior-mutability-v0/**'
+      - '.github/workflows/interior-mutability-research.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+
+      - name: Show toolchain
+        run: rustc -Vv
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Run interior mutability matrix
+        env:
+          EVO_REQUIRE_PINNED_RUSTC: '1'
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_INTERIOR_MUTABILITY_RESEARCH_OUT: ${{ github.workspace }}/target/evo-interior-mutability-research
+        run: >-
+          cargo test -p evo-lowering --test interior_mutability_research
+          interior_mutability_research_classifies_models
+          -- --ignored --exact --nocapture
+
+      - name: Validate research report
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = Path('target/evo-interior-mutability-research/report.json')
+          data = json.loads(report.read_text())
+          assert data['git_sha'] == os.environ['EXPECTED_GIT_SHA'], data
+          assert data['verdict'] == 'SPLIT-CANDIDATES', data
+          assert data['case_count'] == 15, data
+          assert data['compile_expectation_mismatches'] == 0, data
+          assert data['runtime_expectation_mismatches'] == 0, data
+          assert data['own_borrow_instead_count'] == 3, data
+          assert data['cell_candidate_count'] == 2, data
+          assert data['refcell_candidate_count'] == 4, data
+          assert data['composition_candidate_count'] == 2, data
+          assert data['guard_surface_boundary_count'] == 2, data
+          assert data['concurrency_boundary_count'] == 1, data
+          assert data['hidden_runtime_cost_reject_count'] == 1, data
+          print(json.dumps(data, indent=2))
+          PY
+
+      - name: Upload research evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-interior-mutability-research-ubuntu-24.04
+          path: target/evo-interior-mutability-research
+          if-no-files-found: warn
+          retention-days: 90
