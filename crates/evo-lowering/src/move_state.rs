@@ -96,6 +96,14 @@ impl<T: Clone + Eq> MoveState<T> {
         debug_assert!(removed.is_some());
     }
 
+    #[allow(
+        dead_code,
+        reason = "the shared move-state source is included by ownership analyzers that do not need type lookup"
+    )]
+    pub(super) fn value_type(&self, name: &str) -> Option<T> {
+        self.bindings.get(name).map(|binding| binding.value_type.clone())
+    }
+
     pub(super) fn inspect(&self, name: &str) -> Result<T, MoveStateError> {
         let binding = self
             .bindings

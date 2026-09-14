@@ -1,0 +1,62 @@
+name: Explicit shared owner performance
+
+on:
+  pull_request:
+    paths:
+      - 'benchmarks/cases/explicit-shared-owner-v0/**'
+      - 'crates/evo-parser/**'
+      - 'crates/evo-lowering/**'
+      - 'crates/evo-codegen-rust/**'
+      - 'crates/evo-bench/tests/explicit_shared_owner_reference.rs'
+      - '.github/workflows/explicit-shared-owner-performance.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'benchmarks/cases/explicit-shared-owner-v0/**'
+      - 'crates/evo-parser/**'
+      - 'crates/evo-lowering/**'
+      - 'crates/evo-codegen-rust/**'
+      - 'crates/evo-bench/tests/explicit_shared_owner_reference.rs'
+      - '.github/workflows/explicit-shared-owner-performance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rc-parity:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Shared owner focused tests
+        run: |
+          cargo test -p evo-parser --test shared_handle_surface
+          cargo test -p evo-lowering --test shared_owner_v0
+          cargo test -p evo-codegen-rust --test shared_owner_v0
+          cargo test -p evo-codegen-rust --test shared_owner_compile
+          cargo test -p evo-bench --test explicit_shared_owner_reference
+
+      - name: Explicit shared owner Rc parity gate
+        run: cargo run -p evo-bench -- run benchmarks/cases/explicit-shared-owner-v0 --out target/evo-bench-explicit-shared-owner
+
+      - name: Upload explicit shared owner report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-bench-explicit-shared-owner-ubuntu-24.04
+          path: target/evo-bench-explicit-shared-owner/
+          if-no-files-found: warn

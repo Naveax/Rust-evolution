@@ -364,7 +364,9 @@ impl SuggestionCatalog {
                 );
                 None
             }
-            ExprKind::SharedBorrow(inner) => self.walk_expr(inner, scopes),
+            ExprKind::SharedBorrow(inner)
+            | ExprKind::SharedAlloc(inner)
+            | ExprKind::SharedDuplicate(inner) => self.walk_expr(inner, scopes),
             ExprKind::LogicalNot(inner) | ExprKind::UnaryMinus(inner) => {
                 let _ = self.walk_expr(inner, scopes);
                 None
@@ -412,7 +414,7 @@ fn register<'a>(
 
 fn named_type(type_name: &TypeName) -> Option<&str> {
     match type_name {
-        TypeName::Named(name) => Some(name),
+        TypeName::Named(name) | TypeName::SharedOwner(name) => Some(name),
         TypeName::SharedRef(inner) => named_type(inner),
         TypeName::Int | TypeName::Bool | TypeName::String => None,
     }

@@ -261,7 +261,11 @@ fn collect_constructor_expr(
         SyntaxExprKind::FieldAccess { base, .. }
         | SyntaxExprKind::LogicalNot(base)
         | SyntaxExprKind::UnaryMinus(base)
-        | SyntaxExprKind::SharedBorrow(base) => collect_constructor_expr(base, environment, lowered),
+        | SyntaxExprKind::SharedBorrow(base)
+        | SyntaxExprKind::SharedAlloc(base)
+        | SyntaxExprKind::SharedDuplicate(base) => {
+            collect_constructor_expr(base, environment, lowered);
+        }
         SyntaxExprKind::Binary { left, right, .. } => {
             collect_constructor_expr(left, environment, lowered);
             collect_constructor_expr(right, environment, lowered);

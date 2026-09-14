@@ -93,6 +93,7 @@ impl ReferenceTracker {
     pub(crate) fn ensure_owner_operation_allowed(
         &self,
         owner: &str,
+        owner_kind: &str,
         operation: OwnerOperation,
         span: Span,
     ) -> Result<(), LowerError> {
@@ -117,7 +118,7 @@ impl ReferenceTracker {
         };
 
         let message = format!(
-            "cannot {} record local {owner:?} while immutable reference {reference_name:?} is still live",
+            "cannot {} {owner_kind} local {owner:?} while immutable reference {reference_name:?} is still live",
             operation.verb()
         );
         let note = format!("immutable reference {reference_name:?} was created here");

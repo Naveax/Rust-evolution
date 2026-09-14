@@ -317,9 +317,17 @@ impl<'a> StaticEnvironment<'a> {
                 Ok(ResolvedPayloadType::Integer)
             }
             SyntaxExprKind::SharedBorrow(_) => Err(LowerError {
-                message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+                message: "immutable reference expressions are not supported in enum-bearing programs in v0"
+                    .to_owned(),
                 span: expr.span,
             }),
+            SyntaxExprKind::SharedAlloc(_) | SyntaxExprKind::SharedDuplicate(_) => {
+                Err(LowerError {
+                    message: "explicit shared-owner expressions are not supported in enum-bearing programs in v0"
+                        .to_owned(),
+                    span: expr.span,
+                })
+            }
             SyntaxExprKind::Binary { left, op, right } => {
                 let left_type = self.infer_expr(left, scopes)?;
                 let right_type = self.infer_expr(right, scopes)?;
@@ -645,7 +653,13 @@ fn resolve_type_name(
             span,
         }),
         TypeName::SharedRef(_) => Err(LowerError {
-            message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+            message: "immutable reference function contracts are not supported in enum-bearing programs in v0"
+                .to_owned(),
+            span,
+        }),
+        TypeName::SharedOwner(_) => Err(LowerError {
+            message: "explicit shared-owner function contracts are not supported in enum-bearing programs in v0"
+                .to_owned(),
             span,
         }),
     }
@@ -764,5 +778,25 @@ mod tests {
             "enum Flag\nOff\nOn\nend\nfn choose(value Flag) int\nmatch value\ncase Flag.Off\nreturn 0\ncase Flag.On\nreturn 1\nend\nend\n",
         )
         .expect("exhaustive terminal match should satisfy function return analysis");
+    }
+
+    #[test]
+    fn enum_bearing_programs_reject_explicit_shared_owner_expressions_clearly() {
+        let error = validate(
+            "record Item\nvalue int\nend\nenum Flag\nOff\nOn\nend\nowner = share Item(value = 1)\n",
+        )
+        .expect_err("shared-owner expressions remain outside the enum-bearing v0 path");
+        assert!(error.message.contains("explicit shared-owner expressions"));
+        assert!(error.message.contains("enum-bearing programs"));
+    }
+
+    #[test]
+    fn enum_bearing_programs_reject_explicit_shared_owner_contracts_clearly() {
+        let error = validate(
+            "record Item\nvalue int\nend\nenum Flag\nOff\nOn\nend\nfn take(item shared Item) int\nreturn item.value\nend\n",
+        )
+        .expect_err("shared-owner contracts remain outside the enum-bearing v0 path");
+        assert!(error.message.contains("explicit shared-owner function contracts"));
+        assert!(error.message.contains("enum-bearing programs"));
     }
 }

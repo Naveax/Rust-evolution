@@ -137,6 +137,9 @@ pub enum ExprKind {
     LogicalNot(Box<Expr>),
     UnaryMinus(Box<Expr>),
     SharedBorrow(Box<Expr>),
+    SharedOwnerBorrow(Box<Expr>),
+    SharedAlloc(Box<Expr>),
+    SharedDuplicate(Box<Expr>),
     Binary {
         left: Box<Expr>,
         op: BinaryOp,
@@ -168,6 +171,7 @@ pub enum ValueType {
     String,
     Bool,
     Record(String),
+    SharedOwner(String),
     SharedRef(Box<ValueType>),
 }
 
@@ -402,6 +406,7 @@ fn semantic_type(value_type: &ValueType) -> SemanticType {
         ValueType::Bool => SemanticType::Bool,
         ValueType::String => SemanticType::String,
         ValueType::Record(name) => SemanticType::Record(name.clone()),
+        ValueType::SharedOwner(name) => SemanticType::SharedOwner(name.clone()),
         ValueType::SharedRef(inner) => {
             SemanticType::SharedRef(Box::new(semantic_type(inner)))
         }
@@ -414,6 +419,7 @@ fn lowered_value_type(value_type: &SemanticType) -> ValueType {
         SemanticType::Bool => ValueType::Bool,
         SemanticType::String => ValueType::String,
         SemanticType::Record(name) => ValueType::Record(name.clone()),
+        SemanticType::SharedOwner(name) => ValueType::SharedOwner(name.clone()),
         SemanticType::SharedRef(inner) => {
             ValueType::SharedRef(Box::new(lowered_value_type(inner)))
         }
@@ -426,6 +432,7 @@ fn type_label(value_type: &ValueType) -> String {
         ValueType::Bool => "bool".to_owned(),
         ValueType::String => "string".to_owned(),
         ValueType::Record(name) => name.clone(),
+        ValueType::SharedOwner(name) => format!("shared {name}"),
         ValueType::SharedRef(inner) => format!("&{}", type_label(inner)),
     }
 }
@@ -563,12 +570,20 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                             span: statement.span,
                         });
                     }
-                    if matches!(&binding.value_type, ValueType::Record(_)) {
-                        self.reference_tracker.ensure_owner_operation_allowed(
+                    match &binding.value_type {
+                        ValueType::Record(_) => self.reference_tracker.ensure_owner_operation_allowed(
                             name,
+                            "record",
                             OwnerOperation::Reinitialize,
                             statement.span,
-                        )?;
+                        )?,
+                        ValueType::SharedOwner(_) => self.reference_tracker.ensure_owner_operation_allowed(
+                            name,
+                            "shared handle",
+                            OwnerOperation::Reinitialize,
+                            statement.span,
+                        )?,
+                        _ => {}
                     }
                     self.move_tracker.reinitialize(
                         name,
@@ -597,7 +612,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                 let (expr, expression_type) = self.lower_expr(expr)?;
                 if matches!(
             &expression_type,
-            ValueType::Record(_) | ValueType::SharedRef(_)
+            ValueType::Record(_) | ValueType::SharedOwner(_) | ValueType::SharedRef(_)
         ) {
                     return Err(LowerError {
                         message: "printing whole record values is not supported in Records v0"
@@ -730,15 +745,22 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
             SyntaxExprKind::String(value) => (ExprKind::String(value.clone()), ValueType::String),
             SyntaxExprKind::Bool(value) => (ExprKind::Bool(*value), ValueType::Bool),
             SyntaxExprKind::Identifier(name) => {
-                if self
-                    .visible_binding(name)
-                    .is_some_and(|binding| matches!(binding.value_type, ValueType::Record(_)))
-                {
-                    self.reference_tracker.ensure_owner_operation_allowed(
-                        name,
-                        OwnerOperation::Move,
-                        expr.span,
-                    )?;
+                if let Some(binding) = self.visible_binding(name) {
+                    match binding.value_type {
+                        ValueType::Record(_) => self.reference_tracker.ensure_owner_operation_allowed(
+                            name,
+                            "record",
+                            OwnerOperation::Move,
+                            expr.span,
+                        )?,
+                        ValueType::SharedOwner(_) => self.reference_tracker.ensure_owner_operation_allowed(
+                            name,
+                            "shared handle",
+                            OwnerOperation::Move,
+                            expr.span,
+                        )?,
+                        _ => {}
+                    }
                 }
                 let value_type = self.move_tracker.consume_value(name, expr.span)?;
                 (
@@ -883,19 +905,74 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                 (ExprKind::UnaryMinus(Box::new(inner)), ValueType::Integer)
             }
             SyntaxExprKind::SharedBorrow(inner) => {
+                let shared_owner_payload = if let SyntaxExprKind::Identifier(name) = &inner.kind {
+                    self.visible_binding(name).is_some_and(|binding| {
+                        matches!(binding.value_type, ValueType::SharedOwner(_))
+                    })
+                } else {
+                    false
+                };
                 let (inner, inner_type) = self.lower_reference_target(inner, expr.span)?;
                 let ValueType::Record(name) = inner_type else {
                     unreachable!("reference target validation returns a nominal record type")
                 };
+                let kind = if shared_owner_payload {
+                    ExprKind::SharedOwnerBorrow(Box::new(inner))
+                } else {
+                    ExprKind::SharedBorrow(Box::new(inner))
+                };
                 (
-                    ExprKind::SharedBorrow(Box::new(inner)),
+                    kind,
                     ValueType::SharedRef(Box::new(ValueType::Record(name))),
+                )
+            }
+            SyntaxExprKind::SharedAlloc(inner) => {
+                let (inner, inner_type) = self.lower_expr(inner)?;
+                let ValueType::Record(name) = inner_type else {
+                    return Err(LowerError {
+                        message: format!(
+                            "share requires an owned record value in v0; found {}",
+                            type_label(&inner_type)
+                        ),
+                        span: expr.span,
+                    });
+                };
+                (
+                    ExprKind::SharedAlloc(Box::new(inner)),
+                    ValueType::SharedOwner(name),
+                )
+            }
+            SyntaxExprKind::SharedDuplicate(inner) => {
+                let (inner, inner_type) = if let SyntaxExprKind::Identifier(name) = &inner.kind {
+                    let value_type = self.move_tracker.inspect_value(name, inner.span)?;
+                    (
+                        Expr {
+                            kind: ExprKind::Local(name.clone()),
+                            span: inner.span,
+                        },
+                        lowered_value_type(&value_type),
+                    )
+                } else {
+                    self.lower_expr(inner)?
+                };
+                let ValueType::SharedOwner(name) = inner_type else {
+                    return Err(LowerError {
+                        message: format!(
+                            "dup requires a shared owner in v0; found {}",
+                            type_label(&inner_type)
+                        ),
+                        span: expr.span,
+                    });
+                };
+                (
+                    ExprKind::SharedDuplicate(Box::new(inner)),
+                    ValueType::SharedOwner(name),
                 )
             }
             SyntaxExprKind::Binary { left, op, right } => {
                 let (left, left_type) = self.lower_expr(left)?;
                 if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
-                    && matches!(&left_type, ValueType::Record(_))
+                    && matches!(&left_type, ValueType::Record(_) | ValueType::SharedOwner(_))
                 {
                     return Err(LowerError {
                         message: "record equality is not supported in Records v0".to_owned(),
@@ -915,7 +992,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                         ValueType::Integer
                     }
                     BinaryOp::Equal | BinaryOp::NotEqual => {
-                        if matches!(&right_type, ValueType::Record(_)) {
+                        if matches!(&right_type, ValueType::Record(_) | ValueType::SharedOwner(_)) {
                             return Err(LowerError {
                                 message: "record equality is not supported in Records v0"
                                     .to_owned(),
@@ -993,6 +1070,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
         let (expr, value_type) = self.lower_field_base(target)?;
         match value_type {
             ValueType::Record(_) => Ok((expr, value_type)),
+            ValueType::SharedOwner(name) => Ok((expr, ValueType::Record(name))),
             ValueType::SharedRef(_) => Err(LowerError {
                 message: "nested immutable references are not supported in v0".to_owned(),
                 span,
@@ -1046,6 +1124,8 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
             | SyntaxExprKind::InputInt
             | SyntaxExprKind::LogicalNot(_)
             | SyntaxExprKind::UnaryMinus(_)
+            | SyntaxExprKind::SharedAlloc(_)
+            | SyntaxExprKind::SharedDuplicate(_)
             | SyntaxExprKind::Binary { .. } => Ok(None),
         }
     }
@@ -1064,10 +1144,9 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                     span: target.span,
                 })?;
                 match binding.value_type {
-                    ValueType::Record(_) => Ok(ReferenceProvenance::local_owner(
-                        name.clone(),
-                        origin_span,
-                    )),
+                    ValueType::Record(_) | ValueType::SharedOwner(_) => Ok(
+                        ReferenceProvenance::local_owner(name.clone(), origin_span),
+                    ),
                     ValueType::SharedRef(_) => self
                         .reference_tracker
                         .provenance(name)
@@ -1292,7 +1371,9 @@ fn collect_expr_identifier_uses(expr: &SyntaxExpr, uses: &mut HashMap<String, us
         SyntaxExprKind::FieldAccess { base, .. }
         | SyntaxExprKind::LogicalNot(base)
         | SyntaxExprKind::UnaryMinus(base)
-        | SyntaxExprKind::SharedBorrow(base) => {
+        | SyntaxExprKind::SharedBorrow(base)
+        | SyntaxExprKind::SharedAlloc(base)
+        | SyntaxExprKind::SharedDuplicate(base) => {
             Self::collect_expr_identifier_uses(base, uses);
         }
         SyntaxExprKind::Binary { left, right, .. } => {

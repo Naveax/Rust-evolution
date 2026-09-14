@@ -285,7 +285,9 @@ fn collect_expr_effects(expr: &Expr, parameter: &str, mode: UseMode, effects: &m
         }
         ExprKind::LogicalNot(inner)
         | ExprKind::UnaryMinus(inner)
-        | ExprKind::SharedBorrow(inner) => {
+        | ExprKind::SharedBorrow(inner)
+        | ExprKind::SharedAlloc(inner)
+        | ExprKind::SharedDuplicate(inner) => {
             collect_expr_effects(inner, parameter, UseMode::Consume, effects);
         }
         ExprKind::Binary { left, right, .. } => {
