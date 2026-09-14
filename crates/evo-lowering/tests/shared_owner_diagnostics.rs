@@ -14,9 +14,7 @@ const ITEM: &str = "record Item\nvalue int\nend\n";
 
 #[test]
 fn moved_shared_handle_reuse_is_source_native_and_points_at_reuse() {
-    let source = format!(
-        "{ITEM}owner = share Item(value = 1)\nmoved = owner\nprint owner.value\n"
-    );
+    let source = format!("{ITEM}owner = share Item(value = 1)\nmoved = owner\nprint owner.value\n");
     let error = lower_error(&source);
     assert!(error.message.contains("moved shared handle"));
     assert_eq!(error.span.line, 6);
@@ -43,9 +41,8 @@ fn share_on_scalar_has_distinct_owned_record_diagnostic() {
 
 #[test]
 fn live_payload_reference_conflict_names_shared_handle_and_reference() {
-    let source = format!(
-        "{ITEM}owner = share Item(value = 1)\nr = &owner\nmoved = owner\nprint r.value\n"
-    );
+    let source =
+        format!("{ITEM}owner = share Item(value = 1)\nr = &owner\nmoved = owner\nprint r.value\n");
     let error = lower_error(&source);
     assert!(error.message.contains("cannot move shared handle local"));
     assert!(error.message.contains("immutable reference"));
@@ -54,9 +51,8 @@ fn live_payload_reference_conflict_names_shared_handle_and_reference() {
 
 #[test]
 fn live_payload_reference_conflict_renders_reference_origin_note() {
-    let source = format!(
-        "{ITEM}owner = share Item(value = 1)\nr = &owner\nmoved = owner\nprint r.value\n"
-    );
+    let source =
+        format!("{ITEM}owner = share Item(value = 1)\nr = &owner\nmoved = owner\nprint r.value\n");
     let error = lower_error(&source);
     let rendered = render_error(
         Path::new("shared-owner.evo"),
