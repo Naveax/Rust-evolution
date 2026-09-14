@@ -242,7 +242,9 @@ fn arena_generational_handles_research_classifies_identity_and_lifetime_boundari
     findings.push(finding(
         "fresh-generation-resolves-reused-slot",
         Class::GenerationalHandleCandidate,
-        arena.get(fresh) == Some(&99) && fresh.index == stale.index && fresh.generation != stale.generation,
+        arena.get(fresh) == Some(&99)
+            && fresh.index == stale.index
+            && fresh.generation != stale.generation,
     ));
 
     let copied = first;
@@ -339,7 +341,12 @@ fn arena_generational_handles_research_classifies_identity_and_lifetime_boundari
     assert!(findings.iter().all(|finding| finding.matched));
     assert!(findings.len() >= 15);
 
-    let count = |class| findings.iter().filter(|finding| finding.class == class).count();
+    let count = |class| {
+        findings
+            .iter()
+            .filter(|finding| finding.class == class)
+            .count()
+    };
     assert!(count(Class::GenerationalHandleCandidate) >= 7);
     assert!(count(Class::PlainIndexCandidate) >= 3);
     assert!(count(Class::RejectStaleIdentityRisk) >= 1);
@@ -359,7 +366,11 @@ fn arena_generational_handles_research_classifies_identity_and_lifetime_boundari
     writeln!(json, "{{").unwrap();
     writeln!(json, "  \"git_sha\": {git_sha:?},").unwrap();
     writeln!(json, "  \"verdict\": \"REQUIRES-COLLECTION-SURFACE\",").unwrap();
-    writeln!(json, "  \"recommended_model\": \"GENERATIONAL-HANDLE-CANDIDATE\",").unwrap();
+    writeln!(
+        json,
+        "  \"recommended_model\": \"GENERATIONAL-HANDLE-CANDIDATE\","
+    )
+    .unwrap();
     writeln!(json, "  \"case_count\": {},", findings.len()).unwrap();
     writeln!(json, "  \"expectation_mismatches\": 0,").unwrap();
     writeln!(
