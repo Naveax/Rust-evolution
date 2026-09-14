@@ -155,6 +155,10 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
             || is_binary_operator(previous, previous_unary_minus);
     }
 
+    if matches!(current, TokenKind::Identifier(_)) && matches!(previous, TokenKind::RParen) {
+        return true;
+    }
+
     if matches!(current, TokenKind::LParen) {
         if matches!(previous, TokenKind::Identifier(_)) {
             return false;

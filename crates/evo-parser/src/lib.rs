@@ -72,6 +72,7 @@ pub enum TypeName {
     Bool,
     String,
     Named(String),
+    SharedOwner(String),
     SharedRef(Box<TypeName>),
 }
 
@@ -159,6 +160,8 @@ pub enum ExprKind {
     LogicalNot(Box<Expr>),
     UnaryMinus(Box<Expr>),
     SharedBorrow(Box<Expr>),
+    SharedAlloc(Box<Expr>),
+    SharedDuplicate(Box<Expr>),
     Binary {
         left: Box<Expr>,
         op: BinaryOp,
@@ -515,6 +518,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_record_field_type(&mut self) -> Result<RecordFieldType, ParseError> {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared")
+            && self
+                .tokens
+                .get(self.index + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+        {
+            return Err(self.error_here("shared-owner record fields are not supported in v0"));
+        }
         let token = self.advance();
         match token.kind {
             TokenKind::TypeInt => Ok(RecordFieldType::Int),
@@ -566,6 +577,16 @@ impl<'a> Parser<'a> {
                 if matches!(self.current().kind, TokenKind::Ampersand) {
                     return Err(self
                         .error_here("immutable reference enum payloads are not supported in v0"));
+                }
+                if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared")
+                    && self
+                        .tokens
+                        .get(self.index + 1)
+                        .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+                {
+                    return Err(
+                        self.error_here("shared-owner enum payloads are not supported in v0")
+                    );
                 }
                 Some(self.parse_owned_type_name()?)
             };
@@ -662,6 +683,28 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type_name(&mut self) -> Result<TypeName, ParseError> {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared") {
+            let next = self.tokens.get(self.index + 1);
+            if let Some(token) = next {
+                match &token.kind {
+                    TokenKind::Identifier(name) => {
+                        let name = name.clone();
+                        self.advance();
+                        self.advance();
+                        return Ok(TypeName::SharedOwner(name));
+                    }
+                    TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString => {
+                        return Err(ParseError {
+                            message: "shared-owner types require a nominal record type in v0"
+                                .to_owned(),
+                            span: self.current().span.join(token.span),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         if !matches!(self.current().kind, TokenKind::Ampersand) {
             return self.parse_owned_type_name();
         }
@@ -1171,6 +1214,29 @@ impl<'a> Parser<'a> {
                 kind: ExprKind::SharedBorrow(Box::new(expr)),
                 span,
             });
+        }
+        let shared_operation = match &self.current().kind {
+            TokenKind::Identifier(name)
+                if matches!(name.as_str(), "share" | "dup")
+                    && self
+                        .tokens
+                        .get(self.index + 1)
+                        .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_))) =>
+            {
+                Some(name.clone())
+            }
+            _ => None,
+        };
+        if let Some(operation) = shared_operation {
+            let start = self.advance().span;
+            let expr = self.parse_unary()?;
+            let span = start.join(expr.span);
+            let kind = if operation == "share" {
+                ExprKind::SharedAlloc(Box::new(expr))
+            } else {
+                ExprKind::SharedDuplicate(Box::new(expr))
+            };
+            return Ok(Expr { kind, span });
         }
         self.parse_postfix()
     }
