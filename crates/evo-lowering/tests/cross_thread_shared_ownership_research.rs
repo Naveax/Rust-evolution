@@ -2,7 +2,7 @@ use std::env;
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +28,7 @@ impl Classification {
     }
 }
 
+#[derive(Debug)]
 struct CaseSpec {
     name: &'static str,
     classification: Classification,
@@ -38,13 +39,14 @@ struct CaseSpec {
     source: &'static str,
 }
 
+#[derive(Debug)]
 struct Finding {
     spec: &'static CaseSpec,
     compiled: bool,
     ran: bool,
     expectation_matched: bool,
     stdout: String,
-    stderr: String,
+    stderr_summary: String,
 }
 
 const CASES: &[CaseSpec] = &[
@@ -145,8 +147,8 @@ use std::thread;
 fn main() {
     let owner = Arc::new(7_i64);
     let worker_owner = Arc::clone(&owner);
-    let worker = thread::spawn(move || *worker_owner).join().unwrap();
-    println!("{} {} {}", worker, *owner, Arc::strong_count(&owner));
+    let worker_value = thread::spawn(move || *worker_owner).join().unwrap();
+    println!("{} {} {}", worker_value, *owner, Arc::strong_count(&owner));
 }
 "#,
     },
@@ -162,9 +164,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 static DROPS: AtomicUsize = AtomicUsize::new(0);
 struct Item;
-impl Drop for Item { fn drop(&mut self) { DROPS.fetch_add(1, Ordering::SeqCst); } }
+impl Drop for Item {
+    fn drop(&mut self) {
+        DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
 fn main() {
-    { let owner = Arc::new(Item); let alias = Arc::clone(&owner); drop(alias); drop(owner); }
+    {
+        let owner = Arc::new(Item);
+        let alias = Arc::clone(&owner);
+        drop(alias);
+        drop(owner);
+    }
     println!("{}", DROPS.load(Ordering::SeqCst));
 }
 "#,
@@ -252,7 +263,11 @@ use std::thread;
 fn main() {
     let owner = Arc::new(AtomicI64::new(7));
     let alias = Arc::clone(&owner);
-    thread::spawn(move || { alias.fetch_add(1, Ordering::SeqCst); }).join().unwrap();
+    thread::spawn(move || {
+        alias.fetch_add(1, Ordering::SeqCst);
+    })
+    .join()
+    .unwrap();
     println!("{}", owner.load(Ordering::SeqCst));
 }
 "#,
@@ -290,7 +305,7 @@ fn main() {
     let owner = Arc::new(Item(7));
     let alias = Arc::clone(&owner);
     let deep = Arc::new((*owner).clone());
-    let _ = alias.0 + deep.0;
+    let _sum = alias.0 + deep.0;
     println!("{} {}", Arc::ptr_eq(&owner, &alias), Arc::ptr_eq(&owner, &deep));
 }
 "#,
@@ -317,96 +332,188 @@ fn rustc_path() -> OsString {
     env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc"))
 }
 
+fn rustc_version() -> String {
+    let output = Command::new(rustc_path())
+        .arg("-Vv")
+        .output()
+        .expect("failed to execute rustc -Vv");
+    assert!(output.status.success(), "rustc -Vv failed");
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+fn summarize(stderr: &[u8]) -> String {
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(6)
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
 fn run_case(spec: &'static CaseSpec, root: &Path) -> Finding {
-    let dir = root.join(spec.name);
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    let source = dir.join("case.rs");
-    let binary = dir.join(format!("case{}", env::consts::EXE_SUFFIX));
-    fs::write(&source, spec.source).unwrap();
+    let case_dir = root.join(spec.name);
+    if case_dir.exists() {
+        fs::remove_dir_all(&case_dir)
+            .unwrap_or_else(|error| panic!("failed to reset {}: {error}", case_dir.display()));
+    }
+    fs::create_dir_all(&case_dir)
+        .unwrap_or_else(|error| panic!("failed to create {}: {error}", case_dir.display()));
+    let source = case_dir.join("case.rs");
+    let binary = case_dir.join(format!("case-bin{}", env::consts::EXE_SUFFIX));
+    fs::write(&source, spec.source)
+        .unwrap_or_else(|error| panic!("failed to write {}: {error}", source.display()));
+
     let compile = Command::new(rustc_path())
         .arg("--edition=2024")
+        .arg("--crate-name")
+        .arg("evo_cross_thread_shared_ownership_case")
         .arg("-C")
         .arg("opt-level=3")
         .arg(&source)
         .arg("-o")
         .arg(&binary)
         .output()
-        .unwrap();
+        .unwrap_or_else(|error| panic!("failed to execute rustc for {}: {error}", spec.name));
     let compiled = compile.status.success();
-    if compiled && spec.expected_compile {
-        let run = Command::new(&binary).output().unwrap();
-        let stdout = String::from_utf8_lossy(&run.stdout).trim().to_owned();
-        let expected = spec.expected_stdout.unwrap_or_default();
-        Finding {
+
+    if !compiled {
+        return Finding {
             spec,
-            compiled,
-            ran: run.status.success(),
-            expectation_matched: run.status.success() && stdout == expected,
-            stdout,
-            stderr: String::from_utf8_lossy(&run.stderr).trim().to_owned(),
-        }
-    } else {
-        Finding {
-            spec,
-            compiled,
+            compiled: false,
             ran: false,
-            expectation_matched: compiled == spec.expected_compile,
+            expectation_matched: !spec.expected_compile,
             stdout: String::new(),
-            stderr: String::from_utf8_lossy(&compile.stderr)
-                .lines()
-                .take(4)
-                .collect::<Vec<_>>()
-                .join(" | "),
+            stderr_summary: summarize(&compile.stderr),
+        };
+    }
+
+    if !spec.expected_compile {
+        return Finding {
+            spec,
+            compiled: true,
+            ran: false,
+            expectation_matched: false,
+            stdout: String::new(),
+            stderr_summary: String::new(),
+        };
+    }
+
+    let run = Command::new(&binary)
+        .output()
+        .unwrap_or_else(|error| panic!("failed to execute {}: {error}", spec.name));
+    let stdout = String::from_utf8_lossy(&run.stdout).trim().to_owned();
+    let expectation_matched = run.status.success()
+        && spec
+            .expected_stdout
+            .is_none_or(|expected| stdout == expected);
+
+    Finding {
+        spec,
+        compiled: true,
+        ran: run.status.success(),
+        expectation_matched,
+        stdout,
+        stderr_summary: summarize(&run.stderr),
+    }
+}
+
+fn write_reports(findings: &[Finding], out: &Path, git_sha: &str, rustc: &str) {
+    fs::create_dir_all(out)
+        .unwrap_or_else(|error| panic!("failed to create {}: {error}", out.display()));
+    let mismatches = findings
+        .iter()
+        .filter(|finding| !finding.expectation_matched)
+        .count();
+    let count = |classification| {
+        findings
+            .iter()
+            .filter(|finding| finding.spec.classification == classification)
+            .count()
+    };
+
+    let mut json = String::new();
+    writeln!(json, "{{").expect("writing JSON cannot fail");
+    writeln!(json, "  \"git_sha\": {git_sha:?},").expect("writing JSON cannot fail");
+    writeln!(json, "  \"verdict\": \"SPLIT-RESEARCH\",").expect("writing JSON cannot fail");
+    writeln!(json, "  \"case_count\": {},", findings.len()).expect("writing JSON cannot fail");
+    writeln!(json, "  \"expectation_mismatches\": {mismatches},").expect("writing JSON cannot fail");
+    writeln!(json, "  \"arc_candidate_count\": {},", count(Classification::ArcCandidate)).expect("writing JSON cannot fail");
+    writeln!(json, "  \"rc_owned_instead_count\": {},", count(Classification::RcOwnedInstead)).expect("writing JSON cannot fail");
+    writeln!(json, "  \"send_sync_boundary_count\": {},", count(Classification::RequiresSendSyncDesign)).expect("writing JSON cannot fail");
+    writeln!(json, "  \"synchronization_boundary_count\": {},", count(Classification::RequiresSynchronizationDesign)).expect("writing JSON cannot fail");
+    writeln!(json, "  \"weak_cycle_boundary_count\": {},", count(Classification::RequiresWeakCycleModel)).expect("writing JSON cannot fail");
+    writeln!(json, "  \"hidden_cost_rejection_count\": {},", count(Classification::RejectHiddenCost)).expect("writing JSON cannot fail");
+    writeln!(json, "  \"rustc_vv\": {rustc:?}").expect("writing JSON cannot fail");
+    writeln!(json, "}}").expect("writing JSON cannot fail");
+    fs::write(out.join("report.json"), json).expect("report JSON should be writable");
+
+    let mut markdown = String::from("# Cross-thread shared ownership research\n\n");
+    writeln!(markdown, "- git_sha: `{git_sha}`").expect("writing Markdown cannot fail");
+    writeln!(markdown, "- aggregate verdict: **SPLIT-RESEARCH**").expect("writing Markdown cannot fail");
+    writeln!(markdown, "- cases: **{}**", findings.len()).expect("writing Markdown cannot fail");
+    writeln!(markdown, "- expectation mismatches: **{mismatches}**").expect("writing Markdown cannot fail");
+    writeln!(markdown).expect("writing Markdown cannot fail");
+    writeln!(markdown, "```text\n{rustc}\n```").expect("writing Markdown cannot fail");
+    writeln!(markdown).expect("writing Markdown cannot fail");
+    writeln!(markdown, "| Case | Classification | Ownership model | Operations | Compiled | Ran | Match |").expect("writing Markdown cannot fail");
+    writeln!(markdown, "| --- | --- | --- | --- | --- | --- | --- |").expect("writing Markdown cannot fail");
+    for finding in findings {
+        writeln!(
+            markdown,
+            "| `{}` | {} | {} | {} | {} | {} | {} |",
+            finding.spec.name,
+            finding.spec.classification.as_str(),
+            finding.spec.ownership_model,
+            finding.spec.operations,
+            finding.compiled,
+            finding.ran,
+            finding.expectation_matched,
+        )
+        .expect("writing Markdown cannot fail");
+        if !finding.stderr_summary.is_empty() {
+            writeln!(markdown, "  - `{}` stderr: `{}`", finding.spec.name, finding.stderr_summary.replace('`', "'"))
+                .expect("writing Markdown cannot fail");
         }
     }
+    fs::write(out.join("report.md"), &markdown).expect("report Markdown should be writable");
+    print!("{markdown}");
 }
 
 #[test]
 #[ignore = "research evidence; dedicated workflow should run this exact test"]
 fn cross_thread_shared_ownership_research_classifies_arc_boundaries() {
-    let version = Command::new(rustc_path()).arg("-Vv").output().unwrap();
-    let version = String::from_utf8_lossy(&version.stdout).trim().to_owned();
+    let rustc = rustc_version();
     if env::var_os("EVO_REQUIRE_PINNED_RUSTC").is_some() {
-        assert!(version.lines().next().is_some_and(|line| line.contains("rustc 1.98.0")));
+        assert!(
+            rustc
+                .lines()
+                .next()
+                .is_some_and(|line| line.contains("rustc 1.98.0")),
+            "research workflow must use pinned Rust 1.98.0, got: {rustc}"
+        );
     }
-    let root = env::temp_dir().join("evo-cross-thread-shared-ownership-v0");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).unwrap();
-    let findings = CASES.iter().map(|spec| run_case(spec, &root)).collect::<Vec<_>>();
+
+    let scratch = env::temp_dir().join(format!(
+        "evo-cross-thread-shared-ownership-research-{}",
+        std::process::id()
+    ));
+    if scratch.exists() {
+        fs::remove_dir_all(&scratch).expect("stale research scratch should be removable");
+    }
+    fs::create_dir_all(&scratch).expect("research scratch should be creatable");
+
+    let findings: Vec<_> = CASES.iter().map(|spec| run_case(spec, &scratch)).collect();
+    assert_eq!(CASES.len(), 15);
     assert!(findings.iter().all(|finding| finding.expectation_matched));
 
-    if let Some(out) = env::var_os("EVO_CROSS_THREAD_SHARED_OWNERSHIP_RESEARCH_OUT") {
-        let out = Path::new(&out);
-        fs::create_dir_all(out).unwrap();
-        let git_sha = env::var("EVO_GIT_SHA").unwrap_or_else(|_| "unknown".to_owned());
-        let count = |class| findings.iter().filter(|f| f.spec.classification == class).count();
-        let mut json = String::new();
-        writeln!(json, "{{").unwrap();
-        writeln!(json, "  \"git_sha\": {git_sha:?},").unwrap();
-        writeln!(json, "  \"verdict\": \"SPLIT-RESEARCH\",").unwrap();
-        writeln!(json, "  \"case_count\": {},", findings.len()).unwrap();
-        writeln!(json, "  \"expectation_mismatches\": {},", findings.iter().filter(|f| !f.expectation_matched).count()).unwrap();
-        writeln!(json, "  \"arc_candidate_count\": {},", count(Classification::ArcCandidate)).unwrap();
-        writeln!(json, "  \"rc_owned_instead_count\": {},", count(Classification::RcOwnedInstead)).unwrap();
-        writeln!(json, "  \"send_sync_boundary_count\": {},", count(Classification::RequiresSendSyncDesign)).unwrap();
-        writeln!(json, "  \"synchronization_boundary_count\": {},", count(Classification::RequiresSynchronizationDesign)).unwrap();
-        writeln!(json, "  \"weak_cycle_boundary_count\": {},", count(Classification::RequiresWeakCycleModel)).unwrap();
-        writeln!(json, "  \"hidden_cost_rejection_count\": {},", count(Classification::RejectHiddenCost)).unwrap();
-        writeln!(json, "  \"rustc_vv\": {version:?}").unwrap();
-        writeln!(json, "}}").unwrap();
-        fs::write(out.join("report.json"), json).unwrap();
+    let out = env::var_os("EVO_CROSS_THREAD_SHARED_OWNERSHIP_RESEARCH_OUT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/evo-cross-thread-shared-ownership-research")
+        });
+    let git_sha = env::var("EVO_GIT_SHA").unwrap_or_else(|_| "unknown".to_owned());
+    write_reports(&findings, &out, &git_sha, &rustc);
 
-        let mut markdown = String::from("# Cross-thread shared ownership research\n\n");
-        writeln!(markdown, "- git_sha: `{git_sha}`").unwrap();
-        writeln!(markdown, "- verdict: **SPLIT-RESEARCH**").unwrap();
-        writeln!(markdown, "- cases: {}", findings.len()).unwrap();
-        for finding in &findings {
-            writeln!(markdown, "- `{}`: {} | compiled={} | ran={} | stdout=`{}` | ops={}", finding.spec.name, finding.spec.classification.as_str(), finding.compiled, finding.ran, finding.stdout, finding.spec.operations).unwrap();
-            if !finding.stderr.is_empty() {
-                writeln!(markdown, "  - stderr: `{}`", finding.stderr.replace('`', "'" )).unwrap();
-            }
-        }
-        fs::write(out.join("report.md"), markdown).unwrap();
-    }
+    fs::remove_dir_all(&scratch).expect("research scratch should be removable");
 }
