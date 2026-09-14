@@ -1,0 +1,40 @@
+name: Dev Weak research clippy fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/dev-weak-clippy-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: research/weak-edge-surface-v0
+
+      - name: Remove unused label helper
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/evo-formatter/tests/weak_edge_surface_research.rs')
+          s = p.read_text()
+          start = s.index('impl Class {')
+          end = s.index('\n}\n\nstruct Case', start) + 3
+          s = s[:start] + s[end:]
+          p.write_text(s)
+          PY
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt
+          cargo fmt --all
+          git diff --check
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/evo-formatter/tests/weak_edge_surface_research.rs
+          git commit -m "test: satisfy Clippy in Weak edge research"
+          git push origin HEAD:research/weak-edge-surface-v0
