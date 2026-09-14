@@ -1,0 +1,66 @@
+name: Stage explicit shared owner handoff docs
+
+on:
+  push:
+    branches:
+      - feature/explicit-shared-handle-v0-docs
+    paths:
+      - '.github/workflows/stage-explicit-shared-owner-handoff.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout docs branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/explicit-shared-handle-v0-docs
+
+      - name: Rewrite living handoff
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          project_path = Path('docs/PROJECT_STATE.md')
+          project = project_path.read_text()
+          project = project.replace(
+              'Current exact verified stable main: `0f90cca266c346941ed6453e5a2be065f4f37a07`',
+              'Current exact verified stable main: `42fc00323a1359824d0a0adf6df6c28410556b22`',
+          )
+          project = project.replace(
+              'Natural exact-SHA CI #467 / run `34617261754`: **SUCCESS** on Ubuntu, Windows and macOS',
+              'Natural exact-SHA CI #475 / run `34816316570`: **SUCCESS** on Ubuntu, Windows and macOS',
+              1,
+          )
+          start = project.index('### #109 / PR #111 — explicit shared handle surface v0 research')
+          end = project.index('## Current architecture facts relevant to #112')
+          replacement = '''### #109 / PR #111 — explicit shared handle surface v0 research\n\nIssue #109 is closed/completed. PR #111 squash-merged as exact verified main:\n\n`42fc00323a1359824d0a0adf6df6c28410556b22`\n\nNatural post-merge validation:\n\n- CI #475 / run `34816316570`: **SUCCESS** on Ubuntu, Windows and macOS;\n- Explicit shared handle surface research #8 / run `34816316546`: **SUCCESS**;\n- artifact id `10337270060`;\n- digest `sha256:2894d8b1c76a9ad064d18dd632d35e4e3b56a2bc159c14d2235767348c76e335`;\n- report git SHA matches exact main;\n- verdict remains **IMPLEMENT-CANDIDATE / CONTEXTUAL-WORDS** with 4 surfaces, 15 semantic cases and zero compile/runtime mismatches.\n\nDurable report: `docs/EXPLICIT_SHARED_HANDLE_SURFACE_RESEARCH.md`.\n\n### #112 — explicit shared handle v0 production implementation\n\nThe production branch was cut only after the #111 post-merge gate succeeded. The bounded implementation now exists on `feature/explicit-shared-handle-v0` and is under final integration validation.\n\nImplemented behavior includes:\n\n- contextual `shared Item` function parameter/return types without hard-keyword reservation or generic syntax;\n- contextual `share expr` explicit allocation and `dup expr` explicit owner-handle duplication;\n- distinct semantic/lowered `SharedOwner` value category, separate from `SharedRef` and inferred `SharedBorrow`;\n- ordinary assignment, by-value parameter passing and returns move shared handles;\n- `dup` inspects one available handle and emits the only explicit refcount increment operation in this slice;\n- same-type reinitialization under existing move rules;\n- scalar payload reads through shared owners, with move-only payload extraction rejected;\n- payload immutable-reference provenance tied to the specific source handle;\n- source-handle move/reinitialization rejected while a dependent reference may still be live;\n- independent duplicate-handle movement allowed;\n- bounded final-use release allows source-handle movement/reinitialization after the final proven reference use;\n- direct safe Rust lowering to `std::rc::Rc<T>`, `Rc::new`, `Rc::clone`, ordinary moves, borrows and drops;\n- no wrapper ownership object, ownership registry, implicit deep clone, `Arc`, `RefCell`, lock, GC, unsafe or invented lifetime widening.\n\nPermanent production coverage now includes contextual compatibility, scalar/nested/storage boundaries, branch/repeat ownership behavior, reference/source-handle interactions and generated-Rust operation-shape checks. The historical surface research workflow has been retired while its report/artifacts remain preserved.\n\nSeparate final validation lanes cover category-conversion rejection, source-native diagnostics and an equivalent-`Rc` differential performance gate. These must be integrated and validated on the final feature head before the main PR is considered complete.\n\n'''
+          project = project[:start] + replacement + project[end:]
+          project = project.replace(
+              'Shared-owner syntax remains research-only until #112 production work lands.',
+              'Explicit shared-owner syntax is implemented on the #112 production feature branch; it is not stable-main behavior until the final implementation PR merges and post-merge main validation succeeds.',
+          )
+          project_path.write_text(project)
+
+          next_action = '''# Rust Evolution — NEXT ACTION\n\nLast verified update: **2026-09-14**\n\n## Stable gate\n\nCurrent exact verified `main`:\n\n`42fc00323a1359824d0a0adf6df6c28410556b22`\n\nNatural validation on that exact SHA:\n\n- CI #475 / run `34816316570`: **SUCCESS** on Ubuntu, Windows and macOS;\n- Explicit shared handle surface research #8 / run `34816316546`: **SUCCESS**;\n- artifact id `10337270060`;\n- digest `sha256:2894d8b1c76a9ad064d18dd632d35e4e3b56a2bc159c14d2235767348c76e335`;\n- accepted verdict: **IMPLEMENT-CANDIDATE / CONTEXTUAL-WORDS**.\n\n## Active implementation — #112\n\nProduction branch: `feature/explicit-shared-handle-v0`.\n\nThe bounded one-thread immutable shared-owner implementation is present and now in final integration/validation. It uses contextual `shared Item`, `share expr`, and `dup expr`, direct safe `Rc<T>` codegen, move-only handles and existing bounded immutable-reference provenance/final-use rules.\n\n## Remaining completion sequence\n\n1. Integrate the permanent no-implicit-conversion boundary tests.\n2. Integrate the source-native shared-owner diagnostic assertions.\n3. Require the equivalent-`Rc` benchmark reference to match generated Rust exactly and pass the permanent differential performance gate.\n4. Rebase/synchronize the language spec and living handoff onto the final feature head.\n5. Require final exact feature-head normal CI on Ubuntu, Windows and macOS plus the permanent explicit-shared-owner performance workflow.\n6. Open/update the final `feature/explicit-shared-handle-v0 -> main` PR with exact evidence and review the complete diff against verified main.\n7. Squash-merge only with expected-head protection.\n8. Track natural post-merge exact-main CI and explicit-shared-owner performance runs; do not create duplicate runs.\n9. Close #112 only after those natural main gates succeed.\n\n## Contracts that must remain true\n\n- `shared T` is distinct from owned `T`, immutable `&T`, and inferred call-duration `SharedBorrow`.\n- `share` is the only initial shared allocation operation.\n- `dup` is the only shared-owner duplication operation in this slice.\n- ordinary assignment/parameter/return moves a shared handle without hidden refcount increments.\n- payload borrowing remains non-owning and tied to the specific source handle.\n- direct codegen uses safe `std::rc::Rc`; there is no `Arc`, `RefCell`, synchronization, wrapper ownership runtime, hidden deep clone or unsafe emulation.\n- record/enum storage of shared owners, cross-thread ownership, interior mutability, `Weak`, cycle solving, general generics and generalized lifetime machinery remain excluded.\n\n## Performance contract\n\nCompare against equivalent idiomatic Rust `Rc<T>` doing exactly the same ownership work. Correctness must match first. The committed Rust reference must mirror generated static Rust exactly so scheduler noise cannot masquerade as a generated-code regression when executable bytes are identical.\n\n## CI rule\n\nNever create duplicate active Actions for the same SHA/workflow/input. If one gate is queued/running, advance independent work and return to that gate later. Failed SHAs remain evidence and are not rerun merely for a better color.\n'''
+          Path('docs/NEXT_ACTION.md').write_text(next_action)
+          PY
+
+      - name: Validate handoff shape
+        run: |
+          grep -q '42fc00323a1359824d0a0adf6df6c28410556b22' docs/PROJECT_STATE.md
+          grep -q 'SharedOwner' docs/PROJECT_STATE.md
+          grep -q 'Remaining completion sequence' docs/NEXT_ACTION.md
+          ! grep -q 'production start gate is not satisfied' docs/NEXT_ACTION.md
+
+      - name: Commit docs and remove bootstrap
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/PROJECT_STATE.md docs/NEXT_ACTION.md
+          git rm .github/workflows/stage-explicit-shared-owner-handoff.yml
+          git commit -m 'docs: stage explicit shared owner handoff'
+          git push origin HEAD:feature/explicit-shared-handle-v0-docs
