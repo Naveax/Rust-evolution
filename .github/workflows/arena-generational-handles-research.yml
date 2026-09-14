@@ -1,0 +1,79 @@
+name: Arena generational handles research
+
+on:
+  pull_request:
+    paths:
+      - 'crates/evo-lowering/tests/arena_generational_handles_research.rs'
+      - '.github/workflows/arena-generational-handles-research.yml'
+      - 'docs/ARENA_GENERATIONAL_HANDLES_RESEARCH.md'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/evo-lowering/tests/arena_generational_handles_research.rs'
+      - '.github/workflows/arena-generational-handles-research.yml'
+      - 'docs/ARENA_GENERATIONAL_HANDLES_RESEARCH.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  research:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Show toolchain
+        run: rustc -Vv
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Run arena generational handle matrix
+        env:
+          EVO_REQUIRE_PINNED_RUSTC: '1'
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_ARENA_GENERATIONAL_RESEARCH_OUT: ${{ github.workspace }}/target/evo-arena-generational-research
+        run: >-
+          cargo test -p evo-lowering --test arena_generational_handles_research
+          arena_generational_handles_research_classifies_identity_and_lifetime_boundaries
+          -- --ignored --exact --nocapture
+
+      - name: Validate report
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path('target/evo-arena-generational-research/report.json').read_text())
+          assert report['git_sha'] == os.environ['EXPECTED_GIT_SHA'], report
+          assert report['verdict'] == 'REQUIRES-COLLECTION-SURFACE', report
+          assert report['recommended_model'] == 'GENERATIONAL-HANDLE-CANDIDATE', report
+          assert report['case_count'] >= 15, report
+          assert report['expectation_mismatches'] == 0, report
+          assert report['generational_candidate_count'] >= 7, report
+          assert report['plain_index_candidate_count'] >= 3, report
+          assert report['rc_instead_count'] >= 1, report
+          assert report['collection_surface_boundary_count'] >= 1, report
+          assert report['stale_identity_rejection_count'] >= 1, report
+          print(json.dumps(report, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evo-arena-generational-handles-research-ubuntu-24.04
+          path: target/evo-arena-generational-research
+          if-no-files-found: error
+          retention-days: 30
