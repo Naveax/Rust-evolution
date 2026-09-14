@@ -1,0 +1,58 @@
+name: Stage shared owner performance evidence docs
+
+on:
+  push:
+    branches:
+      - staging/explicit-shared-handle-evidence-docs
+    paths:
+      - '.github/workflows/stage-explicit-shared-owner-perf-evidence.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout evidence docs branch
+        uses: actions/checkout@v5
+        with:
+          ref: staging/explicit-shared-handle-evidence-docs
+
+      - name: Insert accepted performance evidence
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          next_path = Path('docs/NEXT_ACTION.md')
+          next_text = next_path.read_text()
+          marker = '## Remaining completion sequence\n'
+          evidence = '''## Accepted component performance evidence\n\nExact performance component head `c83d42dbe0e346021f1f524cf9d65f67fdbc66d3` passed Explicit shared owner performance #7 / run `34824865453`. Artifact `evo-bench-explicit-shared-owner-ubuntu-24.04`, id `10339932088`, digest `sha256:a490d5a0bc5d2cfe15c4da01b89cb45eb9e4d8aa51d8309d865a926dc60d6721`. Correctness passed, normalized LLVM IR matched, executable bytes were identical at 2,267,304 bytes each, the stable observed median ratio was `0.992969173`, and the final verdict was PASS via `byte-identical-binary-parity`.\n\nThis evidence validates the component benchmark/reference lock. The final combined feature head must still pass the same permanent performance workflow after all remaining gates/docs are integrated.\n\n'''
+          if marker not in next_text:
+              raise SystemExit('NEXT_ACTION completion marker missing')
+          next_text = next_text.replace(marker, evidence + marker, 1)
+          next_path.write_text(next_text)
+
+          state_path = Path('docs/PROJECT_STATE.md')
+          state = state_path.read_text()
+          old = 'Separate final validation lanes cover category-conversion rejection, source-native diagnostics and an equivalent-`Rc` differential performance gate. These must be integrated and validated on the final feature head before the main PR is considered complete.'
+          new = '''Separate final validation lanes cover category-conversion rejection, source-native diagnostics and equivalent-`Rc` differential performance. The performance component is accepted on exact head `c83d42dbe0e346021f1f524cf9d65f67fdbc66d3`: Explicit shared owner performance #7 / run `34824865453` succeeded; artifact id `10339932088`, digest `sha256:a490d5a0bc5d2cfe15c4da01b89cb45eb9e4d8aa51d8309d865a926dc60d6721`; correctness, normalized LLVM IR and executable-byte parity all passed, both binaries were 2,267,304 bytes, stable median ratio `0.992969173`, final verdict PASS via `byte-identical-binary-parity`. All component lanes still require combined final-head validation before the main PR is complete.'''
+          if old not in state:
+              raise SystemExit('PROJECT_STATE validation-lane marker missing')
+          state_path.write_text(state.replace(old, new, 1))
+          PY
+
+      - name: Validate evidence anchors
+        run: |
+          grep -q '34824865453' docs/NEXT_ACTION.md
+          grep -q 'a490d5a0bc5d2cfe15c4da01b89cb45eb9e4d8aa51d8309d865a926dc60d6721' docs/PROJECT_STATE.md
+          grep -q 'byte-identical-binary-parity' docs/PROJECT_STATE.md
+
+      - name: Commit docs and remove bootstrap
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/NEXT_ACTION.md docs/PROJECT_STATE.md
+          git rm .github/workflows/stage-explicit-shared-owner-perf-evidence.yml
+          git commit -m 'docs: record explicit shared owner performance evidence'
+          git push origin HEAD:staging/explicit-shared-handle-evidence-docs
