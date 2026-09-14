@@ -8,102 +8,48 @@ This is the durable project handoff. Always re-read live GitHub issue/PR/Actions
 
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
-- Current exact verified stable main: `42fc00323a1359824d0a0adf6df6c28410556b22`
+- Current exact verified stable main: `c5ccc21d7bf23d8daec2de36dc635c0f85313605`
 - Rust toolchain: **1.98.0**
 - Production flags: edition 2024, opt-level 3, codegen-units 1
-- Measured GNU/Linux linker path: `rustc -> cc -> lld`
-- Natural exact-SHA CI #475 / run `34816316570`: **SUCCESS** on Ubuntu, Windows and macOS
+- Natural exact-main CI #512 / run `34834431873`: **SUCCESS** on Ubuntu 24.04, Windows and macOS
+- Natural exact-main Explicit shared owner performance #12 / run `34834431791`: **SUCCESS**
+- Performance artifact id `10343513286`
+- Performance digest `sha256:fb6714e7f09ca0047c70435b21129128033d8235732ca1d9f82b6fdeab9716bf`
 
 ## Build / compile sequence
 
 - #76: build latency baseline established; single-file native builds are rustc-dominated.
-- #79 / PR #81: `build-cache-v0` accepted for verified unchanged-build artifact reuse.
+- #79 / PR #81: verified unchanged-build cache accepted.
 - #82 / PR #84: changed-source rustc incremental research **REJECT / DEFER**.
-- #85 / PR #86: link-time attribution established current `cc -> lld` path and link cost.
-- #87 / PR #88: GNU ld / mold candidate experiment **REJECT / DEFER**.
-- #89 / PR #90: opt-level 3 -> 2 release optimization candidate **REJECT / DEFER**.
+- #85 / PR #86: link-time attribution established the current `rustc -> cc -> lld` path.
+- #87 / PR #88: alternative linker experiment **REJECT / DEFER**.
+- #89 / PR #90: opt-level 3 -> 2 candidate **REJECT / DEFER**.
 - #91 / PR #92: compile-memory baseline **DEFER / NO ACTION**.
-- #93 / PR #94: binary-size baseline **DEFER / NO ACTION**; controlled reference/Evolution binaries were byte-identical across the seven-case corpus.
+- #93 / PR #94: binary-size baseline **DEFER / NO ACTION**; controlled Evolution/reference binaries were byte-identical across the accepted corpus.
 
 Dependency-build, proc-macro cost and workspace scaling remain deferred until Evolution has a real package/dependency graph.
 
-## Ownership-ergonomics chain
+## Ownership ergonomics implemented
 
-### #95 / PR #96 — borrow inference feasibility
+### Inferred shared-borrow parameters
 
-Verdict: **IMPLEMENT-CANDIDATE**. A bounded local classifier can infer call-duration shared borrows for read-only nominal parameters without generalized lifetime solving.
+`Owned` and call-duration `SharedBorrow` parameter modes are distinct. SharedBorrow is non-owning and does not create a stored or escaping reference.
 
-### #97 / PR #99 — inferred shared-borrow nominal parameters v0
+### First-class immutable references
 
-Implemented `Owned` / `SharedBorrow` parameter modes. `SharedBorrow` is call-duration and non-owning; it does not create a stored or escaping reference.
+`&T` / `&expr` are implemented for the bounded nominal slice with deterministic provenance, stored reference locals, source-owner move/reinitialization conflicts, bounded final-use liveness and direct safe Rust reference lowering.
 
-### #100 / PR #101 — lifetime-elision feasibility
+### Explicit one-thread shared owners — #112 / PR #117 completed
 
-Verdict: **REFERENCE-SURFACE-FIRST**. Useful deterministic single-source borrowed-return signatures can rely on Rust lifetime elision while ambiguous/multi-owner/dead-owner relations fail closed. Durable report: `docs/LIFETIME_ELISION_RESEARCH.md`.
-
-### #102 / PR #103 — immutable reference surface research
-
-Verdict: **SURFACE-CANDIDATE / PUNCTUATION-AMPERSAND**. Selected syntax: `&T` / `&expr`. Durable report: `docs/IMMUTABLE_REFERENCE_SURFACE_RESEARCH.md`.
-
-### #104 / PR #105 — immutable references v0
-
-Completed. Production includes first-class bounded immutable references, deterministic single-source provenance, stored reference locals, owner move/reinitialization conflicts, bounded final-use liveness, inferred-`SharedBorrow` interoperability and direct safe Rust reference lowering without hidden allocation/clone/runtime ownership machinery.
-
-### #106 / PR #108 — shared ownership ergonomics research
-
-Completed with **SPLIT-RESEARCH**. Borrowing, one-thread reference-counted ownership, cross-thread ownership, interior mutability, synchronization, weak/cyclic edges and arena/index ownership remain distinct models. Durable report: `docs/SHARED_OWNERSHIP_RESEARCH.md`.
-
-### #109 / PR #111 — explicit shared handle surface v0 research
-
-Completed and merged as current exact verified main:
-
-`42fc00323a1359824d0a0adf6df6c28410556b22`
-
-Natural validation:
-
-- CI #475 / run `34816316570`: **SUCCESS** on Ubuntu, Windows and macOS;
-- Explicit shared handle surface research #8 / run `34816316546`: **SUCCESS**;
-- artifact id `10337270060`;
-- digest `sha256:2894d8b1c76a9ad064d18dd632d35e4e3b56a2bc159c14d2235767348c76e335`;
-- verdict **IMPLEMENT-CANDIDATE / CONTEXTUAL-WORDS** with 4 surfaces, 15 semantic cases and zero compile/runtime expectation mismatches.
-
-Accepted source surface:
+Production source surface:
 
 ```text
 shared Item
 share expr
-dup expr
+dup owner
 ```
 
-The three words remain contextual identifiers rather than hard lexer keywords. Durable report: `docs/EXPLICIT_SHARED_HANDLE_SURFACE_RESEARCH.md`.
-
-## Active production implementation — #112 / PR #117
-
-Final integration branch: `integration/explicit-shared-handle-v0-final`.
-
-PR #117 is the consolidated production candidate. Earlier component PRs #114, #115 and #116 were closed without merge after their content was incorporated into #117; their CI/performance history remains preserved as evidence.
-
-### Implemented shared-owner behavior
-
-- `TypeName::SharedOwner` and corresponding semantic/lowered `SharedOwner` value categories are distinct from owned records, first-class `SharedRef`, and inferred call-duration `SharedBorrow`.
-- `shared Item` is accepted only in the bounded function parameter/return type surface.
-- `share expr` explicitly allocates the first shared owner and requires an owned nominal record operand.
-- `dup expr` explicitly duplicates one available shared-owner handle.
-- ordinary assignment, by-value parameter passing and return move the handle; they do not increment the strong count.
-- a moved shared-owner local may be explicitly reinitialized with the exact same `shared T` type.
-- `dup` of a moved handle is rejected rather than reviving it.
-- scalar payload fields are readable through a shared owner; moving a move-only nominal payload field out is rejected instead of cloned.
-- no implicit conversion exists among owned `T`, `shared T`, and `&T`.
-- `r = &owner` creates an ordinary non-owning `&T`; provenance remains tied to that specific source handle.
-- moving or reinitializing the source handle while a dependent immutable reference may still be live is rejected source-natively.
-- a different duplicated handle may move independently.
-- bounded final-use analysis permits source-handle move/reinitialization after the final proven reference use.
-- branch and repeat ownership joins preserve the existing conservative move rules.
-- source-native diagnostics distinguish moved shared-handle reuse, invalid `share`, invalid `dup`, and live payload-reference/source-handle conflicts; deterministic related reference-origin notes are preserved where available.
-
-### Direct safe Rust lowering
-
-The implemented mapping is direct:
+Direct generated Rust mapping:
 
 ```text
 shared Item -> std::rc::Rc<__EvoRecord_Item>
@@ -111,98 +57,124 @@ share expr  -> std::rc::Rc::new(expr)
 dup expr    -> std::rc::Rc::clone(&expr)
 ```
 
-Ordinary moves remain ordinary Rust moves. Payload borrows lower to normal safe references through the `Rc` payload. Generated-Rust compile tests cover create/dup/read, payload borrowing, by-value forwarding and same-type reinitialization after a move.
+Implemented contracts:
 
-The implementation adds no wrapper ownership object, runtime ownership registry, hidden payload deep clone, `Arc`, `RefCell`, lock, GC, unsafe block, synchronization or invented lifetime widening.
+- `SharedOwner` is distinct from owned records, first-class `SharedRef`, and inferred `SharedBorrow`;
+- `shared Item` is accepted in the bounded function parameter/return surface;
+- `share expr` explicitly allocates the first shared owner and requires an owned nominal record operand;
+- `dup expr` explicitly creates another available owner handle;
+- ordinary assignment, by-value parameter passing and returns move handles with no implicit strong-count increment;
+- moved shared-owner locals may be explicitly reinitialized with the same `shared T` type;
+- `dup` of a moved handle rejects rather than reviving it;
+- scalar payload fields are readable through shared owners;
+- move-only nominal payload extraction through shared ownership rejects instead of cloning;
+- no implicit conversion exists among owned `T`, `shared T`, and `&T`;
+- payload references derived from a shared owner remain ordinary immutable references tied to that specific source handle;
+- source-handle move/reinitialization rejects while such a reference may still be live;
+- a different duplicated handle may move independently;
+- bounded final-use analysis releases the source handle after the final proven dependent-reference use;
+- branch/repeat ownership joins retain existing conservative move rules;
+- `shared`, `share`, and `dup` remain contextual identifiers rather than global keywords, preserving existing ordinary calls/names;
+- record fields and enum payloads containing shared owners are outside v0;
+- enum-bearing unsupported reference/shared-owner combinations fail closed before executable enum IR/codegen.
 
-### Frontend / formatter compatibility
+Generated code contains no Evolution ownership wrapper, global runtime ownership registry, hidden payload clone, `Arc`, `RefCell`, lock, synchronization, GC, unsafe block or invented lifetime widening.
 
-`shared`, `share`, and `dup` remain ordinary identifier tokens outside the narrow contextual forms. Existing calls/names such as `share(...)`, `dup(...)`, and identifiers named `shared` remain compatible. Formatter coverage locks canonical `shared Item`, `share expr` and `dup expr` spelling.
+### Permanent equivalent-Rc performance gate
 
-### Permanent production coverage
+The permanent benchmark compares Evolution against idiomatic Rust performing the same ownership work: one `Rc` allocation, explicit owner duplication, equivalent forwarding/field reads/drops.
 
-The final candidate contains permanent parser/lowering/codegen tests for:
+Final exact-main evidence:
 
-- contextual surface and identifier compatibility;
-- scalar/nested/storage exclusions;
-- move-only assignment/parameter/return behavior;
-- explicit duplication in branches and repeats;
-- moved-handle reuse and same-type reinitialization;
-- no implicit conversion among ownership categories;
-- payload-reference/source-handle conflicts and final-use release;
-- direct safe Rust codegen operation shape and rustc acceptance;
-- fail-closed current enum-bearing-program boundary.
+- Explicit shared owner performance #12 / run `34834431791`: **SUCCESS**;
+- artifact id `10343513286`;
+- digest `sha256:fb6714e7f09ca0047c70435b21129128033d8235732ca1d9f82b6fdeab9716bf`;
+- artifact head SHA exactly `c5ccc21d7bf23d8daec2de36dc635c0f85313605`.
 
-The historical automated surface-research workflow is retired. Its durable report and artifacts remain preserved.
+Accepted component evidence also established normalized LLVM IR equality and byte-identical Evolution/reference executables for the equivalent-Rc corpus.
 
-### Current enum-bearing-program boundary
+## Active research lanes
 
-The accepted v0 shared-owner slice is record-only. Programs containing enum declarations still route through the existing Enums v0 integrated semantic pipeline. Explicit reference/shared-owner types or expressions in that pipeline fail closed before executable enum IR/codegen with source-native diagnostics. #112 does not silently widen the enum pipeline, invent shared-owner enum payload/storage semantics, or add a runtime fallback.
+The following are deliberately separate cost/safety models and are not production behavior merely because the Rc-like owner is implemented.
 
-### Equivalent-Rc performance gate
+### #118 — cyclic / graph ownership boundaries
 
-PR #117 contains a permanent `explicit-shared-owner-v0` differential benchmark plus an exact committed reference/generated-Rust lock. The Evolution and Rust programs perform the same ownership work: one `Rc` allocation, one explicit owner duplication per loop iteration, equivalent by-value forwarding, field reads and drops.
+PR #120 is parked closed while its five persistent research-only files are reconstructed onto current verified main.
 
-Accepted component evidence on exact head `c83d42dbe0e346021f1f524cf9d65f67fdbc66d3`:
+Dedicated evidence on historical exact research head `4c6a7e4f1d24388d3081e28ca88c73f142f88a68`:
 
-- Explicit shared owner performance #7 / run `34824865453`: **SUCCESS**;
-- artifact id `10339932088`;
-- digest `sha256:a490d5a0bc5d2cfe15c4da01b89cb45eb9e4d8aa51d8309d865a926dc60d6721`;
-- correctness PASS;
-- normalized LLVM IR equal: true;
-- exact executable bytes equal: true;
-- binary size: 2,267,304 bytes on both sides;
-- reference median: 828,921 ns;
-- Evolution median: 823,093 ns;
-- stable observed ratio: `0.992969173`;
-- final verdict: PASS;
-- verdict basis: `byte-identical-binary-parity`.
+- Cyclic graph ownership research #12 / run `34832221728`: **SUCCESS**;
+- artifact id `10342831245`;
+- digest `sha256:5ebf114519378c431f6cee33181de569ef5d4cd6e54e58f09cf3e502b43612ba`;
+- verdict **SPLIT-RESEARCH**;
+- 15 cases, zero compile/runtime expectation mismatches;
+- explicit Weak-edge and arena/index candidates remain separate;
+- strong-cycle retention, weak-edge destruction, stale-index identity risk, generation-checked handle behavior, interior-mutability/concurrency/self-reference boundaries are separately demonstrated.
 
-This component result does not replace the required final combined-head gate on PR #117.
+Gated successors:
 
-## #112 completion rule
+- #125 — explicit Weak-edge surface v0;
+- #126 — arena/generational graph handles v0.
 
-Before merge, the final exact PR #117 head must pass:
+Neither successor may start until #118 merges and natural exact-main normal CI plus dedicated cyclic-graph research both pass.
 
-1. normal CI on Ubuntu, Windows and macOS;
-2. the permanent Explicit shared owner performance workflow;
-3. complete final diff/review-thread inspection against verified main.
+### #121 — interior mutability ergonomics
 
-Then PR #117 may be squash-merged only with expected-head protection. After merge, the natural exact-main normal CI and Explicit shared owner performance runs must both succeed without duplicate manual runs. Issue #112 closes only after those natural main gates pass, followed by living meta/handoff synchronization to the new exact verified main.
+PR #122 is parked closed with a clean research-only branch containing:
 
-## Explicit current non-goals
+- pinned Rust 1.98 `RefCell<T>` / `Rc<RefCell<T>>` semantics matrix;
+- runtime conflict/panic and fallible borrow cases;
+- direct guard-state lifetime controls;
+- dedicated research workflow;
+- durable report.
 
-Not approved by #112:
+Ownership and dynamic borrow-state cost remain separate. No hidden `RefCell`, hidden Rc, synchronization or production mutation syntax is approved.
 
-- `Arc` / cross-thread shared ownership;
-- `Send`/`Sync`-equivalent capability rules;
-- interior mutability (`RefCell` etc.);
-- locks/synchronization (`Mutex`, `RwLock`);
-- `Weak` production semantics or cycle solving;
-- arena/index implementation;
+### #123 — cross-thread shared ownership
+
+PR #124 is parked closed with a clean research-only branch containing:
+
+- `Arc<T>` ownership and atomic refcount controls;
+- `Rc` cross-thread rejection;
+- thread-capability boundary cases;
+- `Mutex`, `RwLock`, atomic-payload synchronization contrasts;
+- Weak/deep-clone/single-thread cost contrasts;
+- dedicated research workflow and durable report.
+
+No automatic `Rc -> Arc` upgrade, hidden synchronization or production concurrency surface is approved.
+
+## Current explicit non-goals
+
+Not yet production-approved:
+
+- cross-thread `Arc` ownership / Send-Sync-like capability rules;
+- interior mutability;
+- locks / synchronized shared mutation;
+- Weak/cycle-edge production semantics;
+- arena/index/generational graph handles;
 - mutable references;
 - generalized/user-written lifetime solving;
 - general generic type syntax;
 - implicit shared ownership inference;
-- implicit allocation;
-- implicit owner duplication;
+- implicit allocation or owner duplication;
 - hidden payload deep clone;
-- implicit owned/reference/shared-owner conversions;
-- shared-owner record fields or enum payloads;
-- nested/general shared-owner type algebra;
-- GC/runtime ownership tables;
-- unsafe emulation;
-- silent changes to existing owned `T`, immutable `&T`, or inferred `SharedBorrow` contracts.
+- shared-owner record fields / enum payloads;
+- generalized shared-owner type algebra;
+- GC/global runtime ownership tables;
+- unsafe ownership emulation.
 
-## Implemented language / tooling state
+## Next operational sequence
 
-`docs/LANGUAGE_SPEC_V0.md` is the implemented-language source of truth. Stable main currently includes integer/bool/static strings, input/repeat/control flow, functions, lexical block locals, Records v0, Enums v0, by-value ownership/reinitialization, inferred call-duration shared-borrow parameters, first-class bounded immutable references, source-native move/reference diagnostics, source maps, formatter, native check/emit/build/run and verified run/build caches.
-
-The explicit shared-owner surface is implemented in PR #117 but is not stable-main behavior until that PR merges and natural post-merge validation succeeds.
+1. Merge the small post-#112 docs handoff and verify its natural exact-main normal CI.
+2. Reconstruct PR #120's five research-only files onto that verified main and reopen #120.
+3. Require exact-head normal CI plus dedicated cyclic research before merge; then require both natural postmerge gates before #118 closes.
+4. While #120 Actions run, reconstruct #122 and #124 onto the same verified main while keeping them closed to avoid redundant runner pressure.
+5. Unlock #125/#126 only after #118 postmerge validation.
+6. Validate #121 and #123 independently and create narrower production successors only when the evidence supports them.
 
 ## CI / handoff invariant
 
-Never create duplicate active Actions for the same SHA/workflow/input. Track the existing run. Failed SHAs remain evidence and are not rerun merely for a better color. CI running does not block independent queue work.
+Never create duplicate active Actions for the same SHA/workflow/input. Track the existing run. Failed/cancelled historical SHAs remain evidence and are not rerun merely for color. CI running does not block independent work.
 
 Authority hierarchy:
 
