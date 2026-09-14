@@ -1,6 +1,8 @@
+use evo_diagnostics::render_error;
 use evo_lexer::lex;
 use evo_lowering::lower;
 use evo_parser::parse;
+use std::path::Path;
 
 fn lower_error(source: &str) -> evo_lowering::LowerError {
     let tokens = lex(source).expect("shared-owner diagnostic source should lex");
@@ -48,4 +50,20 @@ fn live_payload_reference_conflict_names_shared_handle_and_reference() {
     assert!(error.message.contains("cannot move shared handle local"));
     assert!(error.message.contains("immutable reference"));
     assert_eq!(error.span.line, 6);
+}
+
+#[test]
+fn live_payload_reference_conflict_renders_reference_origin_note() {
+    let source = format!(
+        "{ITEM}owner = share Item(value = 1)\nr = &owner\nmoved = owner\nprint r.value\n"
+    );
+    let error = lower_error(&source);
+    let rendered = render_error(
+        Path::new("shared-owner.evo"),
+        &source,
+        &error.message,
+        error.span,
+    );
+    assert!(rendered.contains("note: immutable reference \"r\" was created here"));
+    assert!(rendered.contains(" --> shared-owner.evo:5:5"));
 }
