@@ -1,0 +1,16 @@
+case,classification,expected_compile,expected_runtime,runtime_borrow_state,dynamic_failure_model,ownership_model,allocation_model,operations
+owned-mutable-local,OWN/BORROW-INSTEAD,true,8,no,none,single-owner-mutable,stack-only,direct-mutation
+exclusive-mut-borrow,OWN/BORROW-INSTEAD,true,8,no,compile-time-exclusivity,single-owner-exclusive-borrow,stack-only,mut-borrow
+cell-get-set,CELL-CANDIDATE,true,8,cell-state,none,shared-reference-cell,stack-only,get-set
+cell-shared-aliases,CELL-CANDIDATE,true,9,cell-state,none,multiple-shared-refs-to-cell,stack-only,get-set-through-alias
+refcell-immutable-borrow,REFCELL-CANDIDATE,true,7,yes,panic-or-fallible-on-conflict,single-owner-runtime-borrowed,stack-only,borrow-guard
+refcell-mutable-borrow,REFCELL-CANDIDATE,true,8,yes,panic-or-fallible-on-conflict,single-owner-runtime-mut-borrowed,stack-only,borrow_mut-guard
+guard-drop-then-mutable,REFCELL-CANDIDATE,true,8,yes,guard-scoped,single-owner-sequential-runtime-borrows,stack-only,borrow-drop-borrow_mut
+overlap-immutable-mutable,REQUIRES-GUARD-SURFACE-RESEARCH,true,borrow-conflict,yes,fallible-error,single-owner-overlapping-runtime-borrows,stack-only,borrow-try_borrow_mut
+overlap-mutable-mutable,REQUIRES-GUARD-SURFACE-RESEARCH,true,borrow-conflict,yes,fallible-error,single-owner-overlapping-runtime-mut-borrows,stack-only,borrow_mut-try_borrow_mut
+try-borrow-path,REFCELL-CANDIDATE,true,blocked,yes,fallible-error,single-owner-runtime-borrowed,stack-only,try_borrow_mut
+rc-refcell-shared-mutation,EXPLICIT-COMPOSITION-CANDIDATE,true,8,yes,panic-or-fallible-on-conflict,Rc-plus-RefCell,Rc-allocation,Rc-clone-borrow_mut
+rc-refcell-alias-survives,EXPLICIT-COMPOSITION-CANDIDATE,true,8,yes,panic-or-fallible-on-conflict,Rc-plus-RefCell,Rc-allocation,Rc-clone-drop-borrow
+alias-vs-deep-clone,REJECT-HIDDEN-RUNTIME-COST,true,distinct,yes,none,Rc-RefCell-alias-vs-independent-copy,two-allocations,alias-mutate-vs-deep-copy
+arc-mutex-contrast,REQUIRES-CONCURRENCY-DESIGN,true,8,lock-state,lock-poison-or-blocking,Arc-plus-Mutex,Arc-allocation,atomic-clone-lock
+plain-borrow-alternative,OWN/BORROW-INSTEAD,true,14,no,none,single-owner-shared-borrows,stack-only,borrow-read
