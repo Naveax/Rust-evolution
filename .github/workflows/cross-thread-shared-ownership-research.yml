@@ -1,0 +1,79 @@
+name: Cross-thread shared ownership research
+
+on:
+  pull_request:
+    paths:
+      - 'crates/evo-lowering/tests/cross_thread_shared_ownership_research.rs'
+      - '.github/workflows/cross-thread-shared-ownership-research.yml'
+      - 'docs/CROSS_THREAD_SHARED_OWNERSHIP_RESEARCH.md'
+  push:
+    branches:
+      - main
+    paths:
+      - 'crates/evo-lowering/tests/cross_thread_shared_ownership_research.rs'
+      - '.github/workflows/cross-thread-shared-ownership-research.yml'
+      - 'docs/CROSS_THREAD_SHARED_OWNERSHIP_RESEARCH.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Show toolchain
+        run: rustc -Vv
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Run cross-thread shared ownership matrix
+        env:
+          EVO_REQUIRE_PINNED_RUSTC: '1'
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_CROSS_THREAD_SHARED_OWNERSHIP_RESEARCH_OUT: ${{ github.workspace }}/target/evo-cross-thread-shared-ownership-research
+        run: >-
+          cargo test -p evo-lowering --test cross_thread_shared_ownership_research
+          cross_thread_shared_ownership_research_classifies_arc_boundaries
+          -- --ignored --exact --nocapture
+
+      - name: Validate research report
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path('target/evo-cross-thread-shared-ownership-research/report.json').read_text())
+          assert report['git_sha'] == os.environ['EXPECTED_GIT_SHA'], report
+          assert report['verdict'] == 'SPLIT-RESEARCH', report
+          assert report['case_count'] >= 15, report
+          assert report['expectation_mismatches'] == 0, report
+          assert report['arc_candidate_count'] >= 6, report
+          assert report['rc_owned_instead_count'] >= 2, report
+          assert report['send_sync_boundary_count'] >= 2, report
+          assert report['synchronization_boundary_count'] >= 3, report
+          assert report['weak_cycle_boundary_count'] >= 1, report
+          assert report['hidden_cost_rejection_count'] >= 1, report
+          print(json.dumps(report, indent=2))
+          PY
+
+      - name: Upload research evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-cross-thread-shared-ownership-research-ubuntu-24.04
+          path: target/evo-cross-thread-shared-ownership-research
+          if-no-files-found: error
+          retention-days: 30
