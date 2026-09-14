@@ -142,7 +142,9 @@ additive            := multiplicative (("+" | "-") multiplicative)*
 multiplicative      := unary (("*" | "/") unary)*
 unary               := "-" unary | "&" unary | contextual_shared_prefix | postfix
 contextual_shared_prefix
-                    := "share" unary | "dup" unary
+                    := ("share" | "dup") identifier_led_unary
+identifier_led_unary
+                    := unary   # accepted only when the operand begins with IDENTIFIER
 postfix             := primary ("." IDENTIFIER)*
 primary             := INTEGER
                      | STRING
@@ -293,6 +295,8 @@ print owner.value + moved.value
 
 The three source words stay contextual rather than becoming lexer keywords:
 
+The contextual prefix recognizer is intentionally narrower than a general unary operator: after `share` or `dup`, the operand must begin with an identifier token. This covers locals and identifier-led calls/constructors while grouped, literal, or operator-leading operands are not captured as shared-owner prefixes.
+
 - `shared Item` is accepted only in function parameter/return type positions in this slice;
 - `share expr` explicitly creates the first shared owner and is accepted only when `expr` produces an owned nominal record;
 - `dup expr` explicitly duplicates one available shared-owner handle;
@@ -319,6 +323,8 @@ dup expr    -> std::rc::Rc::clone(&expr)
 Payload references through a shared owner lower to an ordinary reference to the payload, using stable safe `Rc` dereference/as-ref behavior. Evolution adds no wrapper object, runtime ownership table, hidden deep clone, `Arc`, `RefCell`, lock, GC, unsafe code, or invented `'static` lifetime.
 
 Shared-owner record fields and enum payloads, nested/general `shared` type algebra, `Weak`, cycle solving, cross-thread ownership, interior mutability, synchronization, mutable references, and generalized lifetime/generic machinery remain outside this slice.
+
+Shared-owner v0 is currently a record-only executable path. A program containing enum declarations uses the Enums v0 integrated semantic pipeline, which rejects explicit shared-owner/reference contracts and expressions before executable IR/codegen. Shared ownership therefore does not yet compose with enum-bearing programs; this is an explicit fail-closed boundary rather than an implicit conversion or runtime fallback.
 
 Scalar rules:
 
@@ -391,11 +397,11 @@ Accessing a scalar field does not move the containing record. Chained traversal 
 
 Moving a record-valued or otherwise move-only nominal field out of a containing record is deliberately rejected in v0 rather than implemented through an implicit clone.
 
-Records use ordinary by-value move semantics by default. Reading a record local by value consumes it. Passing or returning a record by value uses the same rule. The bounded inferred shared-borrow parameter rule described under Functions v0 is the only implemented exception to by-value nominal parameter passing.
+Records use ordinary by-value move semantics by default. Reading a record local by value consumes it. Passing or returning a record by value uses the same rule. Qualifying ordinary nominal function parameters may use the bounded inferred `SharedBorrow` mode; explicit `&T` references and explicit `shared T` owners are separate source-level value categories and do not silently change an owned record into another category.
 
 A moved record local may be explicitly reinitialized by assigning a new value of the exact same nominal type.
 
-There is no implicit `.clone()`, copy insertion, user-facing reference syntax, or general reference inference.
+There is no implicit `.clone()`, copy insertion, owner duplication, or generalized reference inference. Explicit immutable references use the bounded `&T` / `&expr` rules above, and explicit shared ownership requires `share` / `dup`.
 
 ### Ownership through control flow
 
@@ -830,6 +836,26 @@ Corrected Enums v0 feature head `69bc2d1b15db1bd841b85e8a508c156dc689550d`, CI #
 - verdict basis: `byte-identical-binary-parity`.
 
 Because both accepted sides compile to the same executable bytes after correctness PASS, scheduler-level wall-clock jitter cannot represent a generated-code runtime regression. The timing-only result remains visible as evidence rather than being erased.
+
+### Accepted explicit shared-owner v0 parity evidence
+
+Exact performance component head `c83d42dbe0e346021f1f524cf9d65f67fdbc66d3`, Explicit shared owner performance #7 / run `34824865453`, produced:
+
+- committed benchmark-reference/generated-Rust exact lock: PASS;
+- differential stdout/stderr/exit correctness: PASS;
+- normalized LLVM IR equality: true;
+- exact executable equality: true;
+- reference binary size: 2,267,304 bytes;
+- Evolution binary size: 2,267,304 bytes;
+- reference median: 828,921 ns;
+- Evolution median: 823,093 ns;
+- stable measurement: true;
+- observed median ratio: `0.992969173`;
+- timing verdict: PASS;
+- final verdict: PASS;
+- verdict basis: `byte-identical-binary-parity`.
+
+Artifact `evo-bench-explicit-shared-owner-ubuntu-24.04`, id `10339932088`, digest `sha256:a490d5a0bc5d2cfe15c4da01b89cb45eb9e4d8aa51d8309d865a926dc60d6721`, retains the report and generated/reference evidence. Final integration still requires the permanent gate to pass on the combined feature head.
 
 ## Current explicit non-features
 
