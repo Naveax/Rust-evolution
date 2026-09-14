@@ -1,0 +1,68 @@
+name: Weak edge surface research
+
+on:
+  pull_request:
+    paths:
+      - 'crates/evo-formatter/tests/weak_edge_surface_research.rs'
+      - '.github/workflows/weak-edge-surface-research.yml'
+      - 'docs/WEAK_EDGE_SURFACE_RESEARCH.md'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/evo-formatter/tests/weak_edge_surface_research.rs'
+      - '.github/workflows/weak-edge-surface-research.yml'
+      - 'docs/WEAK_EDGE_SURFACE_RESEARCH.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  research:
+    runs-on: ubuntu-24.04
+    name: ubuntu-24.04 / Rust 1.98.0
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+      - run: rustc -Vv
+      - run: cargo fmt --all -- --check
+      - name: Run Weak edge surface matrix
+        env:
+          EVO_REQUIRE_PINNED_RUSTC: '1'
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_WEAK_EDGE_RESEARCH_OUT: ${{ github.workspace }}/target/evo-weak-edge-research
+        run: cargo test -p evo-formatter --test weak_edge_surface_research weak_edge_surface_research_classifies_explicit_weak_semantics -- --ignored --exact --nocapture
+      - name: Validate report
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          d=json.loads(Path('target/evo-weak-edge-research/report.json').read_text())
+          assert d['git_sha']==os.environ['EXPECTED_GIT_SHA'], d
+          assert d['verdict']=='WEAK-SURFACE-CANDIDATE', d
+          assert d['recommended_surface']=='CONTEXTUAL-WORDS', d
+          assert d['case_count']>=15 and d['expectation_mismatches']==0, d
+          assert d['weak_candidate_count']>=8, d
+          assert d['borrow_instead_count']>=1, d
+          assert d['interior_mutability_composition_count']>=1, d
+          assert d['concurrency_boundary_count']>=1, d
+          assert d['hidden_cost_rejection_count']>=2, d
+          assert d['contextual_words_are_identifiers'] is True, d
+          assert d['contextual_formatter_stable'] is True, d
+          assert d['generic_angle_formatter_rewrite_observed'] is True, d
+          print(json.dumps(d, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evo-weak-edge-surface-research-ubuntu-24.04
+          path: target/evo-weak-edge-research
+          if-no-files-found: error
+          retention-days: 30
