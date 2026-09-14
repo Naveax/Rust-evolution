@@ -14,39 +14,51 @@ Natural validation on that exact SHA:
 - Explicit shared handle surface research #8 / run `34816316546`: **SUCCESS**;
 - artifact id `10337270060`;
 - digest `sha256:2894d8b1c76a9ad064d18dd632d35e4e3b56a2bc159c14d2235767348c76e335`;
-- accepted verdict: **IMPLEMENT-CANDIDATE / CONTEXTUAL-WORDS**.
+- accepted research verdict: **IMPLEMENT-CANDIDATE / CONTEXTUAL-WORDS**.
 
-## Active implementation — #112
+## Active final implementation — #112 / PR #117
 
-Production branch: `feature/explicit-shared-handle-v0`.
+Final integration branch: `integration/explicit-shared-handle-v0-final`.
 
-The bounded one-thread immutable shared-owner implementation is present and now in final integration/validation. It uses contextual `shared Item`, `share expr`, and `dup expr`, direct safe `Rc<T>` codegen, move-only handles and existing bounded immutable-reference provenance/final-use rules.
+PR #117 consolidates the complete bounded one-thread immutable shared-owner slice. The previously separate conversion-boundary, diagnostics, move/reinitialization, enum-boundary, performance and documentation lanes are included in this single final candidate.
+
+Implemented surface and contracts:
+
+- contextual `shared Item`, `share expr`, and `dup expr`;
+- explicit safe `std::rc::Rc<T>` lowering with `Rc::new` and `Rc::clone` only where source requests allocation/duplication;
+- move-only shared-owner handles with same-type explicit reinitialization;
+- no implicit conversion among owned `T`, `shared T`, and `&T`;
+- payload references remain ordinary non-owning references tied to the specific source handle;
+- source-handle move/reinitialization conflicts while a dependent reference may still be live;
+- bounded final-use release, branch/repeat ownership checks and moved-handle diagnostics;
+- record-only first slice with enum-bearing shared-owner/reference use failing closed before executable enum IR/codegen;
+- no `Arc`, `RefCell`, synchronization, `Weak`, GC, wrapper ownership runtime, hidden deep clone, unsafe emulation or generalized lifetime machinery.
+
+## Accepted component performance evidence
+
+Equivalent-`Rc` component head `c83d42dbe0e346021f1f524cf9d65f67fdbc66d3` passed Explicit shared owner performance #7 / run `34824865453`:
+
+- correctness: PASS;
+- normalized LLVM IR equal: true;
+- exact executable bytes equal: true;
+- binary size: 2,267,304 bytes on both sides;
+- stable observed median ratio: `0.992969173`;
+- final verdict: PASS;
+- verdict basis: `byte-identical-binary-parity`;
+- artifact id `10339932088`;
+- digest `sha256:a490d5a0bc5d2cfe15c4da01b89cb45eb9e4d8aa51d8309d865a926dc60d6721`.
+
+This component evidence does **not** replace final combined-head validation.
 
 ## Remaining completion sequence
 
-1. Integrate the permanent no-implicit-conversion boundary tests.
-2. Integrate the source-native shared-owner diagnostic assertions.
-3. Require the equivalent-`Rc` benchmark reference to match generated Rust exactly and pass the permanent differential performance gate.
-4. Rebase/synchronize the language spec and living handoff onto the final feature head.
-5. Require final exact feature-head normal CI on Ubuntu, Windows and macOS plus the permanent explicit-shared-owner performance workflow.
-6. Open/update the final `feature/explicit-shared-handle-v0 -> main` PR with exact evidence and review the complete diff against verified main.
-7. Squash-merge only with expected-head protection.
-8. Track natural post-merge exact-main CI and explicit-shared-owner performance runs; do not create duplicate runs.
-9. Close #112 only after those natural main gates succeed.
-
-## Contracts that must remain true
-
-- `shared T` is distinct from owned `T`, immutable `&T`, and inferred call-duration `SharedBorrow`.
-- `share` is the only initial shared allocation operation.
-- `dup` is the only shared-owner duplication operation in this slice.
-- ordinary assignment/parameter/return moves a shared handle without hidden refcount increments.
-- payload borrowing remains non-owning and tied to the specific source handle.
-- direct codegen uses safe `std::rc::Rc`; there is no `Arc`, `RefCell`, synchronization, wrapper ownership runtime, hidden deep clone or unsafe emulation.
-- record/enum storage of shared owners, cross-thread ownership, interior mutability, `Weak`, cycle solving, general generics and generalized lifetime machinery remain excluded.
-
-## Performance contract
-
-Compare against equivalent idiomatic Rust `Rc<T>` doing exactly the same ownership work. Correctness must match first. The committed Rust reference must mirror generated static Rust exactly so scheduler noise cannot masquerade as a generated-code regression when executable bytes are identical.
+1. Require normal CI on the final exact PR #117 head across Ubuntu, Windows and macOS.
+2. Require the permanent Explicit shared owner performance workflow on that same exact head.
+3. Inspect the complete final diff against verified main and resolve any review threads.
+4. Squash-merge PR #117 only with expected-head protection.
+5. Track the natural post-merge exact-main normal CI and Explicit shared owner performance runs without starting duplicates.
+6. Close #112 only after both natural exact-main gates succeed.
+7. Synchronize the living meta/handoff to the new exact verified main and then advance the next queued P0 item.
 
 ## CI rule
 
