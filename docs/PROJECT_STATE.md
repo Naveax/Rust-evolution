@@ -8,11 +8,11 @@ This is the durable project handoff. Always re-read live GitHub issue/PR/Actions
 
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
-- Current exact verified stable main: `0f90cca266c346941ed6453e5a2be065f4f37a07`
+- Current exact verified stable main: `42fc00323a1359824d0a0adf6df6c28410556b22`
 - Rust toolchain: **1.98.0**
 - Production flags: edition 2024, opt-level 3, codegen-units 1
 - Measured GNU/Linux linker path: `rustc -> cc -> lld`
-- Natural exact-SHA CI #467 / run `34617261754`: **SUCCESS** on Ubuntu, Windows and macOS
+- Natural exact-SHA CI #475 / run `34816316570`: **SUCCESS** on Ubuntu, Windows and macOS
 
 ## Build / compile sequence
 
@@ -114,87 +114,44 @@ Natural CI #467 / run `34617261754`: **SUCCESS** on Ubuntu, Windows and macOS.
 
 ### #109 / PR #111 — explicit shared handle surface v0 research
 
-Issue #109 is the bounded surface successor selected by #106.
+Issue #109 is closed/completed. PR #111 squash-merged as exact verified main:
 
-Research PR #111 compares four source families and executes a 15-case Rust 1.98 `Rc<T>` semantic corpus.
+`42fc00323a1359824d0a0adf6df6c28410556b22`
 
-Accepted clean evidence head:
+Natural post-merge validation:
 
-`0ce2e006b16e5452f460f0c4fbab5c5cb057fc3b`
-
-Exact-head validation:
-
-- normal CI #471 / run `34618281936`: **SUCCESS** on Ubuntu, Windows and macOS;
-- dedicated Explicit shared handle surface research #4 / run `34618282024`: **SUCCESS**;
-- artifact `evo-explicit-shared-handle-surface-research-ubuntu-24.04`;
-- artifact id `10271057861`;
-- digest `sha256:39b110a20392910ac886e0f83e98d22c5c99daa685aa6dc303649d7be70e0fa8`;
-- report `git_sha` exactly matches the evidence head;
-- 4 surface candidates;
-- 15 semantic cases;
-- 0 compile-expectation mismatches;
-- 0 runtime-expectation mismatches.
-
-Final research verdict: **IMPLEMENT-CANDIDATE / CONTEXTUAL-WORDS**.
+- CI #475 / run `34816316570`: **SUCCESS** on Ubuntu, Windows and macOS;
+- Explicit shared handle surface research #8 / run `34816316546`: **SUCCESS**;
+- artifact id `10337270060`;
+- digest `sha256:2894d8b1c76a9ad064d18dd632d35e4e3b56a2bc159c14d2235767348c76e335`;
+- report git SHA matches exact main;
+- verdict remains **IMPLEMENT-CANDIDATE / CONTEXTUAL-WORDS** with 4 surfaces, 15 semantic cases and zero compile/runtime mismatches.
 
 Durable report: `docs/EXPLICIT_SHARED_HANDLE_SURFACE_RESEARCH.md`.
 
-Accepted source candidate:
+### #112 — explicit shared handle v0 production implementation
 
-```text
-shared Item
-share owner
-dup owner
-```
+The production branch was cut only after the #111 post-merge gate succeeded. The bounded implementation now exists on `feature/explicit-shared-handle-v0` and is under final integration validation.
 
-Direct intended Rust mapping:
+Implemented behavior includes:
 
-```text
-shared Item -> std::rc::Rc<Item>
-share expr  -> Rc::new(expr)
-dup expr    -> Rc::clone(&expr)
-```
+- contextual `shared Item` function parameter/return types without hard-keyword reservation or generic syntax;
+- contextual `share expr` explicit allocation and `dup expr` explicit owner-handle duplication;
+- distinct semantic/lowered `SharedOwner` value category, separate from `SharedRef` and inferred `SharedBorrow`;
+- ordinary assignment, by-value parameter passing and returns move shared handles;
+- `dup` inspects one available handle and emits the only explicit refcount increment operation in this slice;
+- same-type reinitialization under existing move rules;
+- scalar payload reads through shared owners, with move-only payload extraction rejected;
+- payload immutable-reference provenance tied to the specific source handle;
+- source-handle move/reinitialization rejected while a dependent reference may still be live;
+- independent duplicate-handle movement allowed;
+- bounded final-use release allows source-handle movement/reinitialization after the final proven reference use;
+- direct safe Rust lowering to `std::rc::Rc<T>`, `Rc::new`, `Rc::clone`, ordinary moves, borrows and drops;
+- no wrapper ownership object, ownership registry, implicit deep clone, `Arc`, `RefCell`, lock, GC, unsafe or invented lifetime widening.
 
-Surface comparison result:
+Permanent production coverage now includes contextual compatibility, scalar/nested/storage boundaries, branch/repeat ownership behavior, reference/source-handle interactions and generated-Rust operation-shape checks. The historical surface research workflow has been retired while its report/artifacts remain preserved.
 
-- `Shared<Item>`: **DEFER-GENERIC-INFRASTRUCTURE** because current parser has no general generic type AST and formatter renders `Shared < Item >` under comparison-token rules;
-- `Rc<Item>`: **DEFER-RUST-COUPLED-GENERIC** for the same generic/frontend cost plus backend-specific source coupling;
-- contextual words: **PREFERRED-CANDIDATE** because existing identifier tokens and spacing preserve `shared Item`, `share owner`, `dup owner` without new lexer punctuation or general generics;
-- `@Item` / `@owner` / `@@owner`: **DEFER-NEW-PUNCTUATION** because `@` currently fails lexing and needs new lexer/formatter rules.
-
-The contextual words are not accepted as hard keywords. Production parsing must preserve existing valid identifier/call uses such as `share(...)`, `dup(...)`, and bindings named `shared`, `share`, or `dup` outside the narrow new grammar contexts.
-
-An earlier evidence head `567278829bac974fa10306979d7d08653ef52123` passed the semantic research but failed normal CI at rustfmt. It remains historical evidence and was not rerun merely for color. A temporary one-shot rustfmt bootstrap formatted the research harness on Rust 1.98 and was removed before the accepted clean head.
-
-PR #111 remains open while durable docs are synchronized and a final exact-head CI/research gate is obtained.
-
-## Active production successor — #112
-
-Issue #112 is open:
-
-`P0 implement explicit shared handle v0: contextual shared/share/dup over Rc<T>`
-
-Its scope is already bounded, but the **production branch must not be cut until PR #111 merges and the resulting exact main SHA passes natural three-OS CI plus the dedicated surface research workflow**.
-
-The first implementation slice is one-thread immutable nominal shared ownership only.
-
-Required production contracts:
-
-- `shared Item` is a distinct shared-owner type category, not `SharedRef` or `SharedBorrow`;
-- `share expr` is explicit initial allocation;
-- `dup expr` is explicit owner-handle duplication;
-- assignment and by-value function parameter/return move the handle;
-- no hidden refcount increment occurs on ordinary use;
-- payload borrow remains ordinary non-owning reference provenance tied to the particular source handle;
-- source-handle move/reinitialization conflicts while that reference may be live;
-- another duplicated handle may move independently;
-- bounded final-use permits source-handle move after the final proven reference use;
-- mutation through immutable shared ownership remains unsupported;
-- cross-thread ownership remains unsupported;
-- codegen maps directly to safe Rust `Rc<T>`, `Rc::new`, `Rc::clone`, moves, borrows and drops;
-- no Evolution wrapper/runtime ownership table, hidden deep clone, `Arc`, interior mutability, locks or unsafe emulation.
-
-The accepted 15 research categories plus contextual-identifier compatibility must become permanent production tests. The historical surface-research workflow must be retired or converted before production syntax makes its pre-production assumptions false.
+Separate final validation lanes cover category-conversion rejection, source-native diagnostics and an equivalent-`Rc` differential performance gate. These must be integrated and validated on the final feature head before the main PR is considered complete.
 
 ## Current architecture facts relevant to #112
 
@@ -260,7 +217,7 @@ Not approved by #112:
 
 `docs/LANGUAGE_SPEC_V0.md` remains the implemented-language source of truth. The production core currently includes integer/bool/static strings, input/repeat/control flow, functions, lexical block locals, Records v0, Enums v0, by-value ownership/reinitialization, inferred call-duration shared-borrow parameters, first-class bounded immutable references, source-native move/reference diagnostics, source maps, formatter, native check/emit/build/run and verified run/build caches.
 
-Shared-owner syntax remains research-only until #112 production work lands.
+Explicit shared-owner syntax is implemented on the #112 production feature branch; it is not stable-main behavior until the final implementation PR merges and post-merge main validation succeeds.
 
 ## CI / handoff invariant
 

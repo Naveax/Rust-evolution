@@ -63,6 +63,7 @@ Accepted source lowers to ordinary static Rust constructs and native code.
 - `.` is postfix field access and the qualifier separator for enum variants.
 - `,` separates function parameters, call arguments, and named record-constructor fields.
 - Current keywords are `print`, `repeat`, `if`, `else`, `end`, `true`, `false`, `input_int`, `and`, `or`, `not`, `fn`, `return`, `record`, `enum`, `match`, `case`, `int`, `bool`, and `string`.
+- `shared`, `share`, and `dup` remain ordinary identifier tokens. The parser interprets them contextually only in the bounded shared-owner type/prefix positions; calls such as `share(...)` and ordinary bindings/names remain compatible.
 - Keyword matching respects identifier boundaries.
 - A lone `!` is not logical negation. `not` is the user-facing operator.
 
@@ -90,18 +91,19 @@ top_level_item      := record_definition
 record_definition   := "record" IDENTIFIER NEWLINE+
                        record_field_list "end"
 record_field_list   := (NEWLINE* record_field NEWLINE+)* NEWLINE*
-record_field        := IDENTIFIER type_name
+record_field        := IDENTIFIER storage_type_name
 
 enum_definition     := "enum" IDENTIFIER NEWLINE+
                        enum_variant_list "end"
 enum_variant_list   := (NEWLINE* enum_variant NEWLINE+)* NEWLINE*
-enum_variant        := IDENTIFIER type_name?
+enum_variant        := IDENTIFIER storage_type_name?
 
-function_definition := "fn" IDENTIFIER "(" parameters? ")" type_name NEWLINE+
+function_definition := "fn" IDENTIFIER "(" parameters? ")" function_type_name NEWLINE+
                        function_block "end"
 parameters          := parameter ("," parameter)*
-parameter           := IDENTIFIER type_name
-type_name           := "int" | "bool" | "string" | IDENTIFIER | "&" IDENTIFIER
+parameter           := IDENTIFIER function_type_name
+storage_type_name   := "int" | "bool" | "string" | IDENTIFIER
+function_type_name  := storage_type_name | "&" IDENTIFIER | "shared" IDENTIFIER
 
 function_block      := (NEWLINE* function_statement (NEWLINE+ | EOF))* NEWLINE*
 function_statement  := statement | return_statement
@@ -138,7 +140,9 @@ comparison          := additive (comparison_operator additive)?
 comparison_operator := "==" | "!=" | "<" | "<=" | ">" | ">="
 additive            := multiplicative (("+" | "-") multiplicative)*
 multiplicative      := unary (("*" | "/") unary)*
-unary               := "-" unary | "&" unary | postfix
+unary               := "-" unary | "&" unary | contextual_shared_prefix | postfix
+contextual_shared_prefix
+                    := "share" unary | "dup" unary
 postfix             := primary ("." IDENTIFIER)*
 primary             := INTEGER
                      | STRING
@@ -187,7 +191,7 @@ From lowest to highest:
 5. `+` / `-`
 6. `*` / `/`
 7. unary numeric `-`
-8. unary immutable borrow `&`
+8. unary immutable borrow `&` and contextual explicit shared-owner `share` / `dup` prefixes
 9. postfix qualification/field access
 10. primary/call/constructor/grouping
 
@@ -246,7 +250,8 @@ The semantic layer recognizes:
 - boolean;
 - nominal record types by declared name;
 - nominal enum types by declared name;
-- first-class immutable references to nominal record values (`&T`).
+- first-class immutable references to nominal record values (`&T`);
+- explicit one-thread immutable shared-owner handles to nominal record values (`shared T`).
 
 ### Immutable references v0
 
@@ -266,6 +271,54 @@ The production immutable-reference subset is deliberately bounded:
 - codegen uses ordinary safe Rust `&T` / `&expr` and relies on Rust lifetime elision only for the already-proven single-source contracts.
 
 Explicit v0 exclusions: mutable references, nested `&&T`/`&&expr`, primitive reference types such as `&int`, reference fields in records/enums, generalized or user-written lifetime parameters, multi-owner lifetime solving, hidden clone/copy, allocation, RC/GC, runtime borrow tables, unsafe lifetime widening, and invented `'static` lifetimes.
+
+### Explicit shared-owner handles v0
+
+Evolution also has a bounded one-thread immutable shared-owner value category for nominal records:
+
+```text
+record Item
+    value int
+end
+
+fn forward(item shared Item) shared Item
+    return item
+end
+
+owner = share Item(value = 7)
+alias = dup owner
+moved = forward(alias)
+print owner.value + moved.value
+```
+
+The three source words stay contextual rather than becoming lexer keywords:
+
+- `shared Item` is accepted only in function parameter/return type positions in this slice;
+- `share expr` explicitly creates the first shared owner and is accepted only when `expr` produces an owned nominal record;
+- `dup expr` explicitly duplicates one available shared-owner handle;
+- normal calls/names such as `share(...)`, `dup(...)`, or an identifier named `shared` retain ordinary identifier behavior outside those contextual positions.
+
+Shared-owner handles are move-only Evolution values. Ordinary assignment, a by-value function argument, and return move the handle. None of those operations inserts a reference-count increment. A caller that wants to retain another owner must write `dup` explicitly. Reinitialization is allowed only with the exact same `shared T` type under the existing move/reinitialization rules.
+
+`share` and `dup` are deliberately different operations. `share` maps to one allocation; `dup` maps to one owner-handle duplication. `dup` is not a payload deep clone and there is no generic implicit clone operation.
+
+Read-only payload access uses the underlying nominal record through ordinary `Rc` dereference behavior. Scalar payload fields are reusable. Moving a move-only nominal payload field out through shared ownership is rejected rather than cloned. Field assignment/mutation through an immutable shared owner is not part of v0.
+
+An explicit payload borrow such as `r = &owner` produces an ordinary non-owning `&T`, not another owner. Its provenance remains tied to that particular source handle. Moving or reinitializing that source handle while the reference may still be live is rejected even when another duplicate owner exists. Moving a different duplicate is allowed, and bounded final-use analysis permits moving/reinitializing the source handle after the final proven reference use.
+
+There is no implicit conversion among owned `T`, `shared T`, and `&T`; source code must use the operation that matches the intended ownership category.
+
+Rust codegen is direct and safe:
+
+```text
+shared Item -> std::rc::Rc<__EvoRecord_Item>
+share expr  -> std::rc::Rc::new(expr)
+dup expr    -> std::rc::Rc::clone(&expr)
+```
+
+Payload references through a shared owner lower to an ordinary reference to the payload, using stable safe `Rc` dereference/as-ref behavior. Evolution adds no wrapper object, runtime ownership table, hidden deep clone, `Arc`, `RefCell`, lock, GC, unsafe code, or invented `'static` lifetime.
+
+Shared-owner record fields and enum payloads, nested/general `shared` type algebra, `Weak`, cycle solving, cross-thread ownership, interior mutability, synchronization, mutable references, and generalized lifetime/generic machinery remain outside this slice.
 
 Scalar rules:
 
@@ -491,7 +544,7 @@ fn add(a int, b int) int
 end
 ```
 
-Supported signature types are `int`, `bool`, `string`, and declared nominal record/enum types.
+Supported signature types are `int`, `bool`, `string`, declared nominal record/enum types, bounded immutable record references `&T`, and bounded explicit shared-owner record handles `shared T`. Shared-owner storage in record fields/enum payloads remains excluded from v0.
 
 Calls are expressions with fixed arity. Lowering rejects unknown functions, wrong argument counts, and argument type mismatches.
 
@@ -511,7 +564,7 @@ Named functions lower to ordinary static Rust functions prefixed by `__evo_fn_`.
 
 ### Inferred shared-borrow nominal parameters v0
 
-Evolution source has no `&` parameter syntax. Lowering internally decides one of two passing modes for each function parameter:
+For an ordinary nominal source parameter declared as `T`, lowering may internally decide one of two passing modes. This inference is separate from explicit `&T` reference contracts and explicit `shared T` shared-owner contracts:
 
 - `Owned`: the existing by-value behavior;
 - `SharedBorrow`: an immutable call-duration borrow lowered directly to ordinary Rust `&T`.
@@ -628,6 +681,9 @@ Canonical formatting is idempotent and covers current scalar/function/control-fl
 - payload binding formatting;
 - field/variant qualification with no whitespace around `.`;
 - function signatures;
+- immutable-reference spelling such as `&Item` / `&item`;
+- contextual explicit shared-owner spelling `shared Item`, `share owner`, and `dup owner`;
+- ordinary call/name compatibility for contextual words;
 - comments and final newline behavior.
 
 `--check` never rewrites and fails when source is not canonical.
@@ -638,7 +694,7 @@ Lexer, parser, and semantic diagnostics render against the original `.evo` sourc
 
 Recovered lexer/parser errors are displayed in source order. Parser errors prevent lowering/rustc.
 
-Known record/enum errors are rejected before Rust codegen, including declaration/type errors, constructor errors, invalid match semantics, ownership reuse-after-move, invalid payload-binding scope, and unsupported partial-move cases.
+Known record/enum/reference/shared-owner errors are rejected before Rust codegen, including declaration/type errors, constructor errors, invalid match semantics, ownership reuse-after-move, invalid `share`/`dup` operands, shared-owner/reference category mismatches, live payload-reference conflicts with source-handle move/reinitialization, invalid payload-binding scope, and unsupported partial-move cases.
 
 For move-only record/enum reuse diagnostics:
 
@@ -702,7 +758,8 @@ Runtime-dependent Ubuntu CI gates include:
 - `block-locals-v0`;
 - `records-v0`;
 - `inferred-shared-borrow-v0`;
-- `enums-v0`.
+- `enums-v0`;
+- `explicit-shared-owner-v0` (matching idiomatic Rust `Rc<T>` ownership work).
 
 The harness compares correctness, raw timing, normalized LLVM IR, binary size, and exact executable bytes.
 
@@ -789,7 +846,7 @@ Not implemented in v0:
 - runtime-produced/owned string semantics beyond the current literal/static string model;
 - whole-record or whole-enum display/equality semantics;
 - partial move of move-only nominal fields;
-- implicit clone/copy insertion or general reference inference beyond the bounded shared-borrow parameter rule;
+- implicit clone/copy insertion or generalized ownership/reference inference beyond the implemented bounded rules;
 - methods / impl blocks;
 - recursive heap/self-referential nominal layouts requiring indirection;
 - generic enums or generic records;
@@ -804,10 +861,10 @@ Not implemented in v0:
 - open/extensible variants;
 - runtime reflection;
 - traits/generics generally;
-- user-facing ownership/borrow syntax;
-- returned/escaping references and generalized lifetime syntax/inference;
-- mutable borrow inference;
-- stored first-class borrow/reference values;
+- mutable references or mutable borrow inference;
+- `Arc`/cross-thread shared ownership, `Weak`, interior mutability, locks, or synchronization;
+- generalized shared-owner type algebra or implicit owner duplication;
+- generalized/user-written lifetime syntax or multi-owner lifetime solving;
 - collections and collection literals;
 - general ranges/iteration syntax outside `repeat`;
 - `Result` / `Option` sugar;
