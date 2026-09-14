@@ -8,18 +8,19 @@ This research separates cyclic/graph ownership models instead of treating refere
 
 ## Accepted executable evidence
 
-Historical exact research head:
+Clean integration research head before this evidence-only documentation commit:
 
-`4c6a7e4f1d24388d3081e28ca88c73f142f88a68`
+`4005bc6da22a974af25a7351b54f810794522481`
 
-Dedicated pinned-Rust evidence:
+Exact-head validation:
 
-- Cyclic graph ownership research #12 / run `34832221728`: **SUCCESS**;
-- Rust: **1.98.0**;
+- normal CI #517 / run `34836819864`: **SUCCESS** on Ubuntu 24.04, Windows and macOS;
+- Cyclic graph ownership research #15 / run `34836819680`: **SUCCESS**;
+- Rust: **1.98.0** / LLVM **22.1.8**;
 - artifact `evo-cyclic-graph-ownership-research-ubuntu-24.04`;
-- artifact id `10342831245`;
-- digest `sha256:5ebf114519378c431f6cee33181de569ef5d4cd6e54e58f09cf3e502b43612ba`;
-- artifact/report git SHA exactly matches the research head;
+- artifact id `10344223126`;
+- digest `sha256:84d1566cf5f357970432b724014fd011fb796a37406b7f908de234df657cf69c`;
+- artifact/report git SHA exactly matches `4005bc6da22a974af25a7351b54f810794522481`;
 - cases: **15**;
 - compile expectation mismatches: **0**;
 - runtime expectation mismatches: **0**.
@@ -36,7 +37,22 @@ Observed classification counts:
 - hidden-cost rejection: **1**;
 - plus the owned acyclic control.
 
-The final PR head after rebasing onto the latest verified `main` must still pass normal three-OS CI and the dedicated workflow before #118 can merge. The historical artifact is decision evidence, not a substitute for that integration gate.
+This documentation commit does not change the research harness or verdict. Its own final exact head must again pass normal three-OS CI and the dedicated workflow before merge, so the durable report and merged tree are validated together rather than relying on an earlier commit.
+
+## Historical decision evidence
+
+Earlier exact research head:
+
+`4c6a7e4f1d24388d3081e28ca88c73f142f88a68`
+
+- Cyclic graph ownership research #12 / run `34832221728`: **SUCCESS**;
+- artifact id `10342831245`;
+- digest `sha256:5ebf114519378c431f6cee33181de569ef5d4cd6e54e58f09cf3e502b43612ba`;
+- verdict **SPLIT-RESEARCH**;
+- 15 cases;
+- compile/runtime expectation mismatches: **0 / 0**.
+
+The historical artifact is retained as decision evidence; final merge eligibility is based on the current branch head.
 
 ## Models classified
 
@@ -68,7 +84,7 @@ Aggregate verdict: **SPLIT-RESEARCH**.
 
 `Weak` edges and arena/generational handles are not two spellings for one feature. They differ in storage ownership, identity, dead-target behavior, removal semantics, per-edge cost, and API shape.
 
-The evidence also rejects treating any of these as implicit upgrades of the production `shared T` / `Rc<T>` owner model.
+The evidence also rejects treating either candidate as an implicit upgrade of production `shared T` / `Rc<T>` ownership.
 
 ## Successors
 
