@@ -1,0 +1,19 @@
+record Item
+value int
+end
+
+fn forward(item shared Item) shared Item
+return item
+end
+
+n = input_int
+seed = input_int
+owner = share Item(value = seed)
+sum = 0
+repeat n
+alias = dup owner
+sum = sum + alias.value
+moved = forward(alias)
+sum = sum + moved.value
+end
+print sum
