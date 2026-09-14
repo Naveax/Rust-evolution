@@ -6,60 +6,85 @@ Last verified update: **2026-09-14**
 
 Current exact verified `main`:
 
-`42fc00323a1359824d0a0adf6df6c28410556b22`
+`c5ccc21d7bf23d8daec2de36dc635c0f85313605`
 
 Natural validation on that exact SHA:
 
-- CI #475 / run `34816316570`: **SUCCESS** on Ubuntu, Windows and macOS;
-- Explicit shared handle surface research #8 / run `34816316546`: **SUCCESS**;
-- artifact id `10337270060`;
-- digest `sha256:2894d8b1c76a9ad064d18dd632d35e4e3b56a2bc159c14d2235767348c76e335`;
-- accepted research verdict: **IMPLEMENT-CANDIDATE / CONTEXTUAL-WORDS**.
+- CI #512 / run `34834431873`: **SUCCESS** on Ubuntu 24.04, Windows and macOS;
+- Explicit shared owner performance #12 / run `34834431791`: **SUCCESS**;
+- performance artifact id `10343513286`;
+- digest `sha256:fb6714e7f09ca0047c70435b21129128033d8235732ca1d9f82b6fdeab9716bf`;
+- artifact head SHA exactly matches verified main.
 
-## Active final implementation — #112 / PR #117
+## Completed production milestone — #112 / PR #117
 
-Final integration branch: `integration/explicit-shared-handle-v0-final`.
+The bounded one-thread explicit shared-owner slice is production behavior:
 
-PR #117 consolidates the complete bounded one-thread immutable shared-owner slice. The previously separate conversion-boundary, diagnostics, move/reinitialization, enum-boundary, performance and documentation lanes are included in this single final candidate.
+```text
+shared Item
+share expr
+dup owner
+```
 
-Implemented surface and contracts:
+Direct safe Rust mapping:
 
-- contextual `shared Item`, `share expr`, and `dup expr`;
-- explicit safe `std::rc::Rc<T>` lowering with `Rc::new` and `Rc::clone` only where source requests allocation/duplication;
-- move-only shared-owner handles with same-type explicit reinitialization;
-- no implicit conversion among owned `T`, `shared T`, and `&T`;
-- payload references remain ordinary non-owning references tied to the specific source handle;
-- source-handle move/reinitialization conflicts while a dependent reference may still be live;
-- bounded final-use release, branch/repeat ownership checks and moved-handle diagnostics;
-- record-only first slice with enum-bearing shared-owner/reference use failing closed before executable enum IR/codegen;
-- no `Arc`, `RefCell`, synchronization, `Weak`, GC, wrapper ownership runtime, hidden deep clone, unsafe emulation or generalized lifetime machinery.
+```text
+shared Item -> std::rc::Rc<Item>
+share expr  -> Rc::new(expr)
+dup expr    -> Rc::clone(&expr)
+```
 
-## Accepted component performance evidence
+Key contracts remain locked:
 
-Equivalent-`Rc` component head `c83d42dbe0e346021f1f524cf9d65f67fdbc66d3` passed Explicit shared owner performance #7 / run `34824865453`:
+- shared owners are a distinct move-only value category;
+- ordinary assignment, by-value calls and returns move handles without hidden count increments;
+- allocation and owner duplication are explicit only;
+- payload immutable references remain ordinary non-owning references tied to the specific source handle;
+- no implicit owned/reference/shared-owner conversions;
+- no `Arc`, `RefCell`, synchronization, `Weak`, GC, global ownership runtime or unsafe emulation;
+- record/enum storage of shared owners remains outside v0;
+- enum-bearing unsupported combinations fail closed before executable codegen.
 
-- correctness: PASS;
-- normalized LLVM IR equal: true;
-- exact executable bytes equal: true;
-- binary size: 2,267,304 bytes on both sides;
-- stable observed median ratio: `0.992969173`;
-- final verdict: PASS;
-- verdict basis: `byte-identical-binary-parity`;
-- artifact id `10339932088`;
-- digest `sha256:a490d5a0bc5d2cfe15c4da01b89cb45eb9e4d8aa51d8309d865a926dc60d6721`.
+## Active research queue
 
-This component evidence does **not** replace final combined-head validation.
+### #118 — cyclic / graph ownership boundaries
 
-## Remaining completion sequence
+PR #120 is parked closed only while its research branch is reconstructed cleanly on verified main.
 
-1. Require normal CI on the final exact PR #117 head across Ubuntu, Windows and macOS.
-2. Require the permanent Explicit shared owner performance workflow on that same exact head.
-3. Inspect the complete final diff against verified main and resolve any review threads.
-4. Squash-merge PR #117 only with expected-head protection.
-5. Track the natural post-merge exact-main normal CI and Explicit shared owner performance runs without starting duplicates.
-6. Close #112 only after both natural exact-main gates succeed.
-7. Synchronize the living meta/handoff to the new exact verified main and then advance the next queued P0 item.
+Accepted dedicated evidence already exists on historical exact research head `4c6a7e4f1d24388d3081e28ca88c73f142f88a68`:
+
+- Cyclic graph ownership research #12 / run `34832221728`: **SUCCESS**;
+- artifact id `10342831245`;
+- digest `sha256:5ebf114519378c431f6cee33181de569ef5d4cd6e54e58f09cf3e502b43612ba`;
+- verdict: **SPLIT-RESEARCH**;
+- 15 cases;
+- compile/runtime expectation mismatches: 0 / 0.
+
+The clean persistent research diff is five files only: dedicated workflow, main matrix, retention controls, arena/generation controls and durable report.
+
+Gated successors exist but must not start before #118 merges and its natural exact-main normal CI plus dedicated research workflow succeed:
+
+- #125 — explicit `Weak` edge surface research;
+- #126 — arena/generational graph-handle research.
+
+### #121 — interior mutability ergonomics
+
+PR #122 is parked closed with its branch preserved. The clean research diff contains only the dedicated workflow, Rust 1.98 matrix, direct guard-state controls and durable report. Shared ownership and dynamic borrow state remain separate models.
+
+### #123 — cross-thread shared ownership
+
+PR #124 is parked closed with its branch preserved. The clean research diff contains only the dedicated workflow, Arc/thread-capability matrix and durable report. `Arc`, Send/Sync-like capability, locks/atomics and Weak remain separate concerns; no automatic `Rc -> Arc` upgrade is permitted.
+
+## Execution order
+
+1. Merge this docs-only handoff after exact-head normal CI.
+2. Require the resulting docs-only `main` SHA to pass natural normal CI.
+3. Reconstruct PR #120's five research-only files onto that exact verified main, reopen #120, and require exact-head normal CI plus dedicated cyclic-graph research evidence.
+4. While #120 Actions run, reconstruct #122 and #124 onto the same verified main while keeping them closed so they do not flood the runner queue.
+5. Merge/validate #118 only after its exact-head gates pass; close #118 only after natural postmerge exact-main normal CI and dedicated cyclic research both pass.
+6. Only then unlock #125 and #126.
+7. Validate #121 and #123 independently and create production successors only for bounded accepted candidates.
 
 ## CI rule
 
-Never create duplicate active Actions for the same SHA/workflow/input. If one gate is queued/running, advance independent work and return to that gate later. Failed SHAs remain evidence and are not rerun merely for a better color.
+Never create duplicate active Actions for the same SHA/workflow/input. If one gate is queued or running, advance independent work and return later. Historical failed/cancelled SHAs remain evidence rather than targets for cosmetic reruns.
