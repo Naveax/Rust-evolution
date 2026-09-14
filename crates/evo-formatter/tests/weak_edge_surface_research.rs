@@ -16,18 +16,6 @@ enum Class {
     RejectHiddenCost,
 }
 
-impl Class {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::WeakSurfaceCandidate => "WEAK-SURFACE-CANDIDATE",
-            Self::BorrowInstead => "BORROW-INSTEAD",
-            Self::InteriorMutabilityComposition => "REQUIRES-INTERIOR-MUTABILITY-COMPOSITION",
-            Self::ConcurrencyBoundary => "REQUIRES-CONCURRENCY-DESIGN",
-            Self::RejectHiddenCost => "REJECT-HIDDEN-COST",
-        }
-    }
-}
-
 struct Case {
     name: &'static str,
     class: Class,
