@@ -33,6 +33,7 @@ jobs:
         run: |
           cargo fmt --all
           cargo check -p evo-lowering --all-targets
+          cargo clippy -p evo-lowering --all-targets -- -D warnings
           cargo test -p evo-lowering --test shared_owner_v0
 
       - name: Commit semantic slice and remove bootstrap
