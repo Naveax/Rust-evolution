@@ -137,6 +137,7 @@ pub enum ExprKind {
     LogicalNot(Box<Expr>),
     UnaryMinus(Box<Expr>),
     SharedBorrow(Box<Expr>),
+    SharedOwnerBorrow(Box<Expr>),
     SharedAlloc(Box<Expr>),
     SharedDuplicate(Box<Expr>),
     Binary {
@@ -904,12 +905,24 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                 (ExprKind::UnaryMinus(Box::new(inner)), ValueType::Integer)
             }
             SyntaxExprKind::SharedBorrow(inner) => {
+                let shared_owner_payload = if let SyntaxExprKind::Identifier(name) = &inner.kind {
+                    self.visible_binding(name).is_some_and(|binding| {
+                        matches!(binding.value_type, ValueType::SharedOwner(_))
+                    })
+                } else {
+                    false
+                };
                 let (inner, inner_type) = self.lower_reference_target(inner, expr.span)?;
                 let ValueType::Record(name) = inner_type else {
                     unreachable!("reference target validation returns a nominal record type")
                 };
+                let kind = if shared_owner_payload {
+                    ExprKind::SharedOwnerBorrow(Box::new(inner))
+                } else {
+                    ExprKind::SharedBorrow(Box::new(inner))
+                };
                 (
-                    ExprKind::SharedBorrow(Box::new(inner)),
+                    kind,
                     ValueType::SharedRef(Box::new(ValueType::Record(name))),
                 )
             }

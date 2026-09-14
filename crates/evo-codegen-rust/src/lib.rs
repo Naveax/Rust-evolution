@@ -237,6 +237,9 @@ fn rust_type(value_type: &ValueType) -> String {
         ValueType::Bool => "bool".to_owned(),
         ValueType::String => "&'static str".to_owned(),
         ValueType::Record(name) => generated_record_name(name),
+        ValueType::SharedOwner(name) => {
+            format!("std::rc::Rc<{}>", generated_record_name(name))
+        }
         ValueType::SharedRef(inner) => format!("&{}", rust_type(inner)),
     }
 }
@@ -301,9 +304,16 @@ fn render_expr(expr: &Expr) -> String {
         ),
         ExprKind::InputInt => "__evo_input_int()".to_owned(),
         ExprKind::LogicalNot(inner) => format!("(!{})", render_expr(inner)),
-    ExprKind::UnaryMinus(inner) => format!("(-{})", render_expr(inner)),
-    ExprKind::SharedBorrow(inner) => format!("&({})", render_expr(inner)),
-    ExprKind::Binary { left, op, right } => format!(
+        ExprKind::UnaryMinus(inner) => format!("(-{})", render_expr(inner)),
+        ExprKind::SharedBorrow(inner) => format!("&({})", render_expr(inner)),
+        ExprKind::SharedOwnerBorrow(inner) => {
+            format!("std::rc::Rc::as_ref(&{})", render_expr(inner))
+        }
+        ExprKind::SharedAlloc(inner) => format!("std::rc::Rc::new({})", render_expr(inner)),
+        ExprKind::SharedDuplicate(inner) => {
+            format!("std::rc::Rc::clone(&({}))", render_expr(inner))
+        }
+        ExprKind::Binary { left, op, right } => format!(
             "({} {} {})",
             render_expr(left),
             render_binary_op(*op),
@@ -384,8 +394,11 @@ fn expr_uses_input_int(expr: &Expr) -> bool {
         }
         ExprKind::FieldAccess { base, .. } => expr_uses_input_int(base),
         ExprKind::LogicalNot(inner)
-    | ExprKind::UnaryMinus(inner)
-    | ExprKind::SharedBorrow(inner) => expr_uses_input_int(inner),
+        | ExprKind::UnaryMinus(inner)
+        | ExprKind::SharedBorrow(inner)
+        | ExprKind::SharedOwnerBorrow(inner)
+        | ExprKind::SharedAlloc(inner)
+        | ExprKind::SharedDuplicate(inner) => expr_uses_input_int(inner),
         ExprKind::Binary { left, right, .. } => {
             expr_uses_input_int(left) || expr_uses_input_int(right)
         }
