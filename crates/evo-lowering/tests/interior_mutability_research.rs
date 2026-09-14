@@ -417,13 +417,14 @@ fn run_case(spec: &'static CaseSpec, root: &Path) -> Finding {
         .unwrap_or_else(|error| panic!("failed to execute {}: {error}", spec.name));
     let stdout = String::from_utf8_lossy(&run.stdout).trim().to_owned();
     let stderr = String::from_utf8_lossy(&run.stderr);
-    let stdout_matches = spec.expected_stdout.is_none_or(|expected| stdout == expected);
+    let stdout_matches = spec
+        .expected_stdout
+        .is_none_or(|expected| stdout == expected);
     let stderr_matches = spec
         .expected_stderr_contains
         .is_none_or(|expected| stderr.contains(expected));
-    let expectation_matched = run.status.success() == spec.expected_run_success
-        && stdout_matches
-        && stderr_matches;
+    let expectation_matched =
+        run.status.success() == spec.expected_run_success && stdout_matches && stderr_matches;
 
     Finding {
         spec,
@@ -442,7 +443,10 @@ fn json_string(value: &str) -> String {
 fn write_reports(findings: &[Finding], out: &Path, git_sha: &str, rustc: &str) {
     fs::create_dir_all(out)
         .unwrap_or_else(|error| panic!("failed to create {}: {error}", out.display()));
-    let mismatches = findings.iter().filter(|finding| !finding.expectation_matched).count();
+    let mismatches = findings
+        .iter()
+        .filter(|finding| !finding.expectation_matched)
+        .count();
     let count = |classification| {
         findings
             .iter()
@@ -456,12 +460,38 @@ fn write_reports(findings: &[Finding], out: &Path, git_sha: &str, rustc: &str) {
     writeln!(json, "  \"rustc_vv\": {},", json_string(rustc)).expect("writing JSON cannot fail");
     writeln!(json, "  \"verdict\": \"SPLIT-RESEARCH\",").expect("writing JSON cannot fail");
     writeln!(json, "  \"case_count\": {},", findings.len()).expect("writing JSON cannot fail");
-    writeln!(json, "  \"expectation_mismatches\": {mismatches},").expect("writing JSON cannot fail");
-    writeln!(json, "  \"owned_mut_instead_count\": {},", count(Classification::OwnedMutInstead)).expect("writing JSON cannot fail");
-    writeln!(json, "  \"refcell_candidate_count\": {},", count(Classification::RefCellCandidate)).expect("writing JSON cannot fail");
-    writeln!(json, "  \"rc_refcell_composition_count\": {},", count(Classification::ExplicitRcRefCellComposition)).expect("writing JSON cannot fail");
-    writeln!(json, "  \"concurrency_boundary_count\": {},", count(Classification::RequiresConcurrencyDesign)).expect("writing JSON cannot fail");
-    writeln!(json, "  \"hidden_cost_rejection_count\": {},", count(Classification::RejectHiddenCost)).expect("writing JSON cannot fail");
+    writeln!(json, "  \"expectation_mismatches\": {mismatches},")
+        .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"owned_mut_instead_count\": {},",
+        count(Classification::OwnedMutInstead)
+    )
+    .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"refcell_candidate_count\": {},",
+        count(Classification::RefCellCandidate)
+    )
+    .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"rc_refcell_composition_count\": {},",
+        count(Classification::ExplicitRcRefCellComposition)
+    )
+    .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"concurrency_boundary_count\": {},",
+        count(Classification::RequiresConcurrencyDesign)
+    )
+    .expect("writing JSON cannot fail");
+    writeln!(
+        json,
+        "  \"hidden_cost_rejection_count\": {},",
+        count(Classification::RejectHiddenCost)
+    )
+    .expect("writing JSON cannot fail");
     writeln!(json, "  \"cases\": [").expect("writing JSON cannot fail");
     for (index, finding) in findings.iter().enumerate() {
         let comma = if index + 1 == findings.len() { "" } else { "," };
@@ -487,16 +517,23 @@ fn write_reports(findings: &[Finding], out: &Path, git_sha: &str, rustc: &str) {
     fs::write(out.join("report.json"), json).expect("report JSON should be writable");
 
     let mut markdown = String::new();
-    writeln!(markdown, "# Interior mutability ergonomics v0 research").expect("writing Markdown cannot fail");
+    writeln!(markdown, "# Interior mutability ergonomics v0 research")
+        .expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(markdown, "- git_sha: `{git_sha}`").expect("writing Markdown cannot fail");
-    writeln!(markdown, "- aggregate verdict: **SPLIT-RESEARCH**").expect("writing Markdown cannot fail");
+    writeln!(markdown, "- aggregate verdict: **SPLIT-RESEARCH**")
+        .expect("writing Markdown cannot fail");
     writeln!(markdown, "- cases: **{}**", findings.len()).expect("writing Markdown cannot fail");
-    writeln!(markdown, "- expectation mismatches: **{mismatches}**").expect("writing Markdown cannot fail");
+    writeln!(markdown, "- expectation mismatches: **{mismatches}**")
+        .expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
     writeln!(markdown, "```text\n{rustc}\n```").expect("writing Markdown cannot fail");
     writeln!(markdown).expect("writing Markdown cannot fail");
-    writeln!(markdown, "| Case | Classification | Dynamic operations | Run success | Match |").expect("writing Markdown cannot fail");
+    writeln!(
+        markdown,
+        "| Case | Classification | Dynamic operations | Run success | Match |"
+    )
+    .expect("writing Markdown cannot fail");
     writeln!(markdown, "| --- | --- | --- | --- | --- |").expect("writing Markdown cannot fail");
     for finding in findings {
         writeln!(
@@ -522,7 +559,10 @@ fn interior_mutability_research_classifies_dynamic_borrow_boundaries() {
     let rustc = rustc_version();
     if env::var_os("EVO_REQUIRE_PINNED_RUSTC").is_some() {
         assert!(
-            rustc.lines().next().is_some_and(|line| line.contains("rustc 1.98.0")),
+            rustc
+                .lines()
+                .next()
+                .is_some_and(|line| line.contains("rustc 1.98.0")),
             "research workflow must use pinned Rust 1.98.0, got: {rustc}"
         );
     }
