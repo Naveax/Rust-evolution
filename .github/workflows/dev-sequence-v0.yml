@@ -44,6 +44,9 @@ jobs:
       - name: Keep downstream matches fail-closed and exhaustive
         run: python .github/dev/sequence_syntax_compat.py
 
+      - name: Keep research helper exhaustive
+        run: python .github/dev/sequence_syntax_test_compat.py
+
       - name: Format
         run: |
           cargo fmt --all
@@ -61,7 +64,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Remove one-shot mutation files
-        run: rm .github/workflows/dev-sequence-v0.yml .github/dev/sequence_syntax_v0_patch.py .github/dev/sequence_syntax_compat.py
+        run: rm .github/workflows/dev-sequence-v0.yml .github/dev/sequence_syntax_v0_patch.py .github/dev/sequence_syntax_compat.py .github/dev/sequence_syntax_test_compat.py
 
       - name: Commit validated syntax slice
         run: |
