@@ -1,0 +1,44 @@
+name: Dev format generational arena research
+
+on:
+  push:
+    branches:
+      - research/generational-arena-surface-v0
+    paths:
+      - 'crates/evo-lowering/tests/generational_arena_surface_research.rs'
+      - '.github/workflows/dev-format-generational-arena.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dev-format-generational-arena-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format-and-commit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: research/generational-arena-surface-v0
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt
+
+      - name: Format research source
+        run: cargo fmt --all
+
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/dev-format-generational-arena.yml
+
+      - name: Commit formatted source
+        run: |
+          git config user.name "Naveax"
+          git config user.email "Omersevik095@gmail.com"
+          git add crates/evo-lowering/tests/generational_arena_surface_research.rs .github/workflows/dev-format-generational-arena.yml
+          git diff --cached --check
+          git commit -m "style: format generational arena research"
+          git push origin HEAD:research/generational-arena-surface-v0
