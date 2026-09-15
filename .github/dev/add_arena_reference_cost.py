@@ -132,6 +132,34 @@ fn reference_cost_snapshot() -> CostSnapshot {
 }
 '''
 
+REINIT_COMPILE_CASE = r'''    CompileCase {
+        name: "arena-reinitialization-blocked-while-element-reference-live",
+        expected_compile: false,
+        source: r#"
+struct Arena<T> { slots: Vec<T> }
+impl<T> Arena<T> {
+    fn get(&self, index: usize) -> Option<&T> { self.slots.get(index) }
+}
+fn main() {
+    let mut arena = Arena { slots: vec![String::from("a")] };
+    let item = arena.get(0).unwrap();
+    arena = Arena { slots: vec![String::from("b")] };
+    println!("{}", item);
+    drop(arena);
+}
+"#,
+        reason: "reinitializing the arena while an element reference remains live must be rejected",
+    },
+'''
+
+REINIT_FINDING = r'''        finding(
+            "arena-reinitialization-conflict-is-native-rust",
+            Class::BorrowBoundary,
+            !compile_findings[4].compiled,
+            "ordinary Rust borrowing rejects reinitializing the arena while a borrowed element remains live",
+        ),
+'''
+
 COST_FINDINGS = r'''    let candidate_cost = candidate_cost_snapshot();
     let reference_cost = reference_cost_snapshot();
     findings.push(finding(
@@ -182,18 +210,30 @@ def insert_after_line_with_key(text: str, key: str, insertion: str) -> str:
 text = TEST.read_text()
 marker = "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\nstruct LocalHandle {\n"
 text = insert_before_unique(text, marker, REFERENCE_BLOCK + "\n", "LocalHandle marker")
+compile_tail = "];\n\nconst SURFACE_CANDIDATES"
+text = insert_before_unique(text, compile_tail, REINIT_COMPILE_CASE, "compile case tail")
 text = insert_after_line_with_key(text, "handle_copy_word_count", REPORT_LINES)
 findings_anchor = '    findings.push(finding(\n        "free-list-reuse-is-constant-time-class",\n'
 text = insert_before_unique(text, findings_anchor, COST_FINDINGS, "cost findings anchor")
+findings_tail = "    ]);\n\n    let unmatched_findings"
+text = insert_before_unique(text, findings_tail, REINIT_FINDING, "borrow findings tail")
+borrow_assert_old = "            .filter(|finding| finding.class == Class::BorrowBoundary)\n            .count()\n            >= 4\n"
+borrow_assert_new = "            .filter(|finding| finding.class == Class::BorrowBoundary)\n            .count()\n            >= 5\n"
+if text.count(borrow_assert_old) != 1:
+    raise SystemExit(f"expected one borrow assertion, found {text.count(borrow_assert_old)}")
+text = text.replace(borrow_assert_old, borrow_assert_new)
 TEST.write_text(text)
 
 workflow = WORKFLOW.read_text()
-workflow = workflow.replace(
-    "          assert report['cost_evidence_count'] >= 2, report\n",
-    "          assert report['cost_evidence_count'] >= 4, report\n",
-)
-if "assert report['cost_evidence_count'] >= 4" not in workflow:
-    raise SystemExit("failed to strengthen cost evidence count")
+replacements = {
+    "          assert report['compile_boundary_case_count'] >= 4, report\n": "          assert report['compile_boundary_case_count'] >= 5, report\n",
+    "          assert report['borrow_boundary_count'] >= 4, report\n": "          assert report['borrow_boundary_count'] >= 5, report\n",
+    "          assert report['cost_evidence_count'] >= 2, report\n": "          assert report['cost_evidence_count'] >= 4, report\n",
+}
+for old, new in replacements.items():
+    if workflow.count(old) != 1:
+        raise SystemExit(f"expected one workflow assertion {old.strip()!r}, found {workflow.count(old)}")
+    workflow = workflow.replace(old, new)
 workflow = insert_after_line_with_key(
     workflow,
     "assert report['handle_copy_word_count'] == 3",
@@ -213,4 +253,9 @@ doc_insert = (
 )
 if docs.count(doc_anchor) != 1:
     raise SystemExit(f"expected one docs cost anchor, found {docs.count(doc_anchor)}")
-DOC.write_text(docs.replace(doc_anchor, doc_anchor + doc_insert))
+docs = docs.replace(doc_anchor, doc_anchor + doc_insert)
+reinit_doc_anchor = "- a live element reference blocks moving the arena while the reference may still be used;\n"
+reinit_doc_insert = "- a live element reference blocks reinitializing the arena while that reference may still be used;\n"
+if docs.count(reinit_doc_anchor) != 1:
+    raise SystemExit(f"expected one docs reinitialization anchor, found {docs.count(reinit_doc_anchor)}")
+DOC.write_text(docs.replace(reinit_doc_anchor, reinit_doc_anchor + reinit_doc_insert))
