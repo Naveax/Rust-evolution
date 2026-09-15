@@ -30,6 +30,25 @@ jobs:
       - name: Add sequence tests benchmark and permanent gate
         run: python .github/dev/sequence_semantics_v0_tests.py
 
+      - name: Align benchmark reference with generated Rust
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("benchmarks/cases/append-only-sequence-v0/reference.rs")
+          text = path.read_text()
+          old = '''        if let Some(&__evo_value) = usize::try_from(__evo_i)
+              .ok()
+              .and_then(|__evo_lookup_index| __evo_items.get(__evo_lookup_index))
+          {
+          '''
+          new = '''        if let Some(&__evo_value) = usize::try_from(__evo_i).ok().and_then(|__evo_lookup_index| __evo_items.get(__evo_lookup_index)) {
+          '''
+          if text.count(old) != 1:
+              raise SystemExit("sequence reference formatting anchor changed")
+          path.write_text(text.replace(old, new, 1))
+          PY
+
       - name: Format
         run: |
           cargo fmt --all
