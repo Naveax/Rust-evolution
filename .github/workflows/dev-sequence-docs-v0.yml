@@ -1,0 +1,45 @@
+name: Dev sequence docs v0
+
+on:
+  push:
+    branches:
+      - feature/append-only-sequence-v0
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/append-only-sequence-v0
+
+      - name: Synchronize append-only sequence docs
+        run: python .github/dev/sequence_docs_v0_patch.py
+
+      - name: Validate docs diff
+        shell: bash
+        run: |
+          git diff --check
+          grep -Fq '### Append-only sequences v0' docs/LANGUAGE_SPEC_V0.md
+          grep -Fq '## D-022 — Append-only sequence v0 is contextual, checked, and direct-Vec' docs/DECISIONS.md
+          grep -Fq '95d847cfe0b6d6d052b096748360915fe1bbcdc6' docs/PROJECT_STATE.md
+          grep -Fq '34982930824' docs/NEXT_ACTION.md
+
+      - name: Remove one-shot mutation files
+        run: rm .github/workflows/dev-sequence-docs-v0.yml .github/dev/sequence_docs_v0_patch.py
+
+      - name: Commit synchronized docs
+        run: |
+          git config user.name "Rust Evolution Dev Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "docs: synchronize append-only sequence v0"
+          git push origin HEAD:feature/append-only-sequence-v0
