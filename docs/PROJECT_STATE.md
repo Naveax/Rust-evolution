@@ -8,14 +8,14 @@ This is the durable project handoff. Always re-read live GitHub issue/PR/Actions
 
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
-- Exact verified stable main before active #132 / PR #139: `f4af6aa89d83dcdee79cabcb4ed166aaf4db6612`
+- Exact verified stable main before active production #140: `532e88586a252e72d7eb9923148b07e2ab94883e`
 - Rust toolchain: **1.98.0**
 - Production flags: edition 2024, opt-level 3, codegen-units 1
-- Natural exact-main CI #547 / run `34857717355`: **SUCCESS** on Ubuntu 24.04, Windows and macOS
-- Natural exact-main Arena generational handles research / run `34857717387`: **SUCCESS**
-- Natural exact-main Explicit shared owner performance / run `34857717373`: **SUCCESS**
+- Natural exact-main CI #555 / run `34957074327`: **SUCCESS** on Ubuntu 24.04, Windows and macOS
+- Natural exact-main Collection surface research #6 / run `34957074432`: **SUCCESS**
+- Natural exact-main Explicit shared owner performance #43 / run `34957074499`: **SUCCESS**
 
-`f4af6aa...` is PR #131 squash merge and completes #126 arena/generational graph-handle research. #126 is closed/completed.
+`532e885...` is PR #139 squash merge. Issue #132 collection-surface research is closed/completed with the accepted **APPEND-ONLY-FIRST** result.
 
 ## Build / compile sequence
 
@@ -73,10 +73,6 @@ The permanent Explicit shared owner performance workflow remains a regression ga
 
 ## Cyclic / graph ownership research sequence
 
-### Split boundary
-
-Cyclic/graph research established that one ownership mechanism should not pretend to solve every graph problem. Explicit weak edges and container-owned arena identity remain separate cost/safety models.
-
 ### Arena/generational handles — #126 / PR #131 completed
 
 Durable report: `docs/ARENA_GENERATIONAL_HANDLES_RESEARCH.md`.
@@ -89,82 +85,73 @@ Accepted result:
 - reusable/removable slots require generation checking;
 - independent node lifetime remains a shared-owner problem rather than an arena problem.
 
-The hard successor is #132, because Evolution must expose bounded explicit indexed storage before a production arena model can honestly state allocation, bounds, mutation, removal, borrowing and destruction semantics.
-
-## Active research — #132 / PR #139 collection surface v0
-
-Research branch:
-
-`research/collection-surface-v0`
-
-Accepted executable evidence head before documentation synchronization:
-
-`2e620c246580bd446b3b42b3495325a599ffcff9`
-
-Collection surface research #4 / run `34950557176`: **SUCCESS**.
-
-Artifact:
-
-- name: `evo-collection-surface-research-ubuntu-24.04`;
-- id: `10388584777`;
-- digest: `sha256:dfae195602260d8bb5b900ea821abd3950d013314938012e153d19f42182d690`;
-- exact report SHA: `2e620c246580bd446b3b42b3495325a599ffcff9`;
-- Rust: **1.98.0**;
-- runtime/surface cases: **17**;
-- compile-boundary cases: **4**;
-- expectation mismatches: **0**;
-- verdict: **APPEND-ONLY-FIRST**;
-- recommended surface: **CONTEXTUAL-SEQUENCE-TYPE-CANDIDATE**.
-
-Evidence summary:
-
-- empty/non-empty owned indexed storage is straightforward;
-- append/growth plus checked lookup maps directly to ordinary safe Rust storage;
-- out-of-bounds checked lookup is explicit;
-- exclusive container mutation needs no hidden interior mutability;
-- container move/drop follows ordinary ownership;
-- append-only numeric indices remain logically stable across physical `Vec` reallocation;
-- shifting removal can silently rebind an old numeric index to a different payload;
-- hole-preserving removal avoids shifting but introduces an explicit slot-occupancy model;
-- move-only payload transfer remains explicit;
-- explicit shared-owner payload composition remains separate from container growth;
-- live element references block conflicting container growth/move;
-- growth after the final element-reference use is valid under bounded last-use analysis;
-- moving move-only payload through a shared element reference rejects;
-- no hidden runtime mechanism is required for the accepted append-only slice.
-
-Surface evidence:
-
-- `[` / `]` are currently unallocated lexer punctuation;
-- `seq` is currently a valid ordinary identifier;
-- current type algebra already has bounded contextual wrapper precedent through `shared Item` and `&Item` without a general generic type system;
-- the research therefore advances a contextual bounded sequence type family rather than `Vec(T)`-style general-generic syntax.
+### Collection surface — #132 / PR #139 completed
 
 Durable report: `docs/COLLECTION_SURFACE_RESEARCH.md`.
 
-## Collection production boundary authorized by research
+Accepted result:
 
-Only after PR #139 final-head and natural postmerge gates succeed may a production successor start.
+- verdict: **APPEND-ONLY-FIRST**;
+- recommended surface: **CONTEXTUAL-SEQUENCE-TYPE-CANDIDATE**;
+- append/growth plus checked lookup maps directly to ordinary safe Rust storage;
+- append-only numeric indices remain logically stable across physical `Vec` reallocation;
+- shifting removal can silently rebind identity, while hole-preserving removal introduces an explicit occupancy model;
+- live element references must block conflicting container growth/move until bounded final-use release proves them dead;
+- removal, holes, generations and reusable arena slots remain later explicit layers.
 
-That first production slice is bounded to:
+## Active production — #140 append-only sequence v0
 
-- contextual sequence type;
-- explicit creation/allocation;
-- explicit append/growth;
-- checked indexed lookup;
-- ordinary container move/drop;
-- immutable element references integrated with the existing reference/liveness model;
-- source-native rejection of conflicting growth/move while an element reference is live;
-- no element removal or slot reuse;
-- no general generics merely for this feature;
-- direct safe Rust `Vec<T>`-class lowering;
-- no hidden clone/refcount/GC/lock/registry/unsafe machinery.
+Branch:
 
-Removal, holes, generations and arena slot reuse remain later explicit layers. Generation-checked arena handles from #126 can only resume after this collection prerequisite is production-verified.
+`feature/append-only-sequence-v0`
+
+Validated implementation head before documentation synchronization:
+
+`95d847cfe0b6d6d052b096748360915fe1bbcdc6`
+
+Development evidence:
+
+- Dev sequence semantics v0 #4 / run `34982930824`: **SUCCESS**;
+- focused parser/lowering/codegen/generated-Rust tests: **PASS**;
+- workspace tests: **SUCCESS**;
+- workspace Clippy `-D warnings`: **SUCCESS**;
+- append-only differential benchmark: correctness **true**, normalized LLVM IR equal **true**, exact binary equal **true**, stable **true**, ratio **0.996626508**, verdict **PASS** by byte-identical-binary parity.
+
+Production source surface:
+
+```text
+items = seq Item()
+append items, Item(value = 1)
+
+lookup items, 0 as item
+    print item.value
+else
+    print 0
+end
+```
+
+Implemented invariants:
+
+- `seq`, `append`, `lookup`, and `as` remain contextual identifiers;
+- `seq T` is an owned move-only append-only sequence;
+- supported v0 element types are scalars, declared nominal records, and explicit `shared Record`; nested sequence/reference element types remain rejected;
+- empty construction lowers to `Vec::<T>::new()`;
+- append lowers to direct `Vec::push` and moves move-only payloads without hidden clone;
+- lookup converts the signed index with `usize::try_from`, uses direct `Vec::get`, and requires an explicit success/failure branch;
+- negative and out-of-range indices take the `else` branch;
+- scalar elements bind by value; move-only record/shared-owner elements bind through an immutable element reference;
+- live move-only element references block sequence growth, move, and reinitialization source-natively;
+- existing bounded last-use analysis releases that conflict after the final proven reference use;
+- shared-owner element lookup keeps `&Rc<T>` behavior without hidden `Rc::clone`;
+- sequence parameters become mutable in generated Rust only when grown;
+- unused move-only lookup bindings do not artificially pin the sequence;
+- generated Rust remains ordinary safe `Vec<T>` / `push` / `get` with no `unsafe`, `RefCell`, lock, GC, registry, or custom runtime.
+
+Permanent regression workflow: `.github/workflows/append-only-sequence-performance.yml`.
 
 ## Separate / deferred research tracks
 
-Do not silently fold these into collection semantics:
+Do not silently fold these into append-only sequence semantics:
 
 - explicit Weak/cycle-edge surface;
 - interior mutability;
@@ -172,17 +159,19 @@ Do not silently fold these into collection semantics:
 - mutable references;
 - generalized/user-written lifetime solving;
 - general generic type syntax;
+- sequence removal/pop/delete;
+- hole reuse and generation-checked reusable arena slots;
 - shared-owner record fields / enum payloads;
-- hidden allocation, owner duplication, deep clone, GC or runtime ownership maps.
+- hidden allocation policy, owner duplication, deep clone, GC or runtime ownership maps.
 
 ## Current operational sequence
 
-1. Finish PR #139 documentation synchronization.
-2. Require one exact final PR head to pass normal CI, Collection surface research, and Explicit shared owner performance.
-3. Merge PR #139 with expected-head protection only after those gates pass.
-4. Require natural exact-main postmerge CI and Collection surface research before closing #132 completed.
-5. Open the bounded append-only indexed-sequence production successor from that verified main.
-6. Implement and verify that slice before returning to generation-checked reusable arena slots.
+1. Synchronize implementation-backed language and handoff docs for #140.
+2. Open the #140 production PR from `feature/append-only-sequence-v0`.
+3. Require one exact final PR head to pass normal CI plus the Append-only sequence performance gate and all other naturally triggered ownership/research regressions.
+4. Review the final PR diff and merge only with expected-head protection.
+5. Require natural exact-main postmerge CI and append-only sequence performance before closing #140 completed.
+6. Return to the generation-checked arena-handle candidate from #126; removal/reuse/generation remains a separate explicit layer.
 
 ## CI / handoff invariant
 

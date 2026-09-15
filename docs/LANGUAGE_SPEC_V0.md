@@ -64,6 +64,7 @@ Accepted source lowers to ordinary static Rust constructs and native code.
 - `,` separates function parameters, call arguments, and named record-constructor fields.
 - Current keywords are `print`, `repeat`, `if`, `else`, `end`, `true`, `false`, `input_int`, `and`, `or`, `not`, `fn`, `return`, `record`, `enum`, `match`, `case`, `int`, `bool`, and `string`.
 - `shared`, `share`, and `dup` remain ordinary identifier tokens. The parser interprets them contextually only in the bounded shared-owner type/prefix positions; calls such as `share(...)` and ordinary bindings/names remain compatible.
+- `seq`, `append`, `lookup`, and `as` also remain ordinary identifier tokens. The parser interprets them contextually only for the bounded append-only sequence type/constructor and statement forms; ordinary bindings, names, and calls remain compatible outside those exact positions.
 - Keyword matching respects identifier boundaries.
 - A lone `!` is not logical negation. `not` is the user-facing operator.
 
@@ -103,7 +104,12 @@ function_definition := "fn" IDENTIFIER "(" parameters? ")" function_type_name NE
 parameters          := parameter ("," parameter)*
 parameter           := IDENTIFIER function_type_name
 storage_type_name   := "int" | "bool" | "string" | IDENTIFIER
-function_type_name  := storage_type_name | "&" IDENTIFIER | "shared" IDENTIFIER
+sequence_element_type
+                    := "int" | "bool" | "string" | IDENTIFIER | "shared" IDENTIFIER
+function_type_name  := storage_type_name
+                     | "&" IDENTIFIER
+                     | "shared" IDENTIFIER
+                     | "seq" sequence_element_type
 
 function_block      := (NEWLINE* function_statement (NEWLINE+ | EOF))* NEWLINE*
 function_statement  := statement | return_statement
@@ -113,10 +119,15 @@ statement           := binding
                      | repeat_statement
                      | if_statement
                      | match_statement
+                     | sequence_append
+                     | sequence_lookup
 
 binding             := IDENTIFIER "=" expression
 print_statement     := "print" expression
 return_statement    := "return" expression
+sequence_append     := "append" IDENTIFIER "," expression
+sequence_lookup     := "lookup" IDENTIFIER "," expression "as" IDENTIFIER NEWLINE+
+                       block "else" NEWLINE+ block "end"
 repeat_statement    := "repeat" expression NEWLINE+ block "end"
 if_statement        := "if" expression NEWLINE+ block
                        ("else" NEWLINE+ block)?
@@ -148,12 +159,15 @@ primary             := INTEGER
                      | STRING
                      | "true"
                      | "false"
+                     | sequence_constructor
                      | IDENTIFIER
                      | call_or_constructor
                      | enum_constructor
                      | "input_int"
                      | "(" expression ")"
 
+sequence_constructor
+                    := "seq" sequence_element_type "(" ")"
 call_or_constructor := IDENTIFIER "(" call_or_named_fields? ")"
 call_or_named_fields
                     := arguments | named_fields
@@ -178,7 +192,7 @@ For compatibility, top-level `fn` declarations remain accepted by the current pa
 
 `return` is valid only inside a function body. Top-level `return` is an error.
 
-`repeat`, `if`, and `match` may nest inside top-level code or function bodies. `if` may omit `else`. Unmatched `case`, `end`, or `else`, missing required `end`, and malformed match cases are parser errors.
+`repeat`, `if`, `match`, and checked `lookup` may nest inside top-level code or function bodies. `if` may omit `else`; `lookup` always requires an explicit `else`. Unmatched `case`, `end`, or `else`, missing required `end`, and malformed match/lookup forms are parser errors.
 
 ### Expression precedence
 
@@ -233,7 +247,7 @@ Current binding rules:
 - type-changing reassignment is rejected;
 - a first assignment creates a binding in the current lexical scope only when no binding with that name is visible in the current or parent scopes;
 - assignment to a visible binding remains reassignment, not shadowing;
-- `if` then/else bodies, `repeat` bodies, and individual `match` arms create lexical child scopes;
+- `if` then/else bodies, `repeat` bodies, individual `match` arms, and checked-lookup branches create lexical child scopes;
 - child scopes may read visible parent bindings while that scope is active;
 - child-local bindings disappear when their block closes;
 - sibling branches and sibling match arms are independent scopes;
@@ -251,7 +265,8 @@ The semantic layer recognizes:
 - nominal record types by declared name;
 - nominal enum types by declared name;
 - first-class immutable references to nominal record values (`&T`);
-- explicit one-thread immutable shared-owner handles to nominal record values (`shared T`).
+- explicit one-thread immutable shared-owner handles to nominal record values (`shared T`);
+- owned append-only sequences (`seq T`) for the bounded v0 element set.
 
 ### Immutable references v0
 
@@ -319,6 +334,79 @@ dup expr    -> std::rc::Rc::clone(&expr)
 Payload references through a shared owner lower to an ordinary reference to the payload, using stable safe `Rc` dereference/as-ref behavior. Evolution adds no wrapper object, runtime ownership table, hidden deep clone, `Arc`, `RefCell`, lock, GC, unsafe code, or invented `'static` lifetime.
 
 Shared-owner record fields and enum payloads, nested/general `shared` type algebra, `Weak`, cycle solving, cross-thread ownership, interior mutability, synchronization, mutable references, and generalized lifetime/generic machinery remain outside this slice.
+
+### Append-only sequences v0
+
+Evolution's first production collection is deliberately narrower than a general generic container system:
+
+```text
+record Item
+    value int
+end
+
+items = seq Item()
+append items, Item(value = 1)
+
+lookup items, 0 as item
+    print item.value
+else
+    print 0
+end
+```
+
+`seq`, `append`, `lookup`, and `as` are contextual parser words only. They remain ordinary identifier tokens outside these exact forms.
+
+The v0 type and construction rules are:
+
+- `seq T` is an owned, move-only sequence type;
+- `T` may be `int`, `bool`, `string`, a declared nominal record, or `shared Record`;
+- nested `seq` elements and reference element types are rejected;
+- `seq T()` constructs an empty sequence;
+- there is no general user-facing generic type syntax introduced by this feature.
+
+Growth is explicit:
+
+```text
+append items, value
+```
+
+The owner must be an available `seq T`, and the appended value must have exactly type `T`. Move-only payloads move into the sequence. Append does not clone the payload, duplicate a shared owner, or replace exclusive mutation with interior mutability. A sequence local or parameter is marked mutable in generated Rust only when growth requires it.
+
+Lookup is checked and statement-only:
+
+```text
+lookup items, index as value
+    # success branch
+else
+    # failure branch
+end
+```
+
+The index must be an integer. Lowering converts it with `usize::try_from` and then performs `Vec::get`; therefore negative and out-of-range Evolution indices enter the explicit `else` branch. The success binding exists only inside the success branch and cannot be reassigned in this v0 slice.
+
+Binding ownership follows the element category:
+
+- scalar elements bind by value, matching the copy-like scalar model;
+- nominal record elements bind as immutable references tied to the source sequence;
+- `shared Record` elements bind as references to the stored `Rc<Record>` handle, so payload field reads use ordinary Rust dereference behavior without `Rc::clone`;
+- an unused move-only lookup binding does not artificially extend a borrow.
+
+A live move-only element reference prevents any operation that may invalidate its source: sequence growth, sequence move, and exact-type sequence reinitialization are rejected source-natively while that reference may still be live. The existing bounded last-use analysis releases the conflict after the final proven reference use, allowing later growth/move/reinitialization when safe.
+
+Sequences themselves use ordinary by-value ownership. Passing or returning `seq T` by value moves the sequence unless ordinary function semantics say otherwise; there is no implicit sequence clone.
+
+Rust codegen is direct and safe:
+
+```text
+seq T                  -> Vec<T>
+seq T()                -> Vec::<T>::new()
+append owner, value    -> owner.push(value)
+checked lookup         -> usize::try_from(index).ok().and_then(|i| owner.get(i))
+```
+
+The accepted differential case proves correctness, normalized LLVM IR parity and exact binary parity against the direct Rust `Vec<i64>` reference workload.
+
+Explicit v0 exclusions: removal/pop/delete, slot holes, slot reuse, generation counters, stable arena identity, iterators/ranges/algorithms, mutable references, nested sequence/reference element types, general generic syntax, hidden clone/copy of move-only values, hidden `Rc`/`Arc` duplication, `RefCell`, locks, GC, runtime ownership registries, and unsafe pointer tables.
 
 Scalar rules:
 
@@ -544,7 +632,7 @@ fn add(a int, b int) int
 end
 ```
 
-Supported signature types are `int`, `bool`, `string`, declared nominal record/enum types, bounded immutable record references `&T`, and bounded explicit shared-owner record handles `shared T`. Shared-owner storage in record fields/enum payloads remains excluded from v0.
+Supported signature types are `int`, `bool`, `string`, declared nominal record/enum types, bounded immutable record references `&T`, bounded explicit shared-owner record handles `shared T`, and bounded append-only sequence types `seq T`. Shared-owner storage in record fields/enum payloads remains excluded from v0, and sequence elements remain limited to the production v0 element set above.
 
 Calls are expressions with fixed arity. Lowering rejects unknown functions, wrong argument counts, and argument type mismatches.
 
@@ -556,7 +644,7 @@ Each function body gets an independent root binding scope. Parameters enter that
 
 Top-level locals are not captured. Duplicate parameter and function names are rejected.
 
-Functions v0 always declare a non-unit return type. Every reachable terminal path must return. A terminal `if/else` satisfies this only when both branches return; an exhaustive match satisfies it only when all arms return. Loops are not considered guaranteed-return constructs.
+Functions v0 always declare a non-unit return type. Every reachable terminal path must return. A terminal `if/else` satisfies this only when both branches return; an exhaustive match satisfies it only when all arms return; a checked sequence lookup satisfies it only when both its success and failure branches return. Loops are not considered guaranteed-return constructs.
 
 Nominal record/enum returns and ordinary `Owned` nominal parameters participate in the by-value ownership analysis. Qualifying read-only nominal parameters may instead use the internal `SharedBorrow` mode below.
 
