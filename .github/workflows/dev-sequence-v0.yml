@@ -34,21 +34,11 @@ jobs:
           from pathlib import Path
           path = Path("crates/evo-formatter/src/lib.rs")
           text = path.read_text()
-          old = '''    if matches!(current, TokenKind::Identifier(_)) && matches!(previous, TokenKind::RParen) {
-              return true;
-          }
-          '''
-          new = '''    if matches!(current, TokenKind::Identifier(name) if name == "as") {
-              return true;
-          }
-
-          if matches!(current, TokenKind::Identifier(_)) && matches!(previous, TokenKind::RParen) {
-              return true;
-          }
-          '''
-          if text.count(old) != 1:
+          needle = 'if matches!(current, TokenKind::Identifier(_)) && matches!(previous, TokenKind::RParen) {'
+          if text.count(needle) != 1:
               raise SystemExit("contextual as-spacing anchor changed")
-          path.write_text(text.replace(old, new, 1))
+          replacement = 'if matches!(current, TokenKind::Identifier(name) if name == "as") {\n        return true;\n    }\n\n    ' + needle
+          path.write_text(text.replace(needle, replacement, 1))
           PY
 
       - name: Format
