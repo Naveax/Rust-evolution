@@ -13,12 +13,13 @@ pub(crate) enum SemanticType {
     Record(String),
     SharedOwner(String),
     SharedRef(Box<SemanticType>),
+    Sequence(Box<SemanticType>),
 }
 
 impl SemanticType {
     #[must_use]
     pub(crate) fn is_trivially_reusable_v0(&self) -> bool {
-        !matches!(self, Self::Record(_) | Self::SharedOwner(_))
+        !matches!(self, Self::Record(_) | Self::SharedOwner(_) | Self::Sequence(_))
     }
 }
 
@@ -82,10 +83,9 @@ impl RecordEnvironment {
             SyntaxTypeName::SharedRef(inner) => self
                 .resolve_type_name(inner, span)
                 .map(|inner| SemanticType::SharedRef(Box::new(inner))),
-            SyntaxTypeName::Sequence(_) => Err(LowerError {
-                message: "append-only sequence semantic lowering is not implemented yet".to_owned(),
-                span,
-            }),
+            SyntaxTypeName::Sequence(inner) => self
+                .resolve_type_name(inner, span)
+                .map(|inner| SemanticType::Sequence(Box::new(inner))),
         }
     }
 
@@ -166,7 +166,7 @@ impl RecordEnvironment {
         let record_name = match base_type {
             SemanticType::Record(name) | SemanticType::SharedOwner(name) => name,
             SemanticType::SharedRef(inner) => match inner.as_ref() {
-                SemanticType::Record(name) => name,
+                SemanticType::Record(name) | SemanticType::SharedOwner(name) => name,
                 _ => {
                     return Err(LowerError {
                         message: "field access requires a record value or immutable record reference"
@@ -384,6 +384,7 @@ fn semantic_type_label(value_type: &SemanticType) -> String {
         SemanticType::Record(name) => name.clone(),
         SemanticType::SharedOwner(name) => format!("shared {name}"),
         SemanticType::SharedRef(inner) => format!("&{}", semantic_type_label(inner)),
+        SemanticType::Sequence(inner) => format!("seq {}", semantic_type_label(inner)),
     }
 }
 

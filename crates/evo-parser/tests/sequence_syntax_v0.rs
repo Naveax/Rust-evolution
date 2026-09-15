@@ -62,3 +62,17 @@ fn rejects_nested_sequence_constructor_surface() {
         parse(&lex("items = seq seq int()\n").unwrap()).expect_err("nested sequence is outside v0");
     assert!(error.message.contains("nested sequence"));
 }
+
+#[test]
+fn removal_surface_stays_absent_in_v0() {
+    let error = parse(&lex("items = seq int()\nremove items, 0\n").unwrap())
+        .expect_err("v0 must not expose removal syntax");
+    assert!(error.message.contains("expected '=' after binding name"));
+}
+
+#[test]
+fn reference_element_types_stay_outside_v0() {
+    let error = parse(&lex("fn bad(items seq &Item) int\nreturn 1\nend\n").unwrap())
+        .expect_err("reference sequence elements are outside v0");
+    assert!(error.message.contains("function parameters") || error.message.contains("type"));
+}

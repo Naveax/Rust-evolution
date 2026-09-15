@@ -187,6 +187,49 @@ impl Generator {
                 }
                 self.push_mapped_line(format!("{padding}}}\n"), statement.span);
             }
+            StmtKind::SequenceAppend { owner, value } => {
+                self.push_mapped_line(
+                    format!(
+                        "{padding}{}.push({});\n",
+                        generated_identifier(owner),
+                        render_expr(value)
+                    ),
+                    statement.span,
+                );
+            }
+            StmtKind::SequenceLookup {
+                owner,
+                index,
+                binding,
+                binding_by_reference,
+                binding_used,
+                then_body,
+                else_body,
+            } => {
+                let pattern = if !binding_used {
+                    "_".to_owned()
+                } else if *binding_by_reference {
+                    generated_identifier(binding)
+                } else {
+                    format!("&{}", generated_identifier(binding))
+                };
+                self.push_mapped_line(
+                    format!(
+                        "{padding}if let Some({pattern}) = usize::try_from({}).ok().and_then(|__evo_lookup_index| {}.get(__evo_lookup_index)) {{\n",
+                        render_expr(index),
+                        generated_identifier(owner)
+                    ),
+                    statement.span,
+                );
+                for statement in then_body {
+                    self.write_statement(statement, indent + 1);
+                }
+                self.push_mapped_line(format!("{padding}}} else {{\n"), statement.span);
+                for statement in else_body {
+                    self.write_statement(statement, indent + 1);
+                }
+                self.push_mapped_line(format!("{padding}}}\n"), statement.span);
+            }
             StmtKind::If {
                 condition,
                 then_body,
@@ -241,6 +284,7 @@ fn rust_type(value_type: &ValueType) -> String {
             format!("std::rc::Rc<{}>", generated_record_name(name))
         }
         ValueType::SharedRef(inner) => format!("&{}", rust_type(inner)),
+        ValueType::Sequence(inner) => format!("Vec<{}>", rust_type(inner)),
     }
 }
 
@@ -313,6 +357,9 @@ fn render_expr(expr: &Expr) -> String {
         ExprKind::SharedDuplicate(inner) => {
             format!("std::rc::Rc::clone(&({}))", render_expr(inner))
         }
+        ExprKind::SequenceNew { element_type } => {
+            format!("Vec::<{}>::new()", rust_type(element_type))
+        }
         ExprKind::Binary { left, op, right } => format!(
             "({} {} {})",
             render_expr(left),
@@ -373,6 +420,17 @@ fn statement_uses_input_int(statement: &Stmt) -> bool {
         StmtKind::Repeat { count, body } => {
             expr_uses_input_int(count) || body.iter().any(statement_uses_input_int)
         }
+        StmtKind::SequenceAppend { value, .. } => expr_uses_input_int(value),
+        StmtKind::SequenceLookup {
+            index,
+            then_body,
+            else_body,
+            ..
+        } => {
+            expr_uses_input_int(index)
+                || then_body.iter().any(statement_uses_input_int)
+                || else_body.iter().any(statement_uses_input_int)
+        }
         StmtKind::If {
             condition,
             then_body,
@@ -402,9 +460,11 @@ fn expr_uses_input_int(expr: &Expr) -> bool {
         ExprKind::Binary { left, right, .. } => {
             expr_uses_input_int(left) || expr_uses_input_int(right)
         }
-        ExprKind::Integer(_) | ExprKind::String(_) | ExprKind::Bool(_) | ExprKind::Local(_) => {
-            false
-        }
+        ExprKind::Integer(_)
+        | ExprKind::String(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Local(_)
+        | ExprKind::SequenceNew { .. } => false,
     }
 }
 

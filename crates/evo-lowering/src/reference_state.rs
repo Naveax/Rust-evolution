@@ -39,6 +39,7 @@ impl ReferenceProvenance {
 pub(crate) enum OwnerOperation {
     Move,
     Reinitialize,
+    Grow,
 }
 
 impl OwnerOperation {
@@ -46,6 +47,7 @@ impl OwnerOperation {
         match self {
             Self::Move => "move",
             Self::Reinitialize => "reinitialize",
+            Self::Grow => "grow",
         }
     }
 }
