@@ -28,7 +28,9 @@ jobs:
         run: python .github/dev/sequence_syntax_v0_patch.py
 
       - name: Format
-        run: cargo fmt --all --check
+        run: |
+          cargo fmt --all
+          cargo fmt --all --check
 
       - name: Focused syntax tests
         run: |
