@@ -47,8 +47,8 @@ jobs:
               ),
               (
                   '    let mut same_shape = Arena::with_id(100);\n    let other_handle = same_shape.insert(String::from("other"));\n',
-                  '    let mut same_shape = Arena::with_id(100);\n    let first_other_handle = same_shape.insert(String::from("old"));\n    drop(same_shape.remove(first_other_handle));\n    let other_handle = same_shape.insert(String::from("other"));\n',
-                  'cross-arena same-generation control',
+                  '    let mut same_shape = Arena::with_id(100);\n    same_shape.insert(String::from("anchor"));\n    let first_other_handle = same_shape.insert(String::from("old"));\n    drop(same_shape.remove(first_other_handle));\n    let other_handle = same_shape.insert(String::from("other"));\n',
+                  'cross-arena same-index-generation control',
               ),
               (
                   '    assert!(findings.iter().all(|finding| finding.matched));\n',
