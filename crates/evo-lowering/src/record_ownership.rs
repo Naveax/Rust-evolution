@@ -151,6 +151,7 @@ impl MoveTracker {
 fn move_only_kind(value_type: Option<&SemanticType>) -> &'static str {
     match value_type {
         Some(SemanticType::SharedOwner(_)) => "shared handle",
+        Some(SemanticType::Sequence(_)) => "sequence",
         _ => "record",
     }
 }

@@ -316,6 +316,10 @@ impl<'a> StaticEnvironment<'a> {
                 }
                 Ok(ResolvedPayloadType::Integer)
             }
+            SyntaxExprKind::SequenceNew { .. } => Err(LowerError {
+                message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
+                span: expr.span,
+            }),
             SyntaxExprKind::SharedBorrow(_) => Err(LowerError {
                 message: "immutable reference expressions are not supported in enum-bearing programs in v0"
                     .to_owned(),
@@ -539,6 +543,12 @@ fn validate_statements(
                 validate_child_scope(then_body, environment, scopes, expected_return)?;
                 validate_child_scope(else_body, environment, scopes, expected_return)?;
             }
+            SyntaxStmtKind::SequenceAppend { .. } | SyntaxStmtKind::SequenceLookup { .. } => {
+                return Err(LowerError {
+                    message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
+                    span: statement.span,
+                });
+            }
             SyntaxStmtKind::Match { value, arms } => {
                 validate_match(value, arms, environment, scopes, expected_return)?;
             }
@@ -628,7 +638,9 @@ fn statement_always_returns(statement: &SyntaxStmt) -> bool {
         }
         SyntaxStmtKind::Bind { .. }
         | SyntaxStmtKind::Print(_)
-        | SyntaxStmtKind::Repeat { .. } => false,
+        | SyntaxStmtKind::Repeat { .. }
+        | SyntaxStmtKind::SequenceAppend { .. }
+        | SyntaxStmtKind::SequenceLookup { .. } => false,
     }
 }
 
@@ -660,6 +672,10 @@ fn resolve_type_name(
         TypeName::SharedOwner(_) => Err(LowerError {
             message: "explicit shared-owner function contracts are not supported in enum-bearing programs in v0"
                 .to_owned(),
+            span,
+        }),
+        TypeName::Sequence(_) => Err(LowerError {
+            message: "append-only sequence function contracts are not supported in enum-bearing programs in v0".to_owned(),
             span,
         }),
     }

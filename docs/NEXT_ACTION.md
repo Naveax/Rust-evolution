@@ -4,77 +4,88 @@ Last verified update: **2026-09-15**
 
 ## Stable gate
 
-Current exact verified `main` before the active #132 research PR:
+Current exact verified `main` before active production issue #140:
 
-`f4af6aa89d83dcdee79cabcb4ed166aaf4db6612`
+`532e88586a252e72d7eb9923148b07e2ab94883e`
 
-This is PR #131 squash merge, completing #126 arena/generational graph-handle research.
+This is PR #139 squash merge, completing #132 collection-surface research.
 
 Natural validation on that exact SHA:
 
-- CI #547 / run `34857717355`: **SUCCESS** on Ubuntu 24.04, Windows and macOS;
-- Arena generational handles research / run `34857717387`: **SUCCESS**;
-- Explicit shared owner performance / run `34857717373`: **SUCCESS**.
+- CI #555 / run `34957074327`: **SUCCESS** on Ubuntu 24.04, Windows and macOS;
+- Collection surface research #6 / run `34957074432`: **SUCCESS**;
+- Explicit shared owner performance #43 / run `34957074499`: **SUCCESS**.
 
-Issue #126 is closed/completed.
+Issue #132 is closed/completed. Its accepted result is **APPEND-ONLY-FIRST** with a contextual bounded sequence type family.
 
-## Active P0 research — #132 / PR #139
+## Active P0 production — #140
 
-`#132 P0 research collection surface v0: bounded indexed storage for arena foundations`
+`#140 P0 implement append-only sequence v0: contextual seq T, explicit growth, checked lookup`
 
 Branch:
 
-`research/collection-surface-v0`
+`feature/append-only-sequence-v0`
 
-Accepted executable research head before documentation synchronization:
+Validated implementation head before documentation synchronization:
 
-`2e620c246580bd446b3b42b3495325a599ffcff9`
+`95d847cfe0b6d6d052b096748360915fe1bbcdc6`
 
-Dedicated evidence:
+Development validation for the semantic slice:
 
-- Collection surface research #4 / run `34950557176`: **SUCCESS**;
-- artifact `evo-collection-surface-research-ubuntu-24.04`;
-- artifact id `10388584777`;
-- digest `sha256:dfae195602260d8bb5b900ea821abd3950d013314938012e153d19f42182d690`;
-- Rust **1.98.0**;
-- runtime/surface cases: **17**;
-- compile-boundary cases: **4**;
-- expectation mismatches: **0**;
-- verdict: **APPEND-ONLY-FIRST**;
-- recommended surface family: **CONTEXTUAL-SEQUENCE-TYPE-CANDIDATE**.
+- Dev sequence semantics v0 #4 / run `34982930824`: **SUCCESS**;
+- focused parser sequence tests: **6/6 PASS**;
+- focused lowering sequence tests: **9/9 PASS**;
+- focused Rust-codegen sequence tests: **6/6 PASS**;
+- generated-Rust compile/process tests: **3/3 PASS**;
+- exact generated/reference benchmark test: **PASS**;
+- full workspace tests: **SUCCESS**;
+- workspace Clippy with `-D warnings`: **SUCCESS**;
+- append-only sequence differential gate: correctness **PASS**, normalized LLVM IR equal **true**, exact binary equal **true**, stable **true**, ratio **0.996626508**, verdict **PASS** by byte-identical-binary parity.
 
-Evidence supports an explicit append-only owned sequence first. General removal is not part of this slice because shifting removal can silently rebind numeric indices; hole-preserving removal is a separate explicit storage policy.
+Implemented production surface:
 
-Production successor boundaries already fixed by the evidence:
+```text
+items = seq Item()
+append items, Item(value = 1)
 
-- contextual bounded sequence type, not general generic syntax merely for convenience;
-- explicit allocation/construction and append;
-- checked indexed lookup;
-- ordinary container move/drop ownership;
-- immutable element references use the existing reference model;
-- live element references block conflicting container growth/move;
-- bounded final-use release permits later growth after the reference is dead;
-- no element removal/reuse in v0;
-- no hidden clone, `Rc`/`Arc` duplication, `RefCell`, lock, GC, global registry, unsafe pointer table, or fabricated stable identity.
+lookup items, 0 as item
+    print item.value
+else
+    print 0
+end
+```
 
-Durable decision report: `docs/COLLECTION_SURFACE_RESEARCH.md`.
+Locked production semantics:
+
+- `seq`, `append`, `lookup`, and `as` are contextual, not new lexer keywords;
+- `seq T` is an owned move-only append-only sequence type; v0 elements are scalar values, nominal records, or explicit `shared Record` owners;
+- `seq T()` creates an empty owned sequence and lowers directly to `Vec::<T>::new()`;
+- `append owner, value` grows one available sequence in place and lowers directly to `Vec::push` without hidden clone;
+- `lookup owner, index as binding ... else ... end` is checked and requires both success and failure branches; negative and out-of-range indices take `else`;
+- scalar lookup bindings copy by value; record/shared-owner elements bind as immutable references tied to the sequence owner;
+- a live move-only element reference blocks sequence growth, move, and reinitialization; bounded final-use analysis releases the conflict after the final proven use;
+- `shared Record` elements remain `&Rc<Record>` on lookup with no hidden `Rc::clone`;
+- no removal, slot reuse, generations, nested sequence/reference elements, general generic syntax, mutable references, hidden allocation policy, GC, lock, registry, or unsafe ownership emulation is introduced.
+
+Permanent PR/main regression gate: `.github/workflows/append-only-sequence-performance.yml`.
 
 ## Immediate execution order
 
-1. Synchronize `COLLECTION_SURFACE_RESEARCH`, `PROJECT_STATE`, and this file on PR #139.
-2. Require one exact documentation-synchronized PR head to pass:
+1. Synchronize `LANGUAGE_SPEC_V0`, `PROJECT_STATE`, `NEXT_ACTION`, and `DECISIONS` on the production branch.
+2. Open the #140 production PR from `feature/append-only-sequence-v0`.
+3. Require one exact final PR head to pass all naturally triggered gates, including:
    - normal CI on Ubuntu, Windows and macOS;
-   - Collection surface research;
-   - Explicit shared owner performance regression gate.
-3. Review the final PR diff and merge PR #139 only with expected-head protection.
-4. Track natural exact-main postmerge CI and Collection surface research; track any naturally triggered ownership/performance gate without dispatching duplicates.
-5. Close #132 completed only after the required postmerge exact-main gates succeed.
-6. Open the bounded production successor for append-only indexed sequence v0 from that verified main. Do not reopen removal/generation semantics in that first implementation issue.
-7. After the collection implementation is independently verified, return to the generation-checked arena-handle candidate from #126.
+   - Append-only sequence performance;
+   - Explicit shared owner performance when triggered by the touched ownership/codegen surface;
+   - Collection surface research when naturally triggered.
+4. Review the exact final diff and merge only with expected-head protection.
+5. Track natural exact-main postmerge CI and append-only sequence performance; track other naturally triggered ownership/research gates without dispatching duplicates.
+6. Close #140 completed only after the required postmerge exact-main gates succeed.
+7. Return to the generation-checked arena-handle successor from #126. Removal/reuse/generation semantics remain a separate explicit layer.
 
 ## Separate ownership/research lanes
 
-Keep distinct rather than folding them into the collection model:
+Keep distinct rather than folding them into append-only sequence semantics:
 
 - explicit Weak/cycle edges;
 - interior mutability;

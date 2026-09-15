@@ -99,6 +99,19 @@ pub enum StmtKind {
         then_body: Vec<Stmt>,
         else_body: Vec<Stmt>,
     },
+    SequenceAppend {
+        owner: String,
+        value: Expr,
+    },
+    SequenceLookup {
+        owner: String,
+        index: Expr,
+        binding: String,
+        binding_by_reference: bool,
+        binding_used: bool,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +153,9 @@ pub enum ExprKind {
     SharedOwnerBorrow(Box<Expr>),
     SharedAlloc(Box<Expr>),
     SharedDuplicate(Box<Expr>),
+    SequenceNew {
+        element_type: ValueType,
+    },
     Binary {
         left: Box<Expr>,
         op: BinaryOp,
@@ -173,6 +189,7 @@ pub enum ValueType {
     Record(String),
     SharedOwner(String),
     SharedRef(Box<ValueType>),
+    Sequence(Box<ValueType>),
 }
 
 #[derive(Debug, Clone)]
@@ -393,10 +410,16 @@ fn statement_always_returns(statement: &Stmt) -> bool {
                 && block_always_returns(then_body)
                 && block_always_returns(else_body)
         }
+        StmtKind::SequenceLookup {
+            then_body,
+            else_body,
+            ..
+        } => block_always_returns(then_body) && block_always_returns(else_body),
         StmtKind::Let { .. }
         | StmtKind::Assign { .. }
         | StmtKind::Print(_)
-        | StmtKind::Repeat { .. } => false,
+        | StmtKind::Repeat { .. }
+        | StmtKind::SequenceAppend { .. } => false,
     }
 }
 
@@ -410,6 +433,7 @@ fn semantic_type(value_type: &ValueType) -> SemanticType {
         ValueType::SharedRef(inner) => {
             SemanticType::SharedRef(Box::new(semantic_type(inner)))
         }
+        ValueType::Sequence(inner) => SemanticType::Sequence(Box::new(semantic_type(inner))),
     }
 }
 
@@ -423,6 +447,7 @@ fn lowered_value_type(value_type: &SemanticType) -> ValueType {
         SemanticType::SharedRef(inner) => {
             ValueType::SharedRef(Box::new(lowered_value_type(inner)))
         }
+        SemanticType::Sequence(inner) => ValueType::Sequence(Box::new(lowered_value_type(inner))),
     }
 }
 
@@ -434,6 +459,7 @@ fn type_label(value_type: &ValueType) -> String {
         ValueType::Record(name) => name.clone(),
         ValueType::SharedOwner(name) => format!("shared {name}"),
         ValueType::SharedRef(inner) => format!("&{}", type_label(inner)),
+        ValueType::Sequence(inner) => format!("seq {}", type_label(inner)),
     }
 }
 
@@ -583,6 +609,12 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                             OwnerOperation::Reinitialize,
                             statement.span,
                         )?,
+                        ValueType::Sequence(_) => self.reference_tracker.ensure_owner_operation_allowed(
+                            name,
+                            "sequence",
+                            OwnerOperation::Reinitialize,
+                            statement.span,
+                        )?,
                         _ => {}
                     }
                     self.move_tracker.reinitialize(
@@ -612,7 +644,10 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                 let (expr, expression_type) = self.lower_expr(expr)?;
                 if matches!(
             &expression_type,
-            ValueType::Record(_) | ValueType::SharedOwner(_) | ValueType::SharedRef(_)
+            ValueType::Record(_)
+                | ValueType::SharedOwner(_)
+                | ValueType::SharedRef(_)
+                | ValueType::Sequence(_)
         ) {
                     return Err(LowerError {
                         message: "printing whole record values is not supported in Records v0"
@@ -675,6 +710,150 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                 merged.merge_repeat(&body_exit, statement.span)?;
                 self.move_tracker = merged;
                 StmtKind::Repeat { count, body }
+            }
+            SyntaxStmtKind::SequenceAppend { owner, value } => {
+                let owner_binding = self.visible_binding(owner).ok_or_else(|| LowerError {
+                    message: format!("use of local {owner:?} before definition or outside its scope"),
+                    span: statement.span,
+                })?;
+                let ValueType::Sequence(element_type) = &owner_binding.value_type else {
+                    return Err(LowerError {
+                        message: format!(
+                            "append requires a sequence owner; found {}",
+                            type_label(&owner_binding.value_type)
+                        ),
+                        span: statement.span,
+                    });
+                };
+                self.reference_tracker.ensure_owner_operation_allowed(
+                    owner,
+                    "sequence",
+                    OwnerOperation::Grow,
+                    statement.span,
+                )?;
+                let inspected = self.move_tracker.inspect_value(owner, statement.span)?;
+                debug_assert_eq!(lowered_value_type(&inspected), owner_binding.value_type);
+                let (value, actual_type) = self.lower_expr(value)?;
+                if &actual_type != element_type.as_ref() {
+                    return Err(LowerError {
+                        message: format!(
+                            "append to sequence {owner:?} expects {}, found {}",
+                            type_label(element_type),
+                            type_label(&actual_type)
+                        ),
+                        span: value.span,
+                    });
+                }
+                self.mutable_declarations.insert(owner_binding.declaration_start);
+                StmtKind::SequenceAppend {
+                    owner: owner.clone(),
+                    value,
+                }
+            }
+            SyntaxStmtKind::SequenceLookup {
+                owner,
+                index,
+                binding,
+                then_body,
+                else_body,
+            } => {
+                let owner_binding = self.visible_binding(owner).ok_or_else(|| LowerError {
+                    message: format!("use of local {owner:?} before definition or outside its scope"),
+                    span: statement.span,
+                })?;
+                let ValueType::Sequence(element_type) = &owner_binding.value_type else {
+                    return Err(LowerError {
+                        message: format!(
+                            "lookup requires a sequence owner; found {}",
+                            type_label(&owner_binding.value_type)
+                        ),
+                        span: statement.span,
+                    });
+                };
+                let inspected = self.move_tracker.inspect_value(owner, statement.span)?;
+                debug_assert_eq!(lowered_value_type(&inspected), owner_binding.value_type);
+                let (index, index_type) = self.lower_expr(index)?;
+                if index_type != ValueType::Integer {
+                    return Err(LowerError {
+                        message: "sequence lookup index must be an integer".to_owned(),
+                        span: index.span,
+                    });
+                }
+                if self.visible_binding(binding).is_some() {
+                    return Err(LowerError {
+                        message: format!(
+                            "sequence lookup success binding {binding:?} conflicts with an already-visible local"
+                        ),
+                        span: statement.span,
+                    });
+                }
+                if Self::block_reassigns_name(then_body, binding) {
+                    return Err(LowerError {
+                        message: format!(
+                            "reassigning sequence lookup success binding {binding:?} is not supported in v0"
+                        ),
+                        span: statement.span,
+                    });
+                }
+
+                let element_type = element_type.as_ref().clone();
+                let binding_by_reference = !matches!(
+                    element_type,
+                    ValueType::Integer | ValueType::Bool | ValueType::String
+                );
+                let binding_type = if binding_by_reference {
+                    ValueType::SharedRef(Box::new(element_type))
+                } else {
+                    element_type
+                };
+                let binding_used = Self::identifier_uses_in_statements(then_body)
+                    .contains_key(binding);
+
+                let entry = self.move_tracker.clone();
+                self.move_tracker = entry.clone();
+                let then_body = self.lower_sequence_lookup_success_scope(
+                    owner,
+                    binding,
+                    binding_type,
+                    binding_by_reference && binding_used,
+                    statement.span,
+                    then_body,
+                )?;
+                let then_exit = self.move_tracker.clone();
+
+                self.move_tracker = entry.clone();
+                let else_body = self.lower_child_scope(else_body)?;
+                let else_exit = self.move_tracker.clone();
+
+                let then_returns = block_always_returns(&then_body);
+                let else_returns = block_always_returns(&else_body);
+                let mut merged = entry;
+                match (then_returns, else_returns) {
+                    (false, false) => merged.merge_if(&then_exit, &else_exit),
+                    (true, false) => {
+                        let continues = merged.merge_if_continuing(None, Some(&else_exit));
+                        debug_assert!(continues);
+                    }
+                    (false, true) => {
+                        let continues = merged.merge_if_continuing(Some(&then_exit), None);
+                        debug_assert!(continues);
+                    }
+                    (true, true) => {
+                        let continues = merged.merge_if_continuing(None, None);
+                        debug_assert!(!continues);
+                    }
+                }
+                self.move_tracker = merged;
+
+                StmtKind::SequenceLookup {
+                    owner: owner.clone(),
+                    index,
+                    binding: binding.clone(),
+                    binding_by_reference,
+                    binding_used,
+                    then_body,
+                    else_body,
+                }
             }
             SyntaxStmtKind::Match { .. } => {
                 return Err(LowerError {
@@ -739,6 +918,61 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
         })
     }
 
+    fn lower_sequence_lookup_success_scope(
+        &mut self,
+        owner: &str,
+        binding: &str,
+        binding_type: ValueType,
+        track_reference: bool,
+        lookup_span: Span,
+        statements: &[SyntaxStmt],
+    ) -> Result<Vec<Stmt>, LowerError> {
+        self.scopes.push(HashMap::new());
+        self.define_binding(binding.to_owned(), binding_type, lookup_span.start);
+        if track_reference {
+            self.reference_tracker.define_reference(
+                binding.to_owned(),
+                ReferenceProvenance::local_owner(owner.to_owned(), lookup_span),
+            );
+        }
+        let result = self.lower_statements(statements);
+        let locals = self
+            .scopes
+            .pop()
+            .expect("sequence lookup child scope must be present after lowering");
+        for name in locals.keys() {
+            self.move_tracker.forget(name);
+            self.reference_tracker.forget(name);
+        }
+        result
+    }
+
+    fn block_reassigns_name(statements: &[SyntaxStmt], target: &str) -> bool {
+        statements.iter().any(|statement| match &statement.kind {
+            SyntaxStmtKind::Bind { name, .. } => name == target,
+            SyntaxStmtKind::Repeat { body, .. } => Self::block_reassigns_name(body, target),
+            SyntaxStmtKind::If {
+                then_body,
+                else_body,
+                ..
+            }
+            | SyntaxStmtKind::SequenceLookup {
+                then_body,
+                else_body,
+                ..
+            } => {
+                Self::block_reassigns_name(then_body, target)
+                    || Self::block_reassigns_name(else_body, target)
+            }
+            SyntaxStmtKind::Match { arms, .. } => arms
+                .iter()
+                .any(|arm| Self::block_reassigns_name(&arm.body, target)),
+            SyntaxStmtKind::Print(_)
+            | SyntaxStmtKind::Return(_)
+            | SyntaxStmtKind::SequenceAppend { .. } => false,
+        })
+    }
+
     fn lower_expr(&mut self, expr: &SyntaxExpr) -> Result<(Expr, ValueType), LowerError> {
         let (kind, expression_type) = match &expr.kind {
             SyntaxExprKind::Integer(value) => (ExprKind::Integer(*value), ValueType::Integer),
@@ -756,6 +990,12 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                         ValueType::SharedOwner(_) => self.reference_tracker.ensure_owner_operation_allowed(
                             name,
                             "shared handle",
+                            OwnerOperation::Move,
+                            expr.span,
+                        )?,
+                        ValueType::Sequence(_) => self.reference_tracker.ensure_owner_operation_allowed(
+                            name,
+                            "sequence",
                             OwnerOperation::Move,
                             expr.span,
                         )?,
@@ -942,6 +1182,18 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                     ValueType::SharedOwner(name),
                 )
             }
+            SyntaxExprKind::SequenceNew { element_type } => {
+                let element_type = self
+                    .record_environment
+                    .resolve_type_name(element_type, expr.span)?;
+                let element_type = lowered_value_type(&element_type);
+                (
+                    ExprKind::SequenceNew {
+                        element_type: element_type.clone(),
+                    },
+                    ValueType::Sequence(Box::new(element_type)),
+                )
+            }
             SyntaxExprKind::SharedDuplicate(inner) => {
                 let (inner, inner_type) = if let SyntaxExprKind::Identifier(name) = &inner.kind {
                     let value_type = self.move_tracker.inspect_value(name, inner.span)?;
@@ -972,7 +1224,10 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
             SyntaxExprKind::Binary { left, op, right } => {
                 let (left, left_type) = self.lower_expr(left)?;
                 if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
-                    && matches!(&left_type, ValueType::Record(_) | ValueType::SharedOwner(_))
+                    && matches!(
+                        &left_type,
+                        ValueType::Record(_) | ValueType::SharedOwner(_) | ValueType::Sequence(_)
+                    )
                 {
                     return Err(LowerError {
                         message: "record equality is not supported in Records v0".to_owned(),
@@ -992,7 +1247,10 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                         ValueType::Integer
                     }
                     BinaryOp::Equal | BinaryOp::NotEqual => {
-                        if matches!(&right_type, ValueType::Record(_) | ValueType::SharedOwner(_)) {
+                        if matches!(
+                            &right_type,
+                            ValueType::Record(_) | ValueType::SharedOwner(_) | ValueType::Sequence(_)
+                        ) {
                             return Err(LowerError {
                                 message: "record equality is not supported in Records v0"
                                     .to_owned(),
@@ -1075,7 +1333,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                 message: "nested immutable references are not supported in v0".to_owned(),
                 span,
             }),
-            ValueType::Integer | ValueType::Bool | ValueType::String => Err(LowerError {
+            ValueType::Integer | ValueType::Bool | ValueType::String | ValueType::Sequence(_) => Err(LowerError {
                 message: "immutable references require a nominal record target in v0"
                     .to_owned(),
                 span,
@@ -1126,6 +1384,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
             | SyntaxExprKind::UnaryMinus(_)
             | SyntaxExprKind::SharedAlloc(_)
             | SyntaxExprKind::SharedDuplicate(_)
+            | SyntaxExprKind::SequenceNew { .. }
             | SyntaxExprKind::Binary { .. } => Ok(None),
         }
     }
@@ -1157,7 +1416,10 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                             ),
                             span: target.span,
                         }),
-                    ValueType::Integer | ValueType::Bool | ValueType::String => {
+                    ValueType::Integer
+                    | ValueType::Bool
+                    | ValueType::String
+                    | ValueType::Sequence(_) => {
                         Err(LowerError {
                             message: "immutable references require a nominal record target in v0"
                                 .to_owned(),
@@ -1337,6 +1599,26 @@ fn collect_statement_identifier_uses(
                 Self::collect_statement_identifier_uses(statement, uses);
             }
         }
+        SyntaxStmtKind::SequenceAppend { owner, value } => {
+            *uses.entry(owner.clone()).or_insert(0) += 1;
+            Self::collect_expr_identifier_uses(value, uses);
+        }
+        SyntaxStmtKind::SequenceLookup {
+            owner,
+            index,
+            then_body,
+            else_body,
+            ..
+        } => {
+            *uses.entry(owner.clone()).or_insert(0) += 1;
+            Self::collect_expr_identifier_uses(index, uses);
+            for statement in then_body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+            for statement in else_body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+        }
         SyntaxStmtKind::Match { value, arms } => {
             Self::collect_expr_identifier_uses(value, uses);
             for arm in arms {
@@ -1353,7 +1635,8 @@ fn collect_expr_identifier_uses(expr: &SyntaxExpr, uses: &mut HashMap<String, us
         SyntaxExprKind::Integer(_)
         | SyntaxExprKind::String(_)
         | SyntaxExprKind::Bool(_)
-        | SyntaxExprKind::InputInt => {}
+        | SyntaxExprKind::InputInt
+        | SyntaxExprKind::SequenceNew { .. } => {}
         SyntaxExprKind::Identifier(name) => {
             *uses.entry(name.clone()).or_insert(0) += 1;
         }
@@ -1398,7 +1681,18 @@ fn collect_expr_identifier_uses(expr: &SyntaxExpr, uses: &mut HashMap<String, us
                     self.apply_mutability(then_body);
                     self.apply_mutability(else_body);
                 }
-                StmtKind::Assign { .. } | StmtKind::Print(_) | StmtKind::Return(_) => {}
+                StmtKind::SequenceLookup {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    self.apply_mutability(then_body);
+                    self.apply_mutability(else_body);
+                }
+                StmtKind::Assign { .. }
+                | StmtKind::Print(_)
+                | StmtKind::Return(_)
+                | StmtKind::SequenceAppend { .. } => {}
             }
         }
     }

@@ -356,6 +356,9 @@ impl<'a> BodyPromoter<'a> {
                 then_body: self.lower_child_scope(then_body),
                 else_body: self.lower_child_scope(else_body),
             },
+            SyntaxStmtKind::SequenceAppend { .. } | SyntaxStmtKind::SequenceLookup { .. } => {
+                unreachable!("sequence syntax is rejected before enum executable IR promotion")
+            }
             SyntaxStmtKind::Match { value, arms } => {
                 let resolved = self.match_at(statement.span.start).clone();
                 debug_assert_eq!(resolved.arms.len(), arms.len());
@@ -506,6 +509,9 @@ impl<'a> BodyPromoter<'a> {
             SyntaxExprKind::UnaryMinus(inner) => {
                 ExecutableExprKind::UnaryMinus(Box::new(self.lower_expr(inner)))
             }
+            SyntaxExprKind::SequenceNew { .. } => {
+                unreachable!("sequence syntax is rejected before enum executable IR promotion")
+            }
             SyntaxExprKind::SharedBorrow(_)
             | SyntaxExprKind::SharedAlloc(_)
             | SyntaxExprKind::SharedDuplicate(_) => unreachable!(
@@ -546,6 +552,9 @@ impl<'a> BodyPromoter<'a> {
                         .any(|record| record.name == *name)
                 );
                 ExecutableValueType::Record(name.clone())
+            }
+            TypeName::Sequence(_) => {
+                unreachable!("sequence types are rejected before enum executable IR promotion")
             }
             TypeName::SharedRef(_) | TypeName::SharedOwner(_) => unreachable!(
                 "immutable reference types are rejected before enum executable IR promotion"

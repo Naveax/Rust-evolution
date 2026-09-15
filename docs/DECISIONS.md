@@ -233,6 +233,40 @@ Accepted final proof:
 
 Changed-source incremental-rustc/session reuse remains a distinct problem. Issue #82 is the research-first successor and does not alter this accepted exact-artifact cache contract unless later evidence justifies a separately scoped implementation decision.
 
+## D-022 — Append-only sequence v0 is contextual, checked, and direct-Vec
+
+**Decision:** The first production collection is a bounded owned append-only sequence with contextual source forms rather than a general generic container language.
+
+Accepted surface:
+
+```text
+items = seq Item()
+append items, Item(value = 1)
+
+lookup items, 0 as item
+    print item.value
+else
+    print 0
+end
+```
+
+For v0:
+
+- `seq`, `append`, `lookup`, and `as` remain ordinary identifier tokens outside their exact contextual positions;
+- `seq T` is move-only owned storage; `T` is limited to scalars, nominal records, or explicit `shared Record` owners;
+- `seq T()` constructs empty storage directly;
+- `append` is explicit exclusive growth and moves move-only payloads without hidden clone;
+- lookup is always checked with explicit success and failure branches; negative/out-of-range signed indices select failure;
+- scalar elements bind by value while move-only record/shared-owner elements bind through immutable references tied to the sequence owner;
+- live move-only element references block sequence growth, move, and reinitialization until bounded last-use analysis proves the reference dead;
+- a `shared Record` element lookup does not duplicate its `Rc` handle;
+- generated Rust is direct safe `Vec<T>` / `push` / `get` code;
+- removal, holes, slot reuse, generations, nested sequence/reference elements, general generic syntax, mutable references, hidden clone/refcount operations, `RefCell`, locks, GC, registries, and unsafe identity machinery are not part of this decision.
+
+**Reason:** #132 proved that append-only indexed storage preserves the useful direct-`Vec` cost model without prematurely choosing removal/reuse identity semantics. #140 implements that smallest production slice while reusing the existing move and bounded immutable-reference liveness model.
+
+Pre-PR implementation evidence: Dev sequence semantics v0 #4 / run `34982930824` passed focused parser/lowering/codegen/native tests, the full workspace suite, Clippy `-D warnings`, and the differential benchmark. The benchmark reported correctness PASS, normalized LLVM IR equality, exact binary equality, stable timing, ratio `0.996626508`, and PASS by byte-identical-binary parity.
+
 ## Changing a decision
 
 A future change should record:

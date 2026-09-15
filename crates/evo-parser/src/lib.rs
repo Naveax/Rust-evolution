@@ -74,6 +74,7 @@ pub enum TypeName {
     Named(String),
     SharedOwner(String),
     SharedRef(Box<TypeName>),
+    Sequence(Box<TypeName>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +103,17 @@ pub enum StmtKind {
     Match {
         value: Expr,
         arms: Vec<MatchArm>,
+    },
+    SequenceAppend {
+        owner: String,
+        value: Expr,
+    },
+    SequenceLookup {
+        owner: String,
+        index: Expr,
+        binding: String,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
     },
 }
 
@@ -162,6 +174,9 @@ pub enum ExprKind {
     SharedBorrow(Box<Expr>),
     SharedAlloc(Box<Expr>),
     SharedDuplicate(Box<Expr>),
+    SequenceNew {
+        element_type: TypeName,
+    },
     Binary {
         left: Box<Expr>,
         op: BinaryOp,
@@ -683,6 +698,15 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type_name(&mut self) -> Result<TypeName, ParseError> {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "seq")
+            && self.sequence_element_type_starts_at(self.index + 1)
+        {
+            self.advance();
+            return Ok(TypeName::Sequence(Box::new(
+                self.parse_sequence_element_type()?,
+            )));
+        }
+
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared") {
             let next = self.tokens.get(self.index + 1);
             if let Some(token) = next {
@@ -729,6 +753,52 @@ impl<'a> Parser<'a> {
                 message: "expected nominal type name after '&'".to_owned(),
                 span: marker.join(token.span),
             }),
+        }
+    }
+
+    fn parse_sequence_element_type(&mut self) -> Result<TypeName, ParseError> {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared") {
+            let marker = self.advance().span;
+            let token = self.advance();
+            return match token.kind {
+                TokenKind::Identifier(name) => Ok(TypeName::SharedOwner(name)),
+                _ => Err(ParseError {
+                    message: "sequence shared-owner elements require a nominal record type"
+                        .to_owned(),
+                    span: marker.join(token.span),
+                }),
+            };
+        }
+        let token = self.advance();
+        match token.kind {
+            TokenKind::TypeInt => Ok(TypeName::Int),
+            TokenKind::TypeBool => Ok(TypeName::Bool),
+            TokenKind::TypeString => Ok(TypeName::String),
+            TokenKind::Identifier(name) if name == "seq" => Err(ParseError {
+                message: "nested sequence element types are not supported in v0".to_owned(),
+                span: token.span,
+            }),
+            TokenKind::Identifier(name) => Ok(TypeName::Named(name)),
+            TokenKind::Ampersand => Err(ParseError {
+                message: "reference sequence element types are not supported in v0".to_owned(),
+                span: token.span,
+            }),
+            _ => Err(ParseError {
+                message: "expected sequence element type".to_owned(),
+                span: token.span,
+            }),
+        }
+    }
+
+    fn sequence_element_type_starts_at(&self, index: usize) -> bool {
+        match self.tokens.get(index).map(|token| &token.kind) {
+            Some(TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString) => true,
+            Some(TokenKind::Identifier(name)) if name == "shared" => self
+                .tokens
+                .get(index + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_))),
+            Some(TokenKind::Identifier(_)) => true,
+            _ => false,
         }
     }
 
@@ -984,6 +1054,12 @@ impl<'a> Parser<'a> {
             TokenKind::Case => Err(self.error_here("unexpected 'case' without matching 'match'")),
             TokenKind::Identifier(name) => {
                 let start = self.advance().span;
+                if name == "append" && !matches!(self.current().kind, TokenKind::Equal) {
+                    return self.parse_sequence_append(start);
+                }
+                if name == "lookup" && !matches!(self.current().kind, TokenKind::Equal) {
+                    return self.parse_sequence_lookup(start);
+                }
                 if !matches!(self.current().kind, TokenKind::Equal) {
                     return Err(self.error_here("expected '=' after binding name"));
                 }
@@ -999,6 +1075,91 @@ impl<'a> Parser<'a> {
                 "expected binding, 'print', 'return', 'repeat', 'if', or 'match' statement",
             )),
         }
+    }
+
+    fn parse_sequence_append(&mut self, start: Span) -> Result<Stmt, ParseError> {
+        let owner_token = self.advance();
+        let TokenKind::Identifier(owner) = owner_token.kind else {
+            return Err(ParseError {
+                message: "expected sequence owner after 'append'".to_owned(),
+                span: owner_token.span,
+            });
+        };
+        self.expect_kind(TokenKind::Comma, "expected ',' after sequence owner")?;
+        let value = self.parse_expression()?;
+        Ok(Stmt {
+            span: start.join(value.span),
+            kind: StmtKind::SequenceAppend { owner, value },
+        })
+    }
+
+    fn parse_sequence_lookup(&mut self, start: Span) -> Result<Stmt, ParseError> {
+        let owner_token = self.advance();
+        let TokenKind::Identifier(owner) = owner_token.kind else {
+            return Err(ParseError {
+                message: "expected sequence owner after 'lookup'".to_owned(),
+                span: owner_token.span,
+            });
+        };
+        self.expect_kind(TokenKind::Comma, "expected ',' after sequence owner")?;
+        let index = self.parse_expression()?;
+        let as_token = self.advance();
+        if !matches!(&as_token.kind, TokenKind::Identifier(name) if name == "as") {
+            return Err(ParseError {
+                message: "expected contextual 'as' after lookup index".to_owned(),
+                span: as_token.span,
+            });
+        }
+        let binding_token = self.advance();
+        let TokenKind::Identifier(binding) = binding_token.kind else {
+            return Err(ParseError {
+                message: "expected success binding after lookup 'as'".to_owned(),
+                span: binding_token.span,
+            });
+        };
+        if !matches!(self.current().kind, TokenKind::Newline) {
+            return Err(self.error_here("expected end of line after lookup binding"));
+        }
+        self.skip_newlines();
+        let mut then_body = Vec::new();
+        while !matches!(self.current().kind, TokenKind::Else | TokenKind::End) {
+            if self.is_eof() {
+                return Err(self.error_here("missing 'else' and 'end' for lookup block"));
+            }
+            let statement = self.parse_statement()?;
+            self.require_statement_terminator()?;
+            then_body.push(statement);
+            self.skip_newlines();
+        }
+        if !matches!(self.current().kind, TokenKind::Else) {
+            return Err(self.error_here("checked lookup requires an explicit 'else' branch"));
+        }
+        self.advance();
+        if !matches!(self.current().kind, TokenKind::Newline) {
+            return Err(self.error_here("expected end of line after lookup 'else'"));
+        }
+        self.skip_newlines();
+        let mut else_body = Vec::new();
+        while !matches!(self.current().kind, TokenKind::End) {
+            if self.is_eof() {
+                return Err(self.error_here("missing 'end' for lookup block"));
+            }
+            let statement = self.parse_statement()?;
+            self.require_statement_terminator()?;
+            else_body.push(statement);
+            self.skip_newlines();
+        }
+        let close = self.advance().span;
+        Ok(Stmt {
+            kind: StmtKind::SequenceLookup {
+                owner,
+                index,
+                binding,
+                then_body,
+                else_body,
+            },
+            span: start.join(close),
+        })
     }
 
     fn parse_repeat(&mut self) -> Result<Stmt, ParseError> {
@@ -1318,6 +1479,25 @@ impl<'a> Parser<'a> {
                 kind: ExprKind::Bool(false),
                 span: token.span,
             }),
+            TokenKind::Identifier(name)
+                if name == "seq" && self.sequence_constructor_starts_here() =>
+            {
+                let element_type = self.parse_sequence_element_type()?;
+                self.expect_kind(
+                    TokenKind::LParen,
+                    "expected '(' after sequence element type",
+                )?;
+                let close = self
+                    .expect_kind(
+                        TokenKind::RParen,
+                        "expected ')' for empty sequence constructor",
+                    )?
+                    .span;
+                Ok(Expr {
+                    kind: ExprKind::SequenceNew { element_type },
+                    span: token.span.join(close),
+                })
+            }
             TokenKind::Identifier(name) => self.parse_identifier_or_call(name, token.span),
             TokenKind::InputInt => Ok(Expr {
                 kind: ExprKind::InputInt,
@@ -1337,6 +1517,26 @@ impl<'a> Parser<'a> {
                 span: token.span,
             }),
         }
+    }
+
+    fn sequence_constructor_starts_here(&self) -> bool {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "seq")
+            && self.sequence_element_type_starts_at(self.index + 1)
+        {
+            return true;
+        }
+        if !self.sequence_element_type_starts_at(self.index) {
+            return false;
+        }
+        let offset = if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared")
+        {
+            2
+        } else {
+            1
+        };
+        self.tokens
+            .get(self.index + offset)
+            .is_some_and(|token| matches!(token.kind, TokenKind::LParen))
     }
 
     fn parse_identifier_or_call(&mut self, name: String, start: Span) -> Result<Expr, ParseError> {
