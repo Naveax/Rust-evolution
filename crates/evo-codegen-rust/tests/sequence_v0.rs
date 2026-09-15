@@ -69,6 +69,19 @@ fn unused_lookup_binding_codegen_avoids_unused_variable_and_retained_borrow() {
 }
 
 #[test]
+fn sequence_payloads_use_plain_vec_scope_drop_without_leak_scaffolding() {
+    let generated = generate(
+        "record Item\nvalue int\nend\nitems = seq Item()\nappend items, Item(value = 1)\nprint 1\n",
+    );
+    assert!(generated.contains("let mut __evo_items = Vec::<__EvoRecord_Item>::new();"));
+    assert!(generated.contains("__evo_items.push("));
+    assert!(!generated.contains("ManuallyDrop"));
+    assert!(!generated.contains("mem::forget"));
+    assert!(!generated.contains("Box::leak"));
+    assert!(!generated.contains("unsafe"));
+}
+
+#[test]
 fn lookup_generated_lines_map_back_to_lookup_source_span() {
     let source = "items = seq int()\nappend items, 7\nlookup items, 0 as value\nprint value\nelse\nprint 0\nend\n";
     let tokens = lex(source).unwrap();
