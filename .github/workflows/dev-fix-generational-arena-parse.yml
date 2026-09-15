@@ -27,17 +27,26 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Patch parser probe
+      - name: Patch parser probe and research-only clippy boundary
         run: |
           python3 - <<'PY'
           from pathlib import Path
           path = Path('crates/evo-lowering/tests/generational_arena_surface_research.rs')
           text = path.read_text()
-          old = '        parse(ordinary_identifier_program).is_ok(),\n'
-          new = '        lex(ordinary_identifier_program).is_ok_and(|tokens| parse(&tokens).is_ok()),\n'
-          if text.count(old) != 1:
-              raise SystemExit(f'expected exactly one parse probe, found {text.count(old)}')
-          path.write_text(text.replace(old, new))
+
+          old_parse = '        parse(ordinary_identifier_program).is_ok(),\n'
+          new_parse = '        lex(ordinary_identifier_program).is_ok_and(|tokens| parse(&tokens).is_ok()),\n'
+          if text.count(old_parse) != 1:
+              raise SystemExit(f'expected exactly one parse probe, found {text.count(old_parse)}')
+          text = text.replace(old_parse, new_parse)
+
+          old_reports = 'fn write_reports(\n'
+          new_reports = '#[allow(clippy::too_many_arguments)]\nfn write_reports(\n'
+          if text.count(old_reports) != 1:
+              raise SystemExit(f'expected exactly one write_reports helper, found {text.count(old_reports)}')
+          text = text.replace(old_reports, new_reports)
+
+          path.write_text(text)
           PY
           cargo fmt --all
 
@@ -55,5 +64,5 @@ jobs:
           git config user.email "Omersevik095@gmail.com"
           git add crates/evo-lowering/tests/generational_arena_surface_research.rs .github/workflows/dev-fix-generational-arena-parse.yml
           git diff --cached --check
-          git commit -m "fix: validate arena identifier parse probe"
+          git commit -m "fix: validate arena research matrix"
           git push origin HEAD:research/generational-arena-surface-v0
