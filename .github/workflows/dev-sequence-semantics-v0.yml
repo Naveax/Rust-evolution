@@ -73,8 +73,8 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-      - name: Remove one-shot mutation files
-        run: rm .github/workflows/dev-sequence-semantics-v0.yml .github/dev/sequence_semantics_v0_patch.py .github/dev/sequence_semantics_v0_tests.py
+      - name: Remove one-shot and connector-published files
+        run: rm -f .github/workflows/dev-sequence-semantics-v0.yml .github/dev/sequence_semantics_v0_patch.py .github/dev/sequence_semantics_v0_tests.py .github/workflows/append-only-sequence-performance.yml Cargo.lock
 
       - name: Commit validated semantic slice
         run: |
