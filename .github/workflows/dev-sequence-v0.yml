@@ -49,14 +49,14 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          old = '''return Err(LowerError {
-                      message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
-                      span: statement.span,
-                  });'''
-          new = '''Err(LowerError {
-                      message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
-                      span: statement.span,
-                  })'''
+          old = '''                return Err(LowerError {
+                    message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
+                    span: statement.span,
+                });'''
+          new = '''                Err(LowerError {
+                    message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
+                    span: statement.span,
+                })'''
           for filename in (
               "crates/evo-lowering/src/enum_borrow_ownership.rs",
               "crates/evo-lowering/src/enum_ownership.rs",
