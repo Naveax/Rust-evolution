@@ -27,24 +27,40 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Patch parser probe and research-only clippy boundary
+      - name: Patch research matrix gaps
         run: |
           python3 - <<'PY'
           from pathlib import Path
           path = Path('crates/evo-lowering/tests/generational_arena_surface_research.rs')
           text = path.read_text()
 
-          old_parse = '        parse(ordinary_identifier_program).is_ok(),\n'
-          new_parse = '        lex(ordinary_identifier_program).is_ok_and(|tokens| parse(&tokens).is_ok()),\n'
-          if text.count(old_parse) != 1:
-              raise SystemExit(f'expected exactly one parse probe, found {text.count(old_parse)}')
-          text = text.replace(old_parse, new_parse)
+          replacements = [
+              (
+                  '        parse(ordinary_identifier_program).is_ok(),\n',
+                  '        lex(ordinary_identifier_program).is_ok_and(|tokens| parse(&tokens).is_ok()),\n',
+                  'parse probe',
+              ),
+              (
+                  'fn write_reports(\n',
+                  '#[allow(clippy::too_many_arguments)]\nfn write_reports(\n',
+                  'write_reports clippy boundary',
+              ),
+              (
+                  '    let mut same_shape = Arena::with_id(100);\n    let other_handle = same_shape.insert(String::from("other"));\n',
+                  '    let mut same_shape = Arena::with_id(100);\n    let first_other_handle = same_shape.insert(String::from("old"));\n    drop(same_shape.remove(first_other_handle));\n    let other_handle = same_shape.insert(String::from("other"));\n',
+                  'cross-arena same-generation control',
+              ),
+              (
+                  '    assert!(findings.iter().all(|finding| finding.matched));\n',
+                  '    let unmatched_findings = findings\n        .iter()\n        .filter(|finding| !finding.matched)\n        .map(|finding| finding.name)\n        .collect::<Vec<_>>();\n    assert!(\n        unmatched_findings.is_empty(),\n        "unmatched findings: {unmatched_findings:?}"\n    );\n',
+                  'finding diagnostics',
+              ),
+          ]
 
-          old_reports = 'fn write_reports(\n'
-          new_reports = '#[allow(clippy::too_many_arguments)]\nfn write_reports(\n'
-          if text.count(old_reports) != 1:
-              raise SystemExit(f'expected exactly one write_reports helper, found {text.count(old_reports)}')
-          text = text.replace(old_reports, new_reports)
+          for old, new, label in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected exactly one {label}, found {text.count(old)}')
+              text = text.replace(old, new)
 
           path.write_text(text)
           PY
