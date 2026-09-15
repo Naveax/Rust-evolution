@@ -1,0 +1,64 @@
+name: Dev sequence semantics v0
+
+on:
+  push:
+    branches:
+      - feature/append-only-sequence-v0
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/append-only-sequence-v0
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+
+      - name: Apply sequence semantic slice
+        run: python .github/dev/sequence_semantics_v0_patch.py
+
+      - name: Add sequence tests benchmark and permanent gate
+        run: python .github/dev/sequence_semantics_v0_tests.py
+
+      - name: Format
+        run: |
+          cargo fmt --all
+          cargo fmt --all --check
+
+      - name: Focused sequence tests
+        run: |
+          cargo test -p evo-parser --test sequence_syntax_v0
+          cargo test -p evo-lowering --test sequence_v0
+          cargo test -p evo-codegen-rust --test sequence_v0
+          cargo test -p evo-codegen-rust --test sequence_compile
+          cargo test -p evo-bench --test append_only_sequence_reference
+
+      - name: Sequence differential parity gate
+        run: cargo run -p evo-bench -- run benchmarks/cases/append-only-sequence-v0 --out target/evo-bench-append-only-sequence-dev
+
+      - name: Workspace regression tests
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Remove one-shot mutation files
+        run: rm .github/workflows/dev-sequence-semantics-v0.yml .github/dev/sequence_semantics_v0_patch.py .github/dev/sequence_semantics_v0_tests.py
+
+      - name: Commit validated semantic slice
+        run: |
+          git config user.name "Rust Evolution Dev Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: implement append-only sequence v0"
+          git push origin HEAD:feature/append-only-sequence-v0
