@@ -546,10 +546,7 @@ fn collection_surface_research_classifies_bounded_indexed_storage() {
     }
     let drops = Rc::new(Cell::new(0usize));
     {
-        let owned = Vec::from([
-            DropProbe(Rc::clone(&drops)),
-            DropProbe(Rc::clone(&drops)),
-        ]);
+        let owned = Vec::from([DropProbe(Rc::clone(&drops)), DropProbe(Rc::clone(&drops))]);
         assert_eq!(owned.len(), 2);
     }
     findings.push(finding(
