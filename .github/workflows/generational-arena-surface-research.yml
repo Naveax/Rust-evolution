@@ -1,0 +1,95 @@
+name: Generational arena surface research
+
+on:
+  pull_request:
+    paths:
+      - 'crates/evo-lowering/tests/generational_arena_surface_research.rs'
+      - '.github/workflows/generational-arena-surface-research.yml'
+      - 'docs/GENERATIONAL_ARENA_SURFACE_RESEARCH.md'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/evo-lowering/tests/generational_arena_surface_research.rs'
+      - '.github/workflows/generational-arena-surface-research.yml'
+      - 'docs/GENERATIONAL_ARENA_SURFACE_RESEARCH.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  research:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Show toolchain
+        run: rustc -Vv
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Current sequence regression
+        run: >-
+          cargo test -p evo-lowering --test sequence_v0
+
+      - name: Run generational arena surface matrix
+        env:
+          EVO_REQUIRE_PINNED_RUSTC: '1'
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_GENERATIONAL_ARENA_SURFACE_RESEARCH_OUT: ${{ github.workspace }}/target/evo-generational-arena-surface-research
+        run: >-
+          cargo test -p evo-lowering --test generational_arena_surface_research
+          generational_arena_surface_research_resolves_reuse_identity_and_borrow_boundaries
+          -- --ignored --exact --nocapture
+
+      - name: Validate report
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path('target/evo-generational-arena-surface-research/report.json').read_text())
+          assert report['git_sha'] == os.environ['EXPECTED_GIT_SHA'], report
+          assert report['verdict'] == 'RUNTIME-ARENA-ID-GENERATIONAL-CANDIDATE', report
+          assert report['recommended_surface'] == 'CONTEXTUAL-ARENA-HANDLE-CANDIDATE', report
+          assert report['case_count'] >= 24, report
+          assert report['compile_boundary_case_count'] >= 4, report
+          assert report['expectation_mismatches'] == 0, report
+          assert report['runtime_identity_candidate_count'] >= 8, report
+          assert report['no_arena_identity_rejection_count'] >= 2, report
+          assert report['static_scope_deferred_count'] >= 1, report
+          assert report['tombstone_control_count'] >= 1, report
+          assert report['shared_owner_control_count'] >= 2, report
+          assert report['surface_candidate_count'] >= 5, report
+          assert report['borrow_boundary_count'] >= 4, report
+          assert report['cost_evidence_count'] >= 2, report
+          assert report['identity_wrap_fail_closed'] is True, report
+          assert report['generation_wrap_retires_slot'] is True, report
+          assert report['contextual_words_available'] is True, report
+          assert report['handle_copy_word_count'] == 3, report
+          assert report['uses_global_handle_table'] is False, report
+          assert report['uses_refcount_for_handle_copy'] is False, report
+          assert report['uses_unsafe_pointer_graph'] is False, report
+          assert report['uses_lock_or_refcell'] is False, report
+          print(json.dumps(report, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evo-generational-arena-surface-research-ubuntu-24.04
+          path: target/evo-generational-arena-surface-research
+          if-no-files-found: error
+          retention-days: 30
