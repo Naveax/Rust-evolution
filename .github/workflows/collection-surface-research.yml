@@ -1,0 +1,84 @@
+name: Collection surface research
+
+on:
+  pull_request:
+    paths:
+      - 'crates/evo-lowering/tests/collection_surface_research.rs'
+      - '.github/workflows/collection-surface-research.yml'
+      - 'docs/COLLECTION_SURFACE_RESEARCH.md'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/evo-lowering/tests/collection_surface_research.rs'
+      - '.github/workflows/collection-surface-research.yml'
+      - 'docs/COLLECTION_SURFACE_RESEARCH.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  research:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Show toolchain
+        run: rustc -Vv
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Run collection surface matrix
+        env:
+          EVO_REQUIRE_PINNED_RUSTC: '1'
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_COLLECTION_SURFACE_RESEARCH_OUT: ${{ github.workspace }}/target/evo-collection-surface-research
+        run: >-
+          cargo test -p evo-lowering --test collection_surface_research
+          collection_surface_research_classifies_bounded_indexed_storage
+          -- --ignored --exact --nocapture
+
+      - name: Validate report
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path('target/evo-collection-surface-research/report.json').read_text())
+          assert report['git_sha'] == os.environ['EXPECTED_GIT_SHA'], report
+          assert report['verdict'] == 'APPEND-ONLY-FIRST', report
+          assert report['recommended_surface'] == 'CONTEXTUAL-SEQUENCE-TYPE-CANDIDATE', report
+          assert report['case_count'] >= 15, report
+          assert report['compile_boundary_case_count'] >= 4, report
+          assert report['expectation_mismatches'] == 0, report
+          assert report['append_only_candidate_count'] >= 7, report
+          assert report['checked_growth_candidate_count'] >= 3, report
+          assert report['removal_identity_risk_count'] >= 1, report
+          assert report['hole_removal_candidate_count'] >= 1, report
+          assert report['surface_constraint_count'] >= 3, report
+          assert report['composition_control_count'] >= 1, report
+          assert report['brackets_currently_invalid'] is True, report
+          assert report['seq_identifier_available'] is True, report
+          assert report['bounded_type_constructor_precedent'] is True, report
+          print(json.dumps(report, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evo-collection-surface-research-ubuntu-24.04
+          path: target/evo-collection-surface-research
+          if-no-files-found: error
+          retention-days: 30

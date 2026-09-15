@@ -1,90 +1,89 @@
 # Rust Evolution — NEXT ACTION
 
-Last verified update: **2026-09-14**
+Last verified update: **2026-09-15**
 
 ## Stable gate
 
-Current exact verified `main`:
+Current exact verified `main` before the active #132 research PR:
 
-`c5ccc21d7bf23d8daec2de36dc635c0f85313605`
+`f4af6aa89d83dcdee79cabcb4ed166aaf4db6612`
+
+This is PR #131 squash merge, completing #126 arena/generational graph-handle research.
 
 Natural validation on that exact SHA:
 
-- CI #512 / run `34834431873`: **SUCCESS** on Ubuntu 24.04, Windows and macOS;
-- Explicit shared owner performance #12 / run `34834431791`: **SUCCESS**;
-- performance artifact id `10343513286`;
-- digest `sha256:fb6714e7f09ca0047c70435b21129128033d8235732ca1d9f82b6fdeab9716bf`;
-- artifact head SHA exactly matches verified main.
+- CI #547 / run `34857717355`: **SUCCESS** on Ubuntu 24.04, Windows and macOS;
+- Arena generational handles research / run `34857717387`: **SUCCESS**;
+- Explicit shared owner performance / run `34857717373`: **SUCCESS**.
 
-## Completed production milestone — #112 / PR #117
+Issue #126 is closed/completed.
 
-The bounded one-thread explicit shared-owner slice is production behavior:
+## Active P0 research — #132 / PR #139
 
-```text
-shared Item
-share expr
-dup owner
-```
+`#132 P0 research collection surface v0: bounded indexed storage for arena foundations`
 
-Direct safe Rust mapping:
+Branch:
 
-```text
-shared Item -> std::rc::Rc<Item>
-share expr  -> Rc::new(expr)
-dup expr    -> Rc::clone(&expr)
-```
+`research/collection-surface-v0`
 
-Key contracts remain locked:
+Accepted executable research head before documentation synchronization:
 
-- shared owners are a distinct move-only value category;
-- ordinary assignment, by-value calls and returns move handles without hidden count increments;
-- allocation and owner duplication are explicit only;
-- payload immutable references remain ordinary non-owning references tied to the specific source handle;
-- no implicit owned/reference/shared-owner conversions;
-- no `Arc`, `RefCell`, synchronization, `Weak`, GC, global ownership runtime or unsafe emulation;
-- record/enum storage of shared owners remains outside v0;
-- enum-bearing unsupported combinations fail closed before executable codegen.
+`2e620c246580bd446b3b42b3495325a599ffcff9`
 
-## Active research queue
+Dedicated evidence:
 
-### #118 — cyclic / graph ownership boundaries
+- Collection surface research #4 / run `34950557176`: **SUCCESS**;
+- artifact `evo-collection-surface-research-ubuntu-24.04`;
+- artifact id `10388584777`;
+- digest `sha256:dfae195602260d8bb5b900ea821abd3950d013314938012e153d19f42182d690`;
+- Rust **1.98.0**;
+- runtime/surface cases: **17**;
+- compile-boundary cases: **4**;
+- expectation mismatches: **0**;
+- verdict: **APPEND-ONLY-FIRST**;
+- recommended surface family: **CONTEXTUAL-SEQUENCE-TYPE-CANDIDATE**.
 
-PR #120 is parked closed only while its research branch is reconstructed cleanly on verified main.
+Evidence supports an explicit append-only owned sequence first. General removal is not part of this slice because shifting removal can silently rebind numeric indices; hole-preserving removal is a separate explicit storage policy.
 
-Accepted dedicated evidence already exists on historical exact research head `4c6a7e4f1d24388d3081e28ca88c73f142f88a68`:
+Production successor boundaries already fixed by the evidence:
 
-- Cyclic graph ownership research #12 / run `34832221728`: **SUCCESS**;
-- artifact id `10342831245`;
-- digest `sha256:5ebf114519378c431f6cee33181de569ef5d4cd6e54e58f09cf3e502b43612ba`;
-- verdict: **SPLIT-RESEARCH**;
-- 15 cases;
-- compile/runtime expectation mismatches: 0 / 0.
+- contextual bounded sequence type, not general generic syntax merely for convenience;
+- explicit allocation/construction and append;
+- checked indexed lookup;
+- ordinary container move/drop ownership;
+- immutable element references use the existing reference model;
+- live element references block conflicting container growth/move;
+- bounded final-use release permits later growth after the reference is dead;
+- no element removal/reuse in v0;
+- no hidden clone, `Rc`/`Arc` duplication, `RefCell`, lock, GC, global registry, unsafe pointer table, or fabricated stable identity.
 
-The clean persistent research diff is five files only: dedicated workflow, main matrix, retention controls, arena/generation controls and durable report.
+Durable decision report: `docs/COLLECTION_SURFACE_RESEARCH.md`.
 
-Gated successors exist but must not start before #118 merges and its natural exact-main normal CI plus dedicated research workflow succeed:
+## Immediate execution order
 
-- #125 — explicit `Weak` edge surface research;
-- #126 — arena/generational graph-handle research.
+1. Synchronize `COLLECTION_SURFACE_RESEARCH`, `PROJECT_STATE`, and this file on PR #139.
+2. Require one exact documentation-synchronized PR head to pass:
+   - normal CI on Ubuntu, Windows and macOS;
+   - Collection surface research;
+   - Explicit shared owner performance regression gate.
+3. Review the final PR diff and merge PR #139 only with expected-head protection.
+4. Track natural exact-main postmerge CI and Collection surface research; track any naturally triggered ownership/performance gate without dispatching duplicates.
+5. Close #132 completed only after the required postmerge exact-main gates succeed.
+6. Open the bounded production successor for append-only indexed sequence v0 from that verified main. Do not reopen removal/generation semantics in that first implementation issue.
+7. After the collection implementation is independently verified, return to the generation-checked arena-handle candidate from #126.
 
-### #121 — interior mutability ergonomics
+## Separate ownership/research lanes
 
-PR #122 is parked closed with its branch preserved. The clean research diff contains only the dedicated workflow, Rust 1.98 matrix, direct guard-state controls and durable report. Shared ownership and dynamic borrow state remain separate models.
+Keep distinct rather than folding them into the collection model:
 
-### #123 — cross-thread shared ownership
-
-PR #124 is parked closed with its branch preserved. The clean research diff contains only the dedicated workflow, Arc/thread-capability matrix and durable report. `Arc`, Send/Sync-like capability, locks/atomics and Weak remain separate concerns; no automatic `Rc -> Arc` upgrade is permitted.
-
-## Execution order
-
-1. Merge this docs-only handoff after exact-head normal CI.
-2. Require the resulting docs-only `main` SHA to pass natural normal CI.
-3. Reconstruct PR #120's five research-only files onto that exact verified main, reopen #120, and require exact-head normal CI plus dedicated cyclic-graph research evidence.
-4. While #120 Actions run, reconstruct #122 and #124 onto the same verified main while keeping them closed so they do not flood the runner queue.
-5. Merge/validate #118 only after its exact-head gates pass; close #118 only after natural postmerge exact-main normal CI and dedicated cyclic research both pass.
-6. Only then unlock #125 and #126.
-7. Validate #121 and #123 independently and create production successors only for bounded accepted candidates.
+- explicit Weak/cycle edges;
+- interior mutability;
+- cross-thread shared ownership / synchronization;
+- generation-checked removable arena slots;
+- mutable references;
+- generalized lifetime solving;
+- general generic type syntax.
 
 ## CI rule
 
-Never create duplicate active Actions for the same SHA/workflow/input. If one gate is queued or running, advance independent work and return later. Historical failed/cancelled SHAs remain evidence rather than targets for cosmetic reruns.
+Never create duplicate active Actions for the same SHA/workflow/input. Track the existing run. Failed/cancelled historical SHAs remain evidence and are not rerun merely for cosmetic green. CI running does not block independent source/docs work.
