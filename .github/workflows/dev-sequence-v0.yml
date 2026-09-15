@@ -44,6 +44,36 @@ jobs:
       - name: Keep downstream matches fail-closed and exhaustive
         run: python .github/dev/sequence_syntax_compat.py
 
+      - name: Normalize enum ownership fail-closed arms
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for filename in (
+              "crates/evo-lowering/src/enum_borrow_ownership.rs",
+              "crates/evo-lowering/src/enum_ownership.rs",
+          ):
+              path = Path(filename)
+              text = path.read_text()
+              old = '''            SyntaxStmtKind::SequenceAppend { .. } | SyntaxStmtKind::SequenceLookup { .. } => {
+                  return Err(LowerError {
+                      message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
+                      span: statement.span,
+                  });
+              }
+          '''
+              new = '''            SyntaxStmtKind::SequenceAppend { .. } | SyntaxStmtKind::SequenceLookup { .. } => {
+                  Err(LowerError {
+                      message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
+                      span: statement.span,
+                  })
+              }
+          '''
+              if text.count(old) != 1:
+                  raise SystemExit(f"sequence fail-closed return anchor changed in {filename}")
+              path.write_text(text.replace(old, new, 1))
+          PY
+
       - name: Keep research helper exhaustive
         run: python .github/dev/sequence_syntax_test_compat.py
 
