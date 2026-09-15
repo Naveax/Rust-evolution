@@ -35,18 +35,20 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
+
           path = Path("benchmarks/cases/append-only-sequence-v0/reference.rs")
           text = path.read_text()
-          old = '''        if let Some(&__evo_value) = usize::try_from(__evo_i)
-              .ok()
-              .and_then(|__evo_lookup_index| __evo_items.get(__evo_lookup_index))
-          {
-          '''
-          new = '''        if let Some(&__evo_value) = usize::try_from(__evo_i).ok().and_then(|__evo_lookup_index| __evo_items.get(__evo_lookup_index)) {
-          '''
-          if text.count(old) != 1:
-              raise SystemExit("sequence reference formatting anchor changed")
-          path.write_text(text.replace(old, new, 1))
+          pattern = re.compile(
+              r"(?m)^\s*if let Some\(&__evo_value\) = usize::try_from\(__evo_i\)\s*"
+              r"\.ok\(\)\s*"
+              r"\.and_then\(\|__evo_lookup_index\| __evo_items\.get\(__evo_lookup_index\)\)\s*\{"
+          )
+          replacement = "        if let Some(&__evo_value) = usize::try_from(__evo_i).ok().and_then(|__evo_lookup_index| __evo_items.get(__evo_lookup_index)) {"
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit("sequence reference formatting pattern changed")
+          path.write_text(text)
           PY
 
       - name: Format
