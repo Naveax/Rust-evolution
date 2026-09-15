@@ -245,8 +245,14 @@ const SURFACE_CANDIDATES: &[(&str, &str)] = &[
     ("handle-type", "handle Item"),
     ("arena-constructor", "arena Item()"),
     ("insert-binding", "insert items, Item(value = 1) as h"),
-    ("checked-handle-lookup", "lookup items, h as item ... else ... end"),
-    ("checked-remove", "remove items, h as removed ... else ... end"),
+    (
+        "checked-handle-lookup",
+        "lookup items, h as item ... else ... end",
+    ),
+    (
+        "checked-remove",
+        "remove items, h as removed ... else ... end",
+    ),
 ];
 
 fn rustc_path() -> std::ffi::OsString {
@@ -527,8 +533,7 @@ fn write_reports(
     .unwrap();
     fs::write(out.join("report.md"), markdown).expect("write Markdown report");
 
-    let mut csv =
-        String::from("kind,name,classification_or_surface,matched_or_tokens,detail\n");
+    let mut csv = String::from("kind,name,classification_or_surface,matched_or_tokens,detail\n");
     for item in findings {
         writeln!(
             csv,
@@ -597,8 +602,7 @@ fn generational_arena_surface_research_resolves_reuse_identity_and_borrow_bounda
     findings.push(finding(
         "handle-copy-is-three-plain-fields",
         Class::CostEvidence,
-        copied == first
-            && size_of::<Handle>() == size_of::<u64>() * 2 + size_of::<usize>(),
+        copied == first && size_of::<Handle>() == size_of::<u64>() * 2 + size_of::<usize>(),
         "handle copy is arena id plus index plus generation with no owner-count update",
     ));
 
@@ -668,9 +672,7 @@ fn generational_arena_surface_research_resolves_reuse_identity_and_borrow_bounda
     findings.push(finding(
         "non-reusing-tombstone-control-is-safe-but-grows",
         Class::TombstoneControl,
-        removed_tombstone == Some(10)
-            && tombstones[0].is_none()
-            && tombstones[2] == Some(30),
+        removed_tombstone == Some(10) && tombstones[0].is_none() && tombstones[2] == Some(30),
         "never reusing holes avoids generation rebinding but storage grows with removals",
     ));
 
@@ -811,9 +813,9 @@ print arena + handle + insert + remove
     findings.push(finding(
         "existing-lookup-branch-shape-can-carry-handle-lookup",
         Class::SurfaceCandidate,
-        SURFACE_CANDIDATES
-            .iter()
-            .any(|(name, example)| *name == "checked-handle-lookup" && example.starts_with("lookup ")),
+        SURFACE_CANDIDATES.iter().any(|(name, example)| {
+            *name == "checked-handle-lookup" && example.starts_with("lookup ")
+        }),
         "checked lookup already has an explicit success/failure branch shape in Evolution",
     ));
     findings.push(finding(
