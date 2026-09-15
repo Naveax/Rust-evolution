@@ -254,6 +254,7 @@ fn is_identifier(source: &str, expected: &str) -> bool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_reports(
     findings: &[Finding],
     compile_findings: &[CompileFinding],
@@ -498,7 +499,7 @@ fn collection_surface_research_classifies_bounded_indexed_storage() {
         "empty owned storage is explicit and has no payload",
     ));
 
-    let non_empty = vec![5_i64, 7_i64];
+    let non_empty = Vec::from([5_i64, 7_i64]);
     findings.push(finding(
         "create-non-empty-storage",
         Class::AppendOnlyCandidate,
@@ -507,12 +508,11 @@ fn collection_surface_research_classifies_bounded_indexed_storage() {
     ));
 
     let mut appended = Vec::with_capacity(1);
-    appended.push(5_i64);
-    appended.push(7_i64);
+    appended.extend([5_i64, 7_i64]);
     findings.push(finding(
         "append-and-checked-read",
         Class::CheckedGrowthCandidate,
-        appended.get(0) == Some(&5) && appended.get(1) == Some(&7),
+        appended.first() == Some(&5) && appended.get(1) == Some(&7),
         "growth and checked lookup map directly to ordinary Vec operations",
     ));
     findings.push(finding(
@@ -546,9 +546,10 @@ fn collection_surface_research_classifies_bounded_indexed_storage() {
     }
     let drops = Rc::new(Cell::new(0usize));
     {
-        let mut owned = Vec::new();
-        owned.push(DropProbe(Rc::clone(&drops)));
-        owned.push(DropProbe(Rc::clone(&drops)));
+        let owned = Vec::from([
+            DropProbe(Rc::clone(&drops)),
+            DropProbe(Rc::clone(&drops)),
+        ]);
         assert_eq!(owned.len(), 2);
     }
     findings.push(finding(
@@ -558,9 +559,7 @@ fn collection_surface_research_classifies_bounded_indexed_storage() {
         "container destruction deterministically drops live payloads",
     ));
 
-    let mut stable = Vec::with_capacity(1);
-    stable.push(10_i64);
-    stable.push(20_i64);
+    let mut stable = Vec::from([10_i64, 20_i64]);
     let first_index = 0usize;
     let second_index = 1usize;
     for value in 0_i64..256 {
@@ -584,7 +583,7 @@ fn collection_surface_research_classifies_bounded_indexed_storage() {
         "ordinary shifting removal can silently make an old numeric index name a different payload",
     ));
 
-    let mut holed = vec![Some(10_i64), Some(20_i64), Some(30_i64)];
+    let mut holed = Vec::from([Some(10_i64), Some(20_i64), Some(30_i64)]);
     let removed = holed[1].take();
     findings.push(finding(
         "hole-removal-preserves-other-indices",
@@ -616,9 +615,9 @@ fn collection_surface_research_classifies_bounded_indexed_storage() {
     struct Outer {
         inner: Inner,
     }
-    let nested = vec![Outer {
+    let nested = Vec::from([Outer {
         inner: Inner { value: 42 },
-    }];
+    }]);
     findings.push(finding(
         "nested-nominal-payload",
         Class::AppendOnlyCandidate,
@@ -627,8 +626,7 @@ fn collection_surface_research_classifies_bounded_indexed_storage() {
     ));
 
     let shared = Rc::new(String::from("shared"));
-    let mut shared_payloads = Vec::new();
-    shared_payloads.push(Rc::clone(&shared));
+    let shared_payloads = Vec::from([Rc::clone(&shared)]);
     findings.push(finding(
         "explicit-shared-owner-payload-composition",
         Class::CompositionControl,
