@@ -27,6 +27,30 @@ jobs:
       - name: Apply contextual sequence syntax slice
         run: python .github/dev/sequence_syntax_v0_patch.py
 
+      - name: Preserve contextual as spacing
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("crates/evo-formatter/src/lib.rs")
+          text = path.read_text()
+          old = '''    if matches!(current, TokenKind::Identifier(_)) && matches!(previous, TokenKind::RParen) {
+              return true;
+          }
+          '''
+          new = '''    if matches!(current, TokenKind::Identifier(name) if name == "as") {
+              return true;
+          }
+
+          if matches!(current, TokenKind::Identifier(_)) && matches!(previous, TokenKind::RParen) {
+              return true;
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit("contextual as-spacing anchor changed")
+          path.write_text(text.replace(old, new, 1))
+          PY
+
       - name: Format
         run: |
           cargo fmt --all
