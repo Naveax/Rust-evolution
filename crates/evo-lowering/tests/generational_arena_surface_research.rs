@@ -341,6 +341,7 @@ fn csv_cell(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\"").replace('\n', "\\n"))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_reports(
     findings: &[Finding],
     compile_findings: &[CompileFinding],
@@ -646,6 +647,9 @@ fn generational_arena_surface_research_resolves_reuse_identity_and_borrow_bounda
         generation: fresh.generation,
     };
     let mut same_shape = Arena::with_id(100);
+    same_shape.insert(String::from("anchor"));
+    let first_other_handle = same_shape.insert(String::from("old"));
+    drop(same_shape.remove(first_other_handle));
     let other_handle = same_shape.insert(String::from("other"));
     let false_accept_without_arena_id = local.index == other_handle.index
         && local.generation == other_handle.generation
@@ -790,7 +794,7 @@ print arena + handle + insert + remove
     findings.push(finding(
         "ordinary-bindings-using-candidate-words-still-parse",
         Class::SurfaceCandidate,
-        parse(ordinary_identifier_program).is_ok(),
+        lex(ordinary_identifier_program).is_ok_and(|tokens| parse(&tokens).is_ok()),
         "candidate spellings remain usable as ordinary identifiers outside contextual positions",
     ));
 
@@ -887,7 +891,15 @@ print arena + handle + insert + remove
         ),
     ]);
 
-    assert!(findings.iter().all(|finding| finding.matched));
+    let unmatched_findings = findings
+        .iter()
+        .filter(|finding| !finding.matched)
+        .map(|finding| finding.name)
+        .collect::<Vec<_>>();
+    assert!(
+        unmatched_findings.is_empty(),
+        "unmatched findings: {unmatched_findings:?}"
+    );
     assert!(compile_findings.iter().all(|finding| finding.matched));
     assert!(findings.len() >= 24);
     assert!(
