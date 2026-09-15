@@ -1,5 +1,5 @@
-use evo_lexer::{lex, TokenKind};
-use evo_parser::{parse, TypeName};
+use evo_lexer::{TokenKind, lex};
+use evo_parser::{TypeName, parse};
 use std::cell::Cell;
 use std::env;
 use std::fmt::Write as _;
@@ -269,9 +269,17 @@ fn write_reports(
     fs::create_dir_all(out)
         .unwrap_or_else(|error| panic!("failed to create {}: {error}", out.display()));
 
-    let count = |class| findings.iter().filter(|finding| finding.class == class).count();
+    let count = |class| {
+        findings
+            .iter()
+            .filter(|finding| finding.class == class)
+            .count()
+    };
     let expectation_mismatches = findings.iter().filter(|finding| !finding.matched).count()
-        + compile_findings.iter().filter(|finding| !finding.matched).count();
+        + compile_findings
+            .iter()
+            .filter(|finding| !finding.matched)
+            .count();
 
     let mut json = String::new();
     writeln!(json, "{{").unwrap();
@@ -416,9 +424,7 @@ fn write_reports(
     .unwrap();
     fs::write(out.join("report.md"), markdown).expect("write Markdown report");
 
-    let mut csv = String::from(
-        "kind,name,classification_or_surface,matched_or_tokens,detail\n",
-    );
+    let mut csv = String::from("kind,name,classification_or_surface,matched_or_tokens,detail\n");
     for item in findings {
         writeln!(
             csv,
@@ -695,7 +701,12 @@ end
     assert!(findings.iter().all(|item| item.matched));
     assert!(compile_findings.iter().all(|item| item.matched));
 
-    let count = |class| findings.iter().filter(|finding| finding.class == class).count();
+    let count = |class| {
+        findings
+            .iter()
+            .filter(|finding| finding.class == class)
+            .count()
+    };
     assert!(count(Class::AppendOnlyCandidate) >= 7);
     assert!(count(Class::CheckedGrowthCandidate) >= 3);
     assert!(count(Class::RemovalIdentityRisk) >= 1);
