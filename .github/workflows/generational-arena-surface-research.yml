@@ -3,12 +3,16 @@ name: Generational arena surface research
 on:
   pull_request:
     paths:
+      - 'crates/evo-parser/src/lib.rs'
+      - 'crates/evo-lowering/src/record_environment_records.rs'
       - 'crates/evo-lowering/tests/generational_arena_surface_research.rs'
       - '.github/workflows/generational-arena-surface-research.yml'
       - 'docs/GENERATIONAL_ARENA_SURFACE_RESEARCH.md'
   push:
     branches: [main]
     paths:
+      - 'crates/evo-parser/src/lib.rs'
+      - 'crates/evo-lowering/src/record_environment_records.rs'
       - 'crates/evo-lowering/tests/generational_arena_surface_research.rs'
       - '.github/workflows/generational-arena-surface-research.yml'
       - 'docs/GENERATIONAL_ARENA_SURFACE_RESEARCH.md'
