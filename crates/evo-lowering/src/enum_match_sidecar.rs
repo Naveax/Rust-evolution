@@ -75,7 +75,9 @@ fn validate_statements(
             }
             SyntaxStmtKind::Bind { .. }
             | SyntaxStmtKind::Print(_)
-            | SyntaxStmtKind::Return(_) => {}
+            | SyntaxStmtKind::Return(_)
+            | SyntaxStmtKind::SequenceAppend { .. }
+            | SyntaxStmtKind::SequenceLookup { .. } => {}
         }
     }
     Ok(())

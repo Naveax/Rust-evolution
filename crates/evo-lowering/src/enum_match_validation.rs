@@ -93,7 +93,9 @@ fn collect_statements(
             }
             SyntaxStmtKind::Bind { .. }
             | SyntaxStmtKind::Print(_)
-            | SyntaxStmtKind::Return(_) => {}
+            | SyntaxStmtKind::Return(_)
+            | SyntaxStmtKind::SequenceAppend { .. }
+            | SyntaxStmtKind::SequenceLookup { .. } => {}
         }
     }
     Ok(())
@@ -225,7 +227,9 @@ fn statement_always_returns(statement: &SyntaxStmt, environment: &MatchEnvironme
             .is_some_and(|resolved| resolved.all_arms_return),
         SyntaxStmtKind::Bind { .. }
         | SyntaxStmtKind::Print(_)
-        | SyntaxStmtKind::Repeat { .. } => false,
+        | SyntaxStmtKind::Repeat { .. }
+        | SyntaxStmtKind::SequenceAppend { .. }
+        | SyntaxStmtKind::SequenceLookup { .. } => false,
     }
 }
 

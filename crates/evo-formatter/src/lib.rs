@@ -59,7 +59,7 @@ pub fn format_source(source: &str, tokens: &[Token]) -> String {
                     | TokenKind::Enum
                     | TokenKind::Match
                     | TokenKind::Case
-            )
+            ) || matches!(kind, TokenKind::Identifier(name) if name == "lookup")
         }) {
             depth += 1;
         }
@@ -153,6 +153,10 @@ fn needs_space(tokens: &[&Token], index: usize) -> bool {
             TokenKind::Identifier(_) | TokenKind::RParen | TokenKind::Equal
         ) || is_expression_prefix(previous)
             || is_binary_operator(previous, previous_unary_minus);
+    }
+
+    if matches!(current, TokenKind::Identifier(name) if name == "as") {
+        return true;
     }
 
     if matches!(current, TokenKind::Identifier(_)) && matches!(previous, TokenKind::RParen) {

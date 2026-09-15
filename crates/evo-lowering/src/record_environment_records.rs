@@ -82,6 +82,10 @@ impl RecordEnvironment {
             SyntaxTypeName::SharedRef(inner) => self
                 .resolve_type_name(inner, span)
                 .map(|inner| SemanticType::SharedRef(Box::new(inner))),
+            SyntaxTypeName::Sequence(_) => Err(LowerError {
+                message: "append-only sequence semantic lowering is not implemented yet".to_owned(),
+                span,
+            }),
         }
     }
 

@@ -185,7 +185,9 @@ fn collect_matches(
             }
             SyntaxStmtKind::Bind { .. }
             | SyntaxStmtKind::Print(_)
-            | SyntaxStmtKind::Return(_) => {}
+            | SyntaxStmtKind::Return(_)
+            | SyntaxStmtKind::SequenceAppend { .. }
+            | SyntaxStmtKind::SequenceLookup { .. } => {}
         }
     }
 }
@@ -213,6 +215,7 @@ fn collect_constructor_statements(
                 collect_constructor_statements(then_body, environment, lowered);
                 collect_constructor_statements(else_body, environment, lowered);
             }
+            SyntaxStmtKind::SequenceAppend { .. } | SyntaxStmtKind::SequenceLookup { .. } => {}
             SyntaxStmtKind::Match { value, arms } => {
                 collect_constructor_expr(value, environment, lowered);
                 for arm in arms {
@@ -274,7 +277,8 @@ fn collect_constructor_expr(
         | SyntaxExprKind::String(_)
         | SyntaxExprKind::Bool(_)
         | SyntaxExprKind::Identifier(_)
-        | SyntaxExprKind::InputInt => {}
+        | SyntaxExprKind::InputInt
+        | SyntaxExprKind::SequenceNew { .. } => {}
     }
 }
 

@@ -311,6 +311,10 @@ fn resolve_payload_type(
             message: "immutable reference enum payloads are not supported in v0".to_owned(),
             span,
         }),
+        SyntaxTypeName::Sequence(_) => Err(LowerError {
+            message: "append-only sequence enum payloads are not supported in v0".to_owned(),
+            span,
+        }),
     }
 }
 
@@ -346,6 +350,12 @@ fn validate_statement_constructor_shapes(
                 validate_statement_constructor_shapes(then_body, environment)?;
                 validate_statement_constructor_shapes(else_body, environment)?;
             }
+            SyntaxStmtKind::SequenceAppend { .. } | SyntaxStmtKind::SequenceLookup { .. } => {
+                return Err(LowerError {
+                    message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
+                    span: statement.span,
+                });
+            }
             SyntaxStmtKind::Match { value, arms } => {
                 validate_expr_constructor_shapes(value, environment)?;
                 for arm in arms {
@@ -367,6 +377,10 @@ fn validate_expr_constructor_shapes(
         | SyntaxExprKind::Bool(_)
         | SyntaxExprKind::Identifier(_)
         | SyntaxExprKind::InputInt => Ok(()),
+            SyntaxExprKind::SequenceNew { .. } => Err(LowerError {
+                message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
+                span: expr.span,
+            }),
         SyntaxExprKind::Call { arguments, .. } => {
             for argument in arguments {
                 validate_expr_constructor_shapes(argument, environment)?;
@@ -445,6 +459,7 @@ fn obvious_expr_type(expr: &SyntaxExpr) -> Option<ResolvedPayloadType> {
             | BinaryOp::Or => ResolvedPayloadType::Bool,
         }),
         SyntaxExprKind::Identifier(_)
+        | SyntaxExprKind::SequenceNew { .. }
         | SyntaxExprKind::Call { .. }
         | SyntaxExprKind::Construct { .. }
         | SyntaxExprKind::FieldAccess { .. }

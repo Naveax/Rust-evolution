@@ -79,6 +79,10 @@ impl<'a> EnumTypeEnvironment<'a> {
                     ),
                     span: expr.span,
                 }),
+            SyntaxExprKind::SequenceNew { .. } => Err(LowerError {
+                message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
+                span: expr.span,
+            }),
             SyntaxExprKind::Call { name, arguments } => {
                 for argument in arguments {
                     let _ = self.infer_expr(argument, scopes)?;
@@ -224,6 +228,12 @@ fn validate_statements(
                 let _ = environment.infer_expr(condition, scopes)?;
                 validate_child_scope(then_body, environment, scopes)?;
                 validate_child_scope(else_body, environment, scopes)?;
+            }
+            SyntaxStmtKind::SequenceAppend { .. } | SyntaxStmtKind::SequenceLookup { .. } => {
+                return Err(LowerError {
+                    message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
+                    span: statement.span,
+                });
             }
             SyntaxStmtKind::Match { value, arms } => {
                 validate_match(value, arms, environment, scopes)?;
@@ -392,6 +402,10 @@ fn resolve_signature_type(
         }),
         SyntaxTypeName::SharedRef(_) | SyntaxTypeName::SharedOwner(_) => Err(LowerError {
             message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+            span,
+        }),
+        SyntaxTypeName::Sequence(_) => Err(LowerError {
+            message: "append-only sequence function contracts are not supported in enum-bearing programs in v0".to_owned(),
             span,
         }),
     }

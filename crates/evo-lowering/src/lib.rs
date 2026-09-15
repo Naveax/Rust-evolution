@@ -676,6 +676,12 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                 self.move_tracker = merged;
                 StmtKind::Repeat { count, body }
             }
+            SyntaxStmtKind::SequenceAppend { .. } | SyntaxStmtKind::SequenceLookup { .. } => {
+                return Err(LowerError {
+                    message: "append-only sequence syntax is parsed, but sequence semantic lowering is not implemented yet".to_owned(),
+                    span: statement.span,
+                });
+            }
             SyntaxStmtKind::Match { .. } => {
                 return Err(LowerError {
                     message: "match statements are parsed, but Enums v0 semantic lowering/codegen is not implemented yet"
@@ -942,6 +948,12 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                     ValueType::SharedOwner(name),
                 )
             }
+            SyntaxExprKind::SequenceNew { .. } => {
+                return Err(LowerError {
+                    message: "sequence construction syntax is parsed, but sequence semantic lowering is not implemented yet".to_owned(),
+                    span: expr.span,
+                });
+            }
             SyntaxExprKind::SharedDuplicate(inner) => {
                 let (inner, inner_type) = if let SyntaxExprKind::Identifier(name) = &inner.kind {
                     let value_type = self.move_tracker.inspect_value(name, inner.span)?;
@@ -1126,6 +1138,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
             | SyntaxExprKind::UnaryMinus(_)
             | SyntaxExprKind::SharedAlloc(_)
             | SyntaxExprKind::SharedDuplicate(_)
+            | SyntaxExprKind::SequenceNew { .. }
             | SyntaxExprKind::Binary { .. } => Ok(None),
         }
     }
@@ -1337,6 +1350,26 @@ fn collect_statement_identifier_uses(
                 Self::collect_statement_identifier_uses(statement, uses);
             }
         }
+        SyntaxStmtKind::SequenceAppend { owner, value } => {
+            *uses.entry(owner.clone()).or_insert(0) += 1;
+            Self::collect_expr_identifier_uses(value, uses);
+        }
+        SyntaxStmtKind::SequenceLookup {
+            owner,
+            index,
+            then_body,
+            else_body,
+            ..
+        } => {
+            *uses.entry(owner.clone()).or_insert(0) += 1;
+            Self::collect_expr_identifier_uses(index, uses);
+            for statement in then_body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+            for statement in else_body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+        }
         SyntaxStmtKind::Match { value, arms } => {
             Self::collect_expr_identifier_uses(value, uses);
             for arm in arms {
@@ -1353,7 +1386,8 @@ fn collect_expr_identifier_uses(expr: &SyntaxExpr, uses: &mut HashMap<String, us
         SyntaxExprKind::Integer(_)
         | SyntaxExprKind::String(_)
         | SyntaxExprKind::Bool(_)
-        | SyntaxExprKind::InputInt => {}
+        | SyntaxExprKind::InputInt
+        | SyntaxExprKind::SequenceNew { .. } => {}
         SyntaxExprKind::Identifier(name) => {
             *uses.entry(name.clone()).or_insert(0) += 1;
         }

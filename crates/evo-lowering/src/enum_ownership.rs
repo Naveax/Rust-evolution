@@ -162,6 +162,12 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                 }
                 Ok(continues)
             }
+            SyntaxStmtKind::SequenceAppend { .. } | SyntaxStmtKind::SequenceLookup { .. } => {
+                Err(LowerError {
+                    message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
+                    span: statement.span,
+                })
+            }
             SyntaxStmtKind::Match { value, arms } => {
                 self.use_expr(value, OwnershipUseMode::Consume, MoveReason::MatchScrutinee)?;
                 let entry = self.state.clone();
@@ -296,6 +302,10 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
             SyntaxExprKind::LogicalNot(inner) | SyntaxExprKind::UnaryMinus(inner) => {
                 self.use_expr(inner, OwnershipUseMode::Consume, reason)
             }
+            SyntaxExprKind::SequenceNew { .. } => Err(LowerError {
+                message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
+                span: expr.span,
+            }),
             SyntaxExprKind::SharedBorrow(_)
             | SyntaxExprKind::SharedAlloc(_)
             | SyntaxExprKind::SharedDuplicate(_) => Err(LowerError {

@@ -244,6 +244,19 @@ fn collect_statement_effects(statements: &[Stmt], parameter: &str, effects: &mut
                 collect_statement_effects(then_body, parameter, effects);
                 collect_statement_effects(else_body, parameter, effects);
             }
+            StmtKind::SequenceAppend { value, .. } => {
+                collect_expr_effects(value, parameter, UseMode::Consume, effects);
+            }
+            StmtKind::SequenceLookup {
+                index,
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_expr_effects(index, parameter, UseMode::Consume, effects);
+                collect_statement_effects(then_body, parameter, effects);
+                collect_statement_effects(else_body, parameter, effects);
+            }
             StmtKind::Match { value, arms } => {
                 collect_expr_effects(value, parameter, UseMode::Consume, effects);
                 for arm in arms {
@@ -256,7 +269,11 @@ fn collect_statement_effects(statements: &[Stmt], parameter: &str, effects: &mut
 
 fn collect_expr_effects(expr: &Expr, parameter: &str, mode: UseMode, effects: &mut Effects) {
     match &expr.kind {
-        ExprKind::Integer(_) | ExprKind::String(_) | ExprKind::Bool(_) | ExprKind::InputInt => {}
+        ExprKind::Integer(_)
+        | ExprKind::String(_)
+        | ExprKind::Bool(_)
+        | ExprKind::InputInt
+        | ExprKind::SequenceNew { .. } => {}
         ExprKind::Identifier(name) => {
             if name == parameter {
                 match mode {

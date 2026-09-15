@@ -206,6 +206,32 @@ impl SuggestionCatalog {
                     self.walk_child(then_body, scopes, None);
                     self.walk_child(else_body, scopes, None);
                 }
+                StmtKind::SequenceAppend { owner, value } => {
+                    if visible(scopes, owner).is_none() {
+                        let message = format!(
+                            "use of local {owner:?} before definition or outside its scope"
+                        );
+                        register(&message, statement.span, owner, visible_names(scopes));
+                    }
+                    let _ = self.walk_expr(value, scopes);
+                }
+                StmtKind::SequenceLookup {
+                    owner,
+                    index,
+                    binding,
+                    then_body,
+                    else_body,
+                } => {
+                    if visible(scopes, owner).is_none() {
+                        let message = format!(
+                            "use of local {owner:?} before definition or outside its scope"
+                        );
+                        register(&message, statement.span, owner, visible_names(scopes));
+                    }
+                    let _ = self.walk_expr(index, scopes);
+                    self.walk_child(then_body, scopes, Some((binding.clone(), None)));
+                    self.walk_child(else_body, scopes, None);
+                }
                 StmtKind::Match { value, arms } => {
                     let _ = self.walk_expr(value, scopes);
                     for arm in arms {
@@ -270,9 +296,11 @@ impl SuggestionCatalog {
 
     fn walk_expr(&self, expr: &Expr, scopes: &mut Vec<Scope>) -> Option<String> {
         match &expr.kind {
-            ExprKind::Integer(_) | ExprKind::String(_) | ExprKind::Bool(_) | ExprKind::InputInt => {
-                None
-            }
+            ExprKind::Integer(_)
+            | ExprKind::String(_)
+            | ExprKind::Bool(_)
+            | ExprKind::InputInt
+            | ExprKind::SequenceNew { .. } => None,
             ExprKind::Identifier(name) => {
                 if let Some(record_hint) = visible(scopes, name) {
                     return record_hint.clone();
@@ -416,7 +444,7 @@ fn named_type(type_name: &TypeName) -> Option<&str> {
     match type_name {
         TypeName::Named(name) | TypeName::SharedOwner(name) => Some(name),
         TypeName::SharedRef(inner) => named_type(inner),
-        TypeName::Int | TypeName::Bool | TypeName::String => None,
+        TypeName::Sequence(_) | TypeName::Int | TypeName::Bool | TypeName::String => None,
     }
 }
 
