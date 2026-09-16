@@ -27,7 +27,7 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Apply syntax and type plumbing
+      - name: Apply syntax and type plumbing with invalid-type rejection
         run: |
           python3 .github/dev/normalize_arena_syntax_patch.py
           python3 .github/dev/arena_syntax_v0_patch.py
