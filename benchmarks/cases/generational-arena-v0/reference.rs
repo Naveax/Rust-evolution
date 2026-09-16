@@ -1,102 +1,58 @@
-use std::cell::Cell;
-use std::marker::PhantomData;
-
-struct RefHandle<T> {
+struct __EvoHandle<T> {
     arena: u64,
     index: usize,
     generation: u64,
-    _marker: PhantomData<fn() -> T>,
+    _marker: std::marker::PhantomData<fn() -> T>,
 }
-
-impl<T> Copy for RefHandle<T> {}
-
-impl<T> Clone for RefHandle<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
+impl<T> Copy for __EvoHandle<T> {}
+impl<T> Clone for __EvoHandle<T> {
+    fn clone(&self) -> Self { *self }
 }
-
-struct RefSlot<T> {
+struct __EvoSlot<T> {
     generation: u64,
     value: Option<T>,
     retired: bool,
 }
-
-struct RefArena<T> {
+struct __EvoArena<T> {
     id: u64,
-    slots: Vec<RefSlot<T>>,
+    slots: Vec<__EvoSlot<T>>,
     free: Vec<usize>,
 }
-
 std::thread_local! {
-    static NEXT_ARENA_ID: Cell<u64> = const { Cell::new(1) };
+    static __EVO_NEXT_ARENA_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
 }
-
-fn next_arena_id() -> u64 {
-    NEXT_ARENA_ID.with(|next| {
+fn __evo_next_arena_id() -> u64 {
+    __EVO_NEXT_ARENA_ID.with(|next| {
         let id = next.get();
-        if id == 0 {
-            panic!("arena identity exhausted");
-        }
+        if id == 0 { panic!("arena identity exhausted"); }
         next.set(id.checked_add(1).unwrap_or(0));
         id
     })
 }
-
-fn arena_new<T>() -> RefArena<T> {
-    RefArena {
-        id: next_arena_id(),
-        slots: Vec::new(),
-        free: Vec::new(),
-    }
+fn __evo_arena_new<T>() -> __EvoArena<T> {
+    __EvoArena { id: __evo_next_arena_id(), slots: Vec::new(), free: Vec::new() }
 }
-
-fn arena_insert<T>(arena: &mut RefArena<T>, value: T) -> RefHandle<T> {
+fn __evo_arena_insert<T>(arena: &mut __EvoArena<T>, value: T) -> __EvoHandle<T> {
     if let Some(index) = arena.free.pop() {
         let slot = &mut arena.slots[index];
         debug_assert!(!slot.retired && slot.value.is_none());
         slot.value = Some(value);
-        return RefHandle {
-            arena: arena.id,
-            index,
-            generation: slot.generation,
-            _marker: PhantomData,
-        };
+        return __EvoHandle { arena: arena.id, index, generation: slot.generation, _marker: std::marker::PhantomData };
     }
-
     let index = arena.slots.len();
-    arena.slots.push(RefSlot {
-        generation: 0,
-        value: Some(value),
-        retired: false,
-    });
-    RefHandle {
-        arena: arena.id,
-        index,
-        generation: 0,
-        _marker: PhantomData,
-    }
+    arena.slots.push(__EvoSlot { generation: 0, value: Some(value), retired: false });
+    __EvoHandle { arena: arena.id, index, generation: 0, _marker: std::marker::PhantomData }
 }
-
-fn arena_get<T>(arena: &RefArena<T>, handle: RefHandle<T>) -> Option<&T> {
-    if handle.arena != arena.id {
-        return None;
-    }
-    arena
-        .slots
-        .get(handle.index)
+fn __evo_arena_get<T>(arena: &__EvoArena<T>, handle: __EvoHandle<T>) -> Option<&T> {
+    if handle.arena != arena.id { return None; }
+    arena.slots.get(handle.index)
         .filter(|slot| !slot.retired && slot.generation == handle.generation)
         .and_then(|slot| slot.value.as_ref())
 }
-
-fn arena_remove<T>(arena: &mut RefArena<T>, handle: RefHandle<T>) -> Option<T> {
-    if handle.arena != arena.id {
-        return None;
-    }
+fn __evo_arena_remove<T>(arena: &mut __EvoArena<T>, handle: __EvoHandle<T>) -> Option<T> {
+    if handle.arena != arena.id { return None; }
     let slot = arena.slots.get_mut(handle.index)?;
-    if slot.retired || slot.generation != handle.generation {
-        return None;
-    }
+    if slot.retired || slot.generation != handle.generation { return None; }
     let value = slot.value.take()?;
     if slot.generation == u64::MAX {
         slot.retired = true;
@@ -107,51 +63,51 @@ fn arena_remove<T>(arena: &mut RefArena<T>, handle: RefHandle<T>) -> Option<T> {
     Some(value)
 }
 
-fn input_int() -> i64 {
-    let mut input = String::new();
+fn __evo_input_int() -> i64 {
+    let mut __evo_input = String::new();
     std::io::stdin()
-        .read_line(&mut input)
+        .read_line(&mut __evo_input)
         .expect("failed to read integer input");
-    input
+    __evo_input
         .trim()
         .parse::<i64>()
         .expect("expected signed integer input")
 }
 
 fn main() {
-    let n = input_int();
-    let mut items = arena_new::<i64>();
+    let n = __evo_input_int();
+    let mut items = __evo_arena_new::<i64>();
     let mut sum = 0_i64;
     let mut i = 0_i64;
 
     for _ in 0..n {
-        let stale = arena_insert(&mut items, i);
-        if let Some(&value) = arena_get(&items, stale) {
+        let stale = __evo_arena_insert(&mut items, i);
+        if let Some(&value) = __evo_arena_get(&items, stale) {
             sum += value;
         } else {
             sum += 1_000_000_000;
         }
 
-        if let Some(removed) = arena_remove(&mut items, stale) {
+        if let Some(removed) = __evo_arena_remove(&mut items, stale) {
             sum += removed;
         } else {
             sum += 1_000_000_000;
         }
 
-        let fresh = arena_insert(&mut items, i + 1);
-        if arena_get(&items, stale).is_some() {
+        let fresh = __evo_arena_insert(&mut items, i + 1);
+        if __evo_arena_get(&items, stale).is_some() {
             sum += 1_000_000_000;
         } else {
             sum += 1;
         }
 
-        if let Some(&value2) = arena_get(&items, fresh) {
+        if let Some(&value2) = __evo_arena_get(&items, fresh) {
             sum += value2;
         } else {
             sum += 1_000_000_000;
         }
 
-        if let Some(removed2) = arena_remove(&mut items, fresh) {
+        if let Some(removed2) = __evo_arena_remove(&mut items, fresh) {
             sum += removed2;
         } else {
             sum += 1_000_000_000;
