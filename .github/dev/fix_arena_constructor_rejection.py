@@ -27,6 +27,29 @@ if text.count(old_constructor) != 1:
     raise SystemExit(f"arena constructor lookahead anchor count: {text.count(old_constructor)}")
 text = text.replace(old_constructor, new_constructor, 1)
 
+old_sequence_constructor = '''    fn sequence_constructor_starts_here(&self) -> bool {
+        self.sequence_element_type_width_at(self.index)
+            .and_then(|width| self.tokens.get(self.index + width))
+            .is_some_and(|token| matches!(token.kind, TokenKind::LParen))
+    }
+'''
+new_sequence_constructor = '''    fn sequence_constructor_starts_here(&self) -> bool {
+        if matches!(self.current().kind, TokenKind::Ampersand)
+            || matches!(&self.current().kind, TokenKind::Identifier(name) if name == "seq")
+        {
+            return true;
+        }
+        self.sequence_element_type_width_at(self.index)
+            .and_then(|width| self.tokens.get(self.index + width))
+            .is_some_and(|token| matches!(token.kind, TokenKind::LParen))
+    }
+'''
+if text.count(old_sequence_constructor) != 1:
+    raise SystemExit(
+        f"sequence constructor lookahead anchor count: {text.count(old_sequence_constructor)}"
+    )
+text = text.replace(old_sequence_constructor, new_sequence_constructor, 1)
+
 old_type_start = '''    fn arena_element_type_starts_at(&self, index: usize) -> bool {
         match self.tokens.get(index).map(|token| &token.kind) {
             Some(TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString) => true,
