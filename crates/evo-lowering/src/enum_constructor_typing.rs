@@ -83,6 +83,10 @@ impl<'a> EnumTypeEnvironment<'a> {
                 message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
                 span: expr.span,
             }),
+            SyntaxExprKind::ArenaNew { .. } => Err(LowerError {
+                message: "generational arenas are not supported in enum-bearing programs in v0".to_owned(),
+                span: expr.span,
+            }),
             SyntaxExprKind::Call { name, arguments } => {
                 for argument in arguments {
                     let _ = self.infer_expr(argument, scopes)?;
@@ -235,6 +239,12 @@ fn validate_statements(
                     span: statement.span,
                 });
             }
+            SyntaxStmtKind::ArenaInsert { .. } | SyntaxStmtKind::ArenaRemove { .. } => {
+                return Err(LowerError {
+                    message: "generational arenas are not supported in enum-bearing programs in v0".to_owned(),
+                    span: statement.span,
+                });
+            }
             SyntaxStmtKind::Match { value, arms } => {
                 validate_match(value, arms, environment, scopes)?;
             }
@@ -377,6 +387,10 @@ fn resolve_record_field_type(
             message: format!("unknown nominal type {name:?}"),
             span,
         }),
+        SyntaxRecordFieldType::Handle(_) => Err(LowerError {
+            message: "generational handle record fields are not supported in enum-bearing programs in v0".to_owned(),
+            span,
+        }),
     }
 }
 
@@ -406,6 +420,10 @@ fn resolve_signature_type(
         }),
         SyntaxTypeName::Sequence(_) => Err(LowerError {
             message: "append-only sequence function contracts are not supported in enum-bearing programs in v0".to_owned(),
+            span,
+        }),
+        SyntaxTypeName::Arena(_) | SyntaxTypeName::Handle(_) => Err(LowerError {
+            message: "generational arena and handle function contracts are not supported in enum-bearing programs in v0".to_owned(),
             span,
         }),
     }

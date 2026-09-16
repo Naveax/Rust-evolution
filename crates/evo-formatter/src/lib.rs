@@ -59,7 +59,7 @@ pub fn format_source(source: &str, tokens: &[Token]) -> String {
                     | TokenKind::Enum
                     | TokenKind::Match
                     | TokenKind::Case
-            ) || matches!(kind, TokenKind::Identifier(name) if name == "lookup")
+            ) || matches!(kind, TokenKind::Identifier(name) if matches!(name.as_str(), "lookup" | "remove"))
         }) {
             depth += 1;
         }

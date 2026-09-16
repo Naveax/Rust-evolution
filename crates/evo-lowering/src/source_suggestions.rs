@@ -47,7 +47,8 @@ impl SuggestionCatalog {
                         RecordFieldType::Int
                         | RecordFieldType::Bool
                         | RecordFieldType::String
-                        | RecordFieldType::Named(_) => None,
+                        | RecordFieldType::Named(_)
+                        | RecordFieldType::Handle(_) => None,
                     };
                     (field.name.clone(), record_type)
                 })
@@ -215,6 +216,42 @@ impl SuggestionCatalog {
                     }
                     let _ = self.walk_expr(value, scopes);
                 }
+                StmtKind::ArenaInsert {
+                    owner,
+                    value,
+                    binding,
+                } => {
+                    if visible(scopes, owner).is_none() {
+                        let message = format!(
+                            "use of local {owner:?} before definition or outside its scope"
+                        );
+                        register(&message, statement.span, owner, visible_names(scopes));
+                    }
+                    let _ = self.walk_expr(value, scopes);
+                    if visible(scopes, binding).is_none() {
+                        scopes
+                            .last_mut()
+                            .expect("suggestion traversal always has a lexical scope")
+                            .insert(binding.clone(), None);
+                    }
+                }
+                StmtKind::ArenaRemove {
+                    owner,
+                    handle,
+                    binding,
+                    then_body,
+                    else_body,
+                } => {
+                    if visible(scopes, owner).is_none() {
+                        let message = format!(
+                            "use of local {owner:?} before definition or outside its scope"
+                        );
+                        register(&message, statement.span, owner, visible_names(scopes));
+                    }
+                    let _ = self.walk_expr(handle, scopes);
+                    self.walk_child(then_body, scopes, Some((binding.clone(), None)));
+                    self.walk_child(else_body, scopes, None);
+                }
                 StmtKind::SequenceLookup {
                     owner,
                     index,
@@ -300,7 +337,8 @@ impl SuggestionCatalog {
             | ExprKind::String(_)
             | ExprKind::Bool(_)
             | ExprKind::InputInt
-            | ExprKind::SequenceNew { .. } => None,
+            | ExprKind::SequenceNew { .. }
+            | ExprKind::ArenaNew { .. } => None,
             ExprKind::Identifier(name) => {
                 if let Some(record_hint) = visible(scopes, name) {
                     return record_hint.clone();
@@ -444,7 +482,12 @@ fn named_type(type_name: &TypeName) -> Option<&str> {
     match type_name {
         TypeName::Named(name) | TypeName::SharedOwner(name) => Some(name),
         TypeName::SharedRef(inner) => named_type(inner),
-        TypeName::Sequence(_) | TypeName::Int | TypeName::Bool | TypeName::String => None,
+        TypeName::Sequence(_)
+        | TypeName::Arena(_)
+        | TypeName::Handle(_)
+        | TypeName::Int
+        | TypeName::Bool
+        | TypeName::String => None,
     }
 }
 

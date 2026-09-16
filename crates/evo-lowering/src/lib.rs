@@ -190,6 +190,8 @@ pub enum ValueType {
     SharedOwner(String),
     SharedRef(Box<ValueType>),
     Sequence(Box<ValueType>),
+    Arena(Box<ValueType>),
+    Handle(Box<ValueType>),
 }
 
 #[derive(Debug, Clone)]
@@ -434,6 +436,8 @@ fn semantic_type(value_type: &ValueType) -> SemanticType {
             SemanticType::SharedRef(Box::new(semantic_type(inner)))
         }
         ValueType::Sequence(inner) => SemanticType::Sequence(Box::new(semantic_type(inner))),
+        ValueType::Arena(inner) => SemanticType::Arena(Box::new(semantic_type(inner))),
+        ValueType::Handle(inner) => SemanticType::Handle(Box::new(semantic_type(inner))),
     }
 }
 
@@ -448,6 +452,8 @@ fn lowered_value_type(value_type: &SemanticType) -> ValueType {
             ValueType::SharedRef(Box::new(lowered_value_type(inner)))
         }
         SemanticType::Sequence(inner) => ValueType::Sequence(Box::new(lowered_value_type(inner))),
+        SemanticType::Arena(inner) => ValueType::Arena(Box::new(lowered_value_type(inner))),
+        SemanticType::Handle(inner) => ValueType::Handle(Box::new(lowered_value_type(inner))),
     }
 }
 
@@ -460,6 +466,8 @@ fn type_label(value_type: &ValueType) -> String {
         ValueType::SharedOwner(name) => format!("shared {name}"),
         ValueType::SharedRef(inner) => format!("&{}", type_label(inner)),
         ValueType::Sequence(inner) => format!("seq {}", type_label(inner)),
+        ValueType::Arena(inner) => format!("arena {}", type_label(inner)),
+        ValueType::Handle(inner) => format!("handle {}", type_label(inner)),
     }
 }
 
@@ -615,6 +623,12 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                             OwnerOperation::Reinitialize,
                             statement.span,
                         )?,
+                        ValueType::Arena(_) => self.reference_tracker.ensure_owner_operation_allowed(
+                            name,
+                            "arena",
+                            OwnerOperation::Reinitialize,
+                            statement.span,
+                        )?,
                         _ => {}
                     }
                     self.move_tracker.reinitialize(
@@ -648,6 +662,8 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                 | ValueType::SharedOwner(_)
                 | ValueType::SharedRef(_)
                 | ValueType::Sequence(_)
+                | ValueType::Arena(_)
+                | ValueType::Handle(_)
         ) {
                     return Err(LowerError {
                         message: "printing whole record values is not supported in Records v0"
@@ -855,6 +871,12 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                     else_body,
                 }
             }
+            SyntaxStmtKind::ArenaInsert { .. } | SyntaxStmtKind::ArenaRemove { .. } => {
+                return Err(LowerError {
+                    message: "generational arena syntax is parsed and typed, but arena semantic lowering is not enabled in this commit".to_owned(),
+                    span: statement.span,
+                });
+            }
             SyntaxStmtKind::Match { .. } => {
                 return Err(LowerError {
                     message: "match statements are parsed, but Enums v0 semantic lowering/codegen is not implemented yet"
@@ -969,7 +991,12 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                 .any(|arm| Self::block_reassigns_name(&arm.body, target)),
             SyntaxStmtKind::Print(_)
             | SyntaxStmtKind::Return(_)
-            | SyntaxStmtKind::SequenceAppend { .. } => false,
+            | SyntaxStmtKind::SequenceAppend { .. }
+            | SyntaxStmtKind::ArenaInsert { .. } => false,
+            SyntaxStmtKind::ArenaRemove { then_body, else_body, .. } => {
+                Self::block_reassigns_name(then_body, target)
+                    || Self::block_reassigns_name(else_body, target)
+            }
         })
     }
 
@@ -996,6 +1023,12 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                         ValueType::Sequence(_) => self.reference_tracker.ensure_owner_operation_allowed(
                             name,
                             "sequence",
+                            OwnerOperation::Move,
+                            expr.span,
+                        )?,
+                        ValueType::Arena(_) => self.reference_tracker.ensure_owner_operation_allowed(
+                            name,
+                            "arena",
                             OwnerOperation::Move,
                             expr.span,
                         )?,
@@ -1182,6 +1215,12 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                     ValueType::SharedOwner(name),
                 )
             }
+            SyntaxExprKind::ArenaNew { .. } => {
+                return Err(LowerError {
+                    message: "generational arena construction is parsed, but arena semantic lowering is not enabled in this commit".to_owned(),
+                    span: expr.span,
+                });
+            }
             SyntaxExprKind::SequenceNew { element_type } => {
                 let element_type = self
                     .record_environment
@@ -1226,7 +1265,11 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                 if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
                     && matches!(
                         &left_type,
-                        ValueType::Record(_) | ValueType::SharedOwner(_) | ValueType::Sequence(_)
+                        ValueType::Record(_)
+                            | ValueType::SharedOwner(_)
+                            | ValueType::Sequence(_)
+                            | ValueType::Arena(_)
+                            | ValueType::Handle(_)
                     )
                 {
                     return Err(LowerError {
@@ -1249,7 +1292,11 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                     BinaryOp::Equal | BinaryOp::NotEqual => {
                         if matches!(
                             &right_type,
-                            ValueType::Record(_) | ValueType::SharedOwner(_) | ValueType::Sequence(_)
+                            ValueType::Record(_)
+                            | ValueType::SharedOwner(_)
+                            | ValueType::Sequence(_)
+                            | ValueType::Arena(_)
+                            | ValueType::Handle(_)
                         ) {
                             return Err(LowerError {
                                 message: "record equality is not supported in Records v0"
@@ -1333,7 +1380,12 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                 message: "nested immutable references are not supported in v0".to_owned(),
                 span,
             }),
-            ValueType::Integer | ValueType::Bool | ValueType::String | ValueType::Sequence(_) => Err(LowerError {
+            ValueType::Integer
+            | ValueType::Bool
+            | ValueType::String
+            | ValueType::Sequence(_)
+            | ValueType::Arena(_)
+            | ValueType::Handle(_) => Err(LowerError {
                 message: "immutable references require a nominal record target in v0"
                     .to_owned(),
                 span,
@@ -1385,6 +1437,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
             | SyntaxExprKind::SharedAlloc(_)
             | SyntaxExprKind::SharedDuplicate(_)
             | SyntaxExprKind::SequenceNew { .. }
+            | SyntaxExprKind::ArenaNew { .. }
             | SyntaxExprKind::Binary { .. } => Ok(None),
         }
     }
@@ -1419,7 +1472,9 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                     ValueType::Integer
                     | ValueType::Bool
                     | ValueType::String
-                    | ValueType::Sequence(_) => {
+                    | ValueType::Sequence(_)
+                    | ValueType::Arena(_)
+                    | ValueType::Handle(_) => {
                         Err(LowerError {
                             message: "immutable references require a nominal record target in v0"
                                 .to_owned(),
@@ -1619,6 +1674,26 @@ fn collect_statement_identifier_uses(
                 Self::collect_statement_identifier_uses(statement, uses);
             }
         }
+        SyntaxStmtKind::ArenaInsert { owner, value, .. } => {
+            *uses.entry(owner.clone()).or_insert(0) += 1;
+            Self::collect_expr_identifier_uses(value, uses);
+        }
+        SyntaxStmtKind::ArenaRemove {
+            owner,
+            handle,
+            then_body,
+            else_body,
+            ..
+        } => {
+            *uses.entry(owner.clone()).or_insert(0) += 1;
+            Self::collect_expr_identifier_uses(handle, uses);
+            for statement in then_body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+            for statement in else_body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+        }
         SyntaxStmtKind::Match { value, arms } => {
             Self::collect_expr_identifier_uses(value, uses);
             for arm in arms {
@@ -1636,7 +1711,8 @@ fn collect_expr_identifier_uses(expr: &SyntaxExpr, uses: &mut HashMap<String, us
         | SyntaxExprKind::String(_)
         | SyntaxExprKind::Bool(_)
         | SyntaxExprKind::InputInt
-        | SyntaxExprKind::SequenceNew { .. } => {}
+        | SyntaxExprKind::SequenceNew { .. }
+        | SyntaxExprKind::ArenaNew { .. } => {}
         SyntaxExprKind::Identifier(name) => {
             *uses.entry(name.clone()).or_insert(0) += 1;
         }

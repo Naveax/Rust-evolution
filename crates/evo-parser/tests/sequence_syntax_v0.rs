@@ -64,10 +64,8 @@ fn rejects_nested_sequence_constructor_surface() {
 }
 
 #[test]
-fn removal_surface_stays_absent_in_v0() {
-    let error = parse(&lex("items = seq int()\nremove items, 0\n").unwrap())
-        .expect_err("v0 must not expose removal syntax");
-    assert!(error.message.contains("expected '=' after binding name"));
+fn remove_remains_an_identifier_when_used_as_a_binding() {
+    parse_source("remove = 1\nprint remove\n");
 }
 
 #[test]

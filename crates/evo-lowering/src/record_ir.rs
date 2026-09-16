@@ -7,6 +7,7 @@ pub enum RecordType {
     Bool,
     String,
     Named(String),
+    Handle(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,5 +51,6 @@ fn lower_field_type(field_type: &SyntaxFieldType) -> RecordType {
         SyntaxFieldType::Bool => RecordType::Bool,
         SyntaxFieldType::String => RecordType::String,
         SyntaxFieldType::Named(name) => RecordType::Named(name.clone()),
+        SyntaxFieldType::Handle(name) => RecordType::Handle(name.clone()),
     }
 }

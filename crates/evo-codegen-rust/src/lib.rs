@@ -285,6 +285,8 @@ fn rust_type(value_type: &ValueType) -> String {
         }
         ValueType::SharedRef(inner) => format!("&{}", rust_type(inner)),
         ValueType::Sequence(inner) => format!("Vec<{}>", rust_type(inner)),
+        ValueType::Arena(inner) => format!("__EvoArena<{}>", rust_type(inner)),
+        ValueType::Handle(inner) => format!("__EvoHandle<{}>", rust_type(inner)),
     }
 }
 
@@ -294,6 +296,7 @@ fn rust_record_type(value_type: &RecordType) -> String {
         RecordType::Bool => "bool".to_owned(),
         RecordType::String => "&'static str".to_owned(),
         RecordType::Named(name) => generated_record_name(name),
+        RecordType::Handle(name) => format!("__EvoHandle<{}>", generated_record_name(name)),
     }
 }
 

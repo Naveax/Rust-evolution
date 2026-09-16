@@ -315,6 +315,10 @@ fn resolve_payload_type(
             message: "append-only sequence enum payloads are not supported in v0".to_owned(),
             span,
         }),
+        SyntaxTypeName::Arena(_) | SyntaxTypeName::Handle(_) => Err(LowerError {
+            message: "generational arena and handle enum payloads are not supported in v0".to_owned(),
+            span,
+        }),
     }
 }
 
@@ -356,6 +360,12 @@ fn validate_statement_constructor_shapes(
                     span: statement.span,
                 });
             }
+            SyntaxStmtKind::ArenaInsert { .. } | SyntaxStmtKind::ArenaRemove { .. } => {
+                return Err(LowerError {
+                    message: "generational arenas are not supported in enum-bearing programs in v0".to_owned(),
+                    span: statement.span,
+                });
+            }
             SyntaxStmtKind::Match { value, arms } => {
                 validate_expr_constructor_shapes(value, environment)?;
                 for arm in arms {
@@ -379,6 +389,10 @@ fn validate_expr_constructor_shapes(
         | SyntaxExprKind::InputInt => Ok(()),
             SyntaxExprKind::SequenceNew { .. } => Err(LowerError {
                 message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
+                span: expr.span,
+            }),
+            SyntaxExprKind::ArenaNew { .. } => Err(LowerError {
+                message: "generational arenas are not supported in enum-bearing programs in v0".to_owned(),
                 span: expr.span,
             }),
         SyntaxExprKind::Call { arguments, .. } => {
@@ -460,6 +474,7 @@ fn obvious_expr_type(expr: &SyntaxExpr) -> Option<ResolvedPayloadType> {
         }),
         SyntaxExprKind::Identifier(_)
         | SyntaxExprKind::SequenceNew { .. }
+        | SyntaxExprKind::ArenaNew { .. }
         | SyntaxExprKind::Call { .. }
         | SyntaxExprKind::Construct { .. }
         | SyntaxExprKind::FieldAccess { .. }
