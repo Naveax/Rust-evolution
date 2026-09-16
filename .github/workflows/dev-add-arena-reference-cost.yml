@@ -39,16 +39,11 @@ jobs:
           EVO_REQUIRE_PINNED_RUSTC=1 EVO_GIT_SHA=${GITHUB_SHA} EVO_GENERATIONAL_ARENA_SURFACE_RESEARCH_OUT=${RUNNER_TEMP}/arena-research cargo test -p evo-lowering --test generational_arena_surface_research generational_arena_surface_research_resolves_reuse_identity_and_borrow_boundaries -- --ignored --exact --nocapture
           cargo test -p evo-lowering --test sequence_v0
 
-      - name: Remove one-shot tooling
-        run: |
-          rm .github/workflows/dev-add-arena-reference-cost.yml
-          rm .github/dev/add_arena_reference_cost.py
-
-      - name: Commit validated research control
+      - name: Commit validated research controls
         run: |
           git config user.name "Naveax"
           git config user.email "Omersevik095@gmail.com"
-          git add crates/evo-lowering/tests/generational_arena_surface_research.rs .github/workflows/generational-arena-surface-research.yml docs/GENERATIONAL_ARENA_SURFACE_RESEARCH.md .github/workflows/dev-add-arena-reference-cost.yml .github/dev/add_arena_reference_cost.py
+          git add crates/evo-lowering/tests/generational_arena_surface_research.rs docs/GENERATIONAL_ARENA_SURFACE_RESEARCH.md
           git diff --cached --check
-          git commit -m "research: add arena reference cost control"
+          git commit -m "research: add arena reference and reinitialization controls"
           git push origin HEAD:research/generational-arena-surface-v0
