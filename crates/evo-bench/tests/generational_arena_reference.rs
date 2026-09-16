@@ -68,10 +68,12 @@ fn generational_arena_keeps_independent_control_and_parity_locked_timed_referenc
     assert!(independent.contains("struct RefHandle<T>"));
     assert!(!independent.contains("__EvoArena"));
     assert!(!independent.contains("__EvoHandle"));
-    assert_ne!(normalize_newlines(&independent), normalize_newlines(&generated));
+    assert_ne!(
+        normalize_newlines(&independent),
+        normalize_newlines(&generated)
+    );
 
-    let metadata = manifest_dir
-        .join("../../target/generational-arena-independent-reference.rmeta");
+    let metadata = manifest_dir.join("../../target/generational-arena-independent-reference.rmeta");
     let compile = Command::new("rustc")
         .arg("--edition=2024")
         .arg("--crate-name")
