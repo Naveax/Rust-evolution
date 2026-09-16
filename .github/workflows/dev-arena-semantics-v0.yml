@@ -6,6 +6,8 @@ on:
       - feature/generational-arena-v0
     paths:
       - '.github/workflows/dev-arena-semantics-v0.yml'
+      - '.github/dev/arena_semantics_v0_patch.py'
+      - '.github/dev/arena_semantics_fixups.py'
 
 permissions:
   contents: write
