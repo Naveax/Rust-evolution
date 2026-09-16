@@ -97,6 +97,132 @@ impl<T> Arena<T> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReferenceHandle {
+    arena: u64,
+    index: usize,
+    generation: u64,
+}
+
+#[derive(Debug)]
+struct ReferenceSlot<T> {
+    generation: u64,
+    value: Option<T>,
+    retired: bool,
+}
+
+#[derive(Debug)]
+struct ReferenceArena<T> {
+    id: u64,
+    slots: Vec<ReferenceSlot<T>>,
+    free: Vec<usize>,
+}
+
+impl<T> ReferenceArena<T> {
+    fn with_id(id: u64) -> Self {
+        Self {
+            id,
+            slots: Vec::new(),
+            free: Vec::new(),
+        }
+    }
+
+    fn insert(&mut self, value: T) -> ReferenceHandle {
+        let (index, generation) = if let Some(index) = self.free.pop() {
+            let slot = &mut self.slots[index];
+            assert!(!slot.retired);
+            assert!(slot.value.is_none());
+            slot.value = Some(value);
+            (index, slot.generation)
+        } else {
+            let index = self.slots.len();
+            self.slots.push(ReferenceSlot {
+                generation: 0,
+                value: Some(value),
+                retired: false,
+            });
+            (index, 0)
+        };
+        ReferenceHandle {
+            arena: self.id,
+            index,
+            generation,
+        }
+    }
+
+    fn get(&self, handle: ReferenceHandle) -> Option<&T> {
+        if handle.arena != self.id {
+            return None;
+        }
+        self.slots
+            .get(handle.index)
+            .filter(|slot| !slot.retired && slot.generation == handle.generation)
+            .and_then(|slot| slot.value.as_ref())
+    }
+
+    fn remove(&mut self, handle: ReferenceHandle) -> Option<T> {
+        if handle.arena != self.id {
+            return None;
+        }
+        let slot = self.slots.get_mut(handle.index)?;
+        if slot.retired || slot.generation != handle.generation {
+            return None;
+        }
+        let value = slot.value.take()?;
+        if let Some(next) = slot.generation.checked_add(1) {
+            slot.generation = next;
+            self.free.push(handle.index);
+        } else {
+            slot.retired = true;
+        }
+        Some(value)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CostSnapshot {
+    checksum: i64,
+    slots: usize,
+    free: usize,
+    operations: usize,
+}
+
+fn candidate_cost_snapshot() -> CostSnapshot {
+    let mut arena = Arena::with_id(77);
+    let first = arena.insert(10_i64);
+    let stale = arena.insert(20_i64);
+    let mut checksum = *arena.get(first).expect("candidate first");
+    let removed = arena.remove(stale).expect("candidate remove");
+    let fresh = arena.insert(30_i64);
+    assert_eq!(fresh.index, stale.index);
+    assert!(arena.get(stale).is_none());
+    checksum += removed + *arena.get(fresh).expect("candidate fresh");
+    CostSnapshot {
+        checksum,
+        slots: arena.slots.len(),
+        free: arena.free.len(),
+        operations: 7,
+    }
+}
+
+fn reference_cost_snapshot() -> CostSnapshot {
+    let mut arena = ReferenceArena::with_id(77);
+    let first = arena.insert(10_i64);
+    let stale = arena.insert(20_i64);
+    let mut checksum = *arena.get(first).expect("reference first");
+    let removed = arena.remove(stale).expect("reference remove");
+    let fresh = arena.insert(30_i64);
+    assert_eq!(fresh.index, stale.index);
+    assert!(arena.get(stale).is_none());
+    checksum += removed + *arena.get(fresh).expect("reference fresh");
+    CostSnapshot {
+        checksum,
+        slots: arena.slots.len(),
+        free: arena.free.len(),
+        operations: 7,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct LocalHandle {
     index: usize,
     generation: u64,
@@ -237,6 +363,24 @@ fn main() {
 }
 "#,
         reason: "moving the arena while an element reference remains live must be rejected",
+    },
+    CompileCase {
+        name: "arena-reinitialization-blocked-while-element-reference-live",
+        expected_compile: false,
+        source: r#"
+struct Arena<T> { slots: Vec<T> }
+impl<T> Arena<T> {
+    fn get(&self, index: usize) -> Option<&T> { self.slots.get(index) }
+}
+fn main() {
+    let mut arena = Arena { slots: vec![String::from("a")] };
+    let item = arena.get(0).unwrap();
+    arena = Arena { slots: vec![String::from("b")] };
+    println!("{}", item);
+    drop(arena);
+}
+"#,
+        reason: "reinitializing the arena while an element reference remains live must be rejected",
     },
 ];
 
@@ -457,6 +601,44 @@ fn write_reports(
     )
     .unwrap();
     writeln!(json, "  \"handle_copy_word_count\": 3,").unwrap();
+    let candidate_cost = candidate_cost_snapshot();
+    let reference_cost = reference_cost_snapshot();
+    let reference_equivalent_work = candidate_cost == reference_cost;
+    let candidate_handle_size_bytes = size_of::<Handle>();
+    let reference_handle_size_bytes = size_of::<ReferenceHandle>();
+    let reference_handle_size_equal = candidate_handle_size_bytes == reference_handle_size_bytes;
+    writeln!(
+        json,
+        "  \"reference_equivalent_work\": {reference_equivalent_work},"
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"reference_handle_size_equal\": {reference_handle_size_equal},"
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"candidate_operation_count\": {},",
+        candidate_cost.operations
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"reference_operation_count\": {},",
+        reference_cost.operations
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"candidate_handle_size_bytes\": {candidate_handle_size_bytes},"
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"reference_handle_size_bytes\": {reference_handle_size_bytes},"
+    )
+    .unwrap();
     writeln!(json, "  \"uses_global_handle_table\": false,").unwrap();
     writeln!(json, "  \"uses_refcount_for_handle_copy\": false,").unwrap();
     writeln!(json, "  \"uses_unsafe_pointer_graph\": false,").unwrap();
@@ -831,6 +1013,21 @@ print arena + handle + insert + remove
         "stale and wrong-arena removal must remain source-visible failure rather than panic or fabricated validity",
     ));
 
+    let candidate_cost = candidate_cost_snapshot();
+    let reference_cost = reference_cost_snapshot();
+    findings.push(finding(
+        "idiomatic-reference-equivalent-work-matches",
+        Class::CostEvidence,
+        candidate_cost == reference_cost,
+        "candidate and independent idiomatic Rust generational-slot reference perform the same seven logical operations and end with the same checksum/storage/free-list state",
+    ));
+    findings.push(finding(
+        "idiomatic-reference-handle-size-matches",
+        Class::CostEvidence,
+        size_of::<Handle>() == size_of::<ReferenceHandle>(),
+        "candidate and idiomatic reference handles occupy the same three-machine-word-class identity shape",
+    ));
+
     findings.push(finding(
         "free-list-reuse-is-constant-time-class",
         Class::CostEvidence,
@@ -889,6 +1086,12 @@ print arena + handle + insert + remove
             !compile_findings[3].compiled,
             "ordinary Rust borrowing rejects moving the arena while a borrowed element remains live",
         ),
+        finding(
+            "arena-reinitialization-conflict-is-native-rust",
+            Class::BorrowBoundary,
+            !compile_findings[4].compiled,
+            "ordinary Rust borrowing rejects reinitializing the arena while a borrowed element remains live",
+        ),
     ]);
 
     let unmatched_findings = findings
@@ -928,7 +1131,7 @@ print arena + handle + insert + remove
             .iter()
             .filter(|finding| finding.class == Class::BorrowBoundary)
             .count()
-            >= 4
+            >= 5
     );
 
     let out = env::var_os("EVO_GENERATIONAL_ARENA_SURFACE_RESEARCH_OUT")

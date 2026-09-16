@@ -102,6 +102,7 @@ The candidate stays aligned with the current Evolution ownership model and ordin
 - a live element reference blocks conflicting removal;
 - a live element reference blocks insertion/growth/reuse-capable mutation;
 - a live element reference blocks moving the arena while the reference may still be used;
+- a live element reference blocks reinitializing the arena while that reference may still be used;
 - ordinary bounded final-use / non-lexical-lifetime behavior permits the conflicting operation after the final proven reference use.
 
 This research does not add mutable references. Exclusive arena operations remain explicit owner operations.
@@ -116,6 +117,8 @@ The runtime candidate is intentionally ordinary, inspectable safe Rust:
 - lookup performs arena-id comparison, vector bounds checking, occupancy checking, and generation comparison;
 - handle copy is fixed-size scalar copying;
 - no per-handle allocation or refcount operation is required.
+- a deterministic equivalent-work control executes the candidate and an independent idiomatic Rust generational-slot reference through the same seven insert/get/remove/reuse/stale-get operations;
+- both produce the same checksum, slot count, free-list state, operation count, and three-machine-word-class handle size.
 
 The research model contains no `unsafe`, global handle table, per-handle reference counting, tracing GC, `RefCell`, lock, or pointer-identity shortcut.
 
