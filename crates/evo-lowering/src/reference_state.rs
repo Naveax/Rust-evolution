@@ -40,6 +40,8 @@ pub(crate) enum OwnerOperation {
     Move,
     Reinitialize,
     Grow,
+    Insert,
+    Remove,
 }
 
 impl OwnerOperation {
@@ -48,6 +50,8 @@ impl OwnerOperation {
             Self::Move => "move",
             Self::Reinitialize => "reinitialize",
             Self::Grow => "grow",
+            Self::Insert => "insert into",
+            Self::Remove => "remove from",
         }
     }
 }

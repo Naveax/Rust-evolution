@@ -112,6 +112,28 @@ pub enum StmtKind {
         then_body: Vec<Stmt>,
         else_body: Vec<Stmt>,
     },
+    ArenaInsert {
+        owner: String,
+        value: Expr,
+        binding: String,
+    },
+    ArenaLookup {
+        owner: String,
+        handle: Expr,
+        binding: String,
+        binding_by_reference: bool,
+        binding_used: bool,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
+    ArenaRemove {
+        owner: String,
+        handle: Expr,
+        binding: String,
+        binding_used: bool,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,6 +176,9 @@ pub enum ExprKind {
     SharedAlloc(Box<Expr>),
     SharedDuplicate(Box<Expr>),
     SequenceNew {
+        element_type: ValueType,
+    },
+    ArenaNew {
         element_type: ValueType,
     },
     Binary {
@@ -416,12 +441,23 @@ fn statement_always_returns(statement: &Stmt) -> bool {
             then_body,
             else_body,
             ..
+        }
+        | StmtKind::ArenaLookup {
+            then_body,
+            else_body,
+            ..
+        }
+        | StmtKind::ArenaRemove {
+            then_body,
+            else_body,
+            ..
         } => block_always_returns(then_body) && block_always_returns(else_body),
         StmtKind::Let { .. }
         | StmtKind::Assign { .. }
         | StmtKind::Print(_)
         | StmtKind::Repeat { .. }
-        | StmtKind::SequenceAppend { .. } => false,
+        | StmtKind::SequenceAppend { .. }
+        | StmtKind::ArenaInsert { .. } => false,
     }
 }
 
@@ -777,28 +813,313 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                     message: format!("use of local {owner:?} before definition or outside its scope"),
                     span: statement.span,
                 })?;
-                let ValueType::Sequence(element_type) = &owner_binding.value_type else {
+                let inspected = self.move_tracker.inspect_value(owner, statement.span)?;
+                debug_assert_eq!(lowered_value_type(&inspected), owner_binding.value_type);
+
+                match &owner_binding.value_type {
+                    ValueType::Sequence(element_type) => {
+                        let (index, index_type) = self.lower_expr(index)?;
+                        if index_type != ValueType::Integer {
+                            return Err(LowerError {
+                                message: "sequence lookup index must be an integer".to_owned(),
+                                span: index.span,
+                            });
+                        }
+                        if self.visible_binding(binding).is_some() {
+                            return Err(LowerError {
+                                message: format!(
+                                    "sequence lookup success binding {binding:?} conflicts with an already-visible local"
+                                ),
+                                span: statement.span,
+                            });
+                        }
+                        if Self::block_reassigns_name(then_body, binding) {
+                            return Err(LowerError {
+                                message: format!(
+                                    "reassigning sequence lookup success binding {binding:?} is not supported in v0"
+                                ),
+                                span: statement.span,
+                            });
+                        }
+
+                        let element_type = element_type.as_ref().clone();
+                        let binding_by_reference = !matches!(
+                            &element_type,
+                            ValueType::Integer
+                                | ValueType::Bool
+                                | ValueType::String
+                                | ValueType::Handle(_)
+                        );
+                        let binding_type = if binding_by_reference {
+                            ValueType::SharedRef(Box::new(element_type.clone()))
+                        } else {
+                            element_type
+                        };
+                        let binding_used = Self::identifier_uses_in_statements(then_body)
+                            .contains_key(binding);
+
+                        let entry = self.move_tracker.clone();
+                        self.move_tracker = entry.clone();
+                        let then_body = self.lower_checked_lookup_success_scope(
+                            owner,
+                            binding,
+                            binding_type,
+                            binding_by_reference && binding_used,
+                            statement.span,
+                            then_body,
+                        )?;
+                        let then_exit = self.move_tracker.clone();
+
+                        self.move_tracker = entry.clone();
+                        let else_body = self.lower_child_scope(else_body)?;
+                        let else_exit = self.move_tracker.clone();
+
+                        let then_returns = block_always_returns(&then_body);
+                        let else_returns = block_always_returns(&else_body);
+                        let mut merged = entry;
+                        match (then_returns, else_returns) {
+                            (false, false) => merged.merge_if(&then_exit, &else_exit),
+                            (true, false) => {
+                                let continues = merged.merge_if_continuing(None, Some(&else_exit));
+                                debug_assert!(continues);
+                            }
+                            (false, true) => {
+                                let continues = merged.merge_if_continuing(Some(&then_exit), None);
+                                debug_assert!(continues);
+                            }
+                            (true, true) => {
+                                let continues = merged.merge_if_continuing(None, None);
+                                debug_assert!(!continues);
+                            }
+                        }
+                        self.move_tracker = merged;
+
+                        StmtKind::SequenceLookup {
+                            owner: owner.clone(),
+                            index,
+                            binding: binding.clone(),
+                            binding_by_reference,
+                            binding_used,
+                            then_body,
+                            else_body,
+                        }
+                    }
+                    ValueType::Arena(element_type) => {
+                        let (handle, handle_type) = self.lower_expr(index)?;
+                        let ValueType::Handle(handle_element_type) = &handle_type else {
+                            return Err(LowerError {
+                                message: format!(
+                                    "arena lookup requires handle {}; found {}",
+                                    type_label(element_type),
+                                    type_label(&handle_type)
+                                ),
+                                span: handle.span,
+                            });
+                        };
+                        if handle_element_type.as_ref() != element_type.as_ref() {
+                            return Err(LowerError {
+                                message: format!(
+                                    "arena lookup for {owner:?} expects handle {}, found handle {}",
+                                    type_label(element_type),
+                                    type_label(handle_element_type)
+                                ),
+                                span: handle.span,
+                            });
+                        }
+                        if self.visible_binding(binding).is_some() {
+                            return Err(LowerError {
+                                message: format!(
+                                    "arena lookup success binding {binding:?} conflicts with an already-visible local"
+                                ),
+                                span: statement.span,
+                            });
+                        }
+                        if Self::block_reassigns_name(then_body, binding) {
+                            return Err(LowerError {
+                                message: format!(
+                                    "reassigning arena lookup success binding {binding:?} is not supported in v0"
+                                ),
+                                span: statement.span,
+                            });
+                        }
+
+                        let element_type = element_type.as_ref().clone();
+                        let binding_by_reference = !matches!(
+                            &element_type,
+                            ValueType::Integer | ValueType::Bool | ValueType::String
+                        );
+                        let binding_type = if binding_by_reference {
+                            ValueType::SharedRef(Box::new(element_type.clone()))
+                        } else {
+                            element_type
+                        };
+                        let binding_used = Self::identifier_uses_in_statements(then_body)
+                            .contains_key(binding);
+
+                        let entry = self.move_tracker.clone();
+                        self.move_tracker = entry.clone();
+                        let then_body = self.lower_checked_lookup_success_scope(
+                            owner,
+                            binding,
+                            binding_type,
+                            binding_by_reference && binding_used,
+                            statement.span,
+                            then_body,
+                        )?;
+                        let then_exit = self.move_tracker.clone();
+
+                        self.move_tracker = entry.clone();
+                        let else_body = self.lower_child_scope(else_body)?;
+                        let else_exit = self.move_tracker.clone();
+
+                        let then_returns = block_always_returns(&then_body);
+                        let else_returns = block_always_returns(&else_body);
+                        let mut merged = entry;
+                        match (then_returns, else_returns) {
+                            (false, false) => merged.merge_if(&then_exit, &else_exit),
+                            (true, false) => {
+                                let continues = merged.merge_if_continuing(None, Some(&else_exit));
+                                debug_assert!(continues);
+                            }
+                            (false, true) => {
+                                let continues = merged.merge_if_continuing(Some(&then_exit), None);
+                                debug_assert!(continues);
+                            }
+                            (true, true) => {
+                                let continues = merged.merge_if_continuing(None, None);
+                                debug_assert!(!continues);
+                            }
+                        }
+                        self.move_tracker = merged;
+
+                        StmtKind::ArenaLookup {
+                            owner: owner.clone(),
+                            handle,
+                            binding: binding.clone(),
+                            binding_by_reference,
+                            binding_used,
+                            then_body,
+                            else_body,
+                        }
+                    }
+                    _ => {
+                        return Err(LowerError {
+                            message: format!(
+                                "lookup requires a sequence or arena owner; found {}",
+                                type_label(&owner_binding.value_type)
+                            ),
+                            span: statement.span,
+                        });
+                    }
+                }
+            }
+            SyntaxStmtKind::ArenaInsert {
+                owner,
+                value,
+                binding,
+            } => {
+                let owner_binding = self.visible_binding(owner).ok_or_else(|| LowerError {
+                    message: format!("use of local {owner:?} before definition or outside its scope"),
+                    span: statement.span,
+                })?;
+                let ValueType::Arena(element_type) = &owner_binding.value_type else {
                     return Err(LowerError {
                         message: format!(
-                            "lookup requires a sequence owner; found {}",
+                            "insert requires an arena owner; found {}",
                             type_label(&owner_binding.value_type)
                         ),
                         span: statement.span,
                     });
                 };
+                if self.visible_binding(binding).is_some() {
+                    return Err(LowerError {
+                        message: format!(
+                            "arena insert handle binding {binding:?} conflicts with an already-visible local"
+                        ),
+                        span: statement.span,
+                    });
+                }
+                self.reference_tracker.ensure_owner_operation_allowed(
+                    owner,
+                    "arena",
+                    OwnerOperation::Insert,
+                    statement.span,
+                )?;
                 let inspected = self.move_tracker.inspect_value(owner, statement.span)?;
                 debug_assert_eq!(lowered_value_type(&inspected), owner_binding.value_type);
-                let (index, index_type) = self.lower_expr(index)?;
-                if index_type != ValueType::Integer {
+                let (value, actual_type) = self.lower_expr(value)?;
+                if &actual_type != element_type.as_ref() {
                     return Err(LowerError {
-                        message: "sequence lookup index must be an integer".to_owned(),
-                        span: index.span,
+                        message: format!(
+                            "insert into arena {owner:?} expects {}, found {}",
+                            type_label(element_type),
+                            type_label(&actual_type)
+                        ),
+                        span: value.span,
+                    });
+                }
+                let handle_type = ValueType::Handle(Box::new(element_type.as_ref().clone()));
+                self.define_binding(binding.clone(), handle_type, statement.span.start);
+                self.mutable_declarations.insert(owner_binding.declaration_start);
+                StmtKind::ArenaInsert {
+                    owner: owner.clone(),
+                    value,
+                    binding: binding.clone(),
+                }
+            }
+            SyntaxStmtKind::ArenaRemove {
+                owner,
+                handle,
+                binding,
+                then_body,
+                else_body,
+            } => {
+                let owner_binding = self.visible_binding(owner).ok_or_else(|| LowerError {
+                    message: format!("use of local {owner:?} before definition or outside its scope"),
+                    span: statement.span,
+                })?;
+                let ValueType::Arena(element_type) = &owner_binding.value_type else {
+                    return Err(LowerError {
+                        message: format!(
+                            "remove requires an arena owner; found {}",
+                            type_label(&owner_binding.value_type)
+                        ),
+                        span: statement.span,
+                    });
+                };
+                self.reference_tracker.ensure_owner_operation_allowed(
+                    owner,
+                    "arena",
+                    OwnerOperation::Remove,
+                    statement.span,
+                )?;
+                let inspected = self.move_tracker.inspect_value(owner, statement.span)?;
+                debug_assert_eq!(lowered_value_type(&inspected), owner_binding.value_type);
+                let (handle, handle_type) = self.lower_expr(handle)?;
+                let ValueType::Handle(handle_element_type) = &handle_type else {
+                    return Err(LowerError {
+                        message: format!(
+                            "arena remove requires handle {}; found {}",
+                            type_label(element_type),
+                            type_label(&handle_type)
+                        ),
+                        span: handle.span,
+                    });
+                };
+                if handle_element_type.as_ref() != element_type.as_ref() {
+                    return Err(LowerError {
+                        message: format!(
+                            "arena remove for {owner:?} expects handle {}, found handle {}",
+                            type_label(element_type),
+                            type_label(handle_element_type)
+                        ),
+                        span: handle.span,
                     });
                 }
                 if self.visible_binding(binding).is_some() {
                     return Err(LowerError {
                         message: format!(
-                            "sequence lookup success binding {binding:?} conflicts with an already-visible local"
+                            "arena remove success binding {binding:?} conflicts with an already-visible local"
                         ),
                         span: statement.span,
                     });
@@ -806,32 +1127,21 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                 if Self::block_reassigns_name(then_body, binding) {
                     return Err(LowerError {
                         message: format!(
-                            "reassigning sequence lookup success binding {binding:?} is not supported in v0"
+                            "reassigning arena remove success binding {binding:?} is not supported in v0"
                         ),
                         span: statement.span,
                     });
                 }
-
-                let element_type = element_type.as_ref().clone();
-                let binding_by_reference = !matches!(
-                    element_type,
-                    ValueType::Integer | ValueType::Bool | ValueType::String
-                );
-                let binding_type = if binding_by_reference {
-                    ValueType::SharedRef(Box::new(element_type))
-                } else {
-                    element_type
-                };
                 let binding_used = Self::identifier_uses_in_statements(then_body)
                     .contains_key(binding);
 
                 let entry = self.move_tracker.clone();
                 self.move_tracker = entry.clone();
-                let then_body = self.lower_sequence_lookup_success_scope(
+                let then_body = self.lower_checked_lookup_success_scope(
                     owner,
                     binding,
-                    binding_type,
-                    binding_by_reference && binding_used,
+                    element_type.as_ref().clone(),
+                    false,
                     statement.span,
                     then_body,
                 )?;
@@ -860,22 +1170,16 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                     }
                 }
                 self.move_tracker = merged;
+                self.mutable_declarations.insert(owner_binding.declaration_start);
 
-                StmtKind::SequenceLookup {
+                StmtKind::ArenaRemove {
                     owner: owner.clone(),
-                    index,
+                    handle,
                     binding: binding.clone(),
-                    binding_by_reference,
                     binding_used,
                     then_body,
                     else_body,
                 }
-            }
-            SyntaxStmtKind::ArenaInsert { .. } | SyntaxStmtKind::ArenaRemove { .. } => {
-                return Err(LowerError {
-                    message: "generational arena syntax is parsed and typed, but arena semantic lowering is not enabled in this commit".to_owned(),
-                    span: statement.span,
-                });
             }
             SyntaxStmtKind::Match { .. } => {
                 return Err(LowerError {
@@ -940,7 +1244,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
         })
     }
 
-    fn lower_sequence_lookup_success_scope(
+    fn lower_checked_lookup_success_scope(
         &mut self,
         owner: &str,
         binding: &str,
@@ -961,7 +1265,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
         let locals = self
             .scopes
             .pop()
-            .expect("sequence lookup child scope must be present after lowering");
+            .expect("checked lookup child scope must be present after lowering");
         for name in locals.keys() {
             self.move_tracker.forget(name);
             self.reference_tracker.forget(name);
@@ -1215,11 +1519,17 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                     ValueType::SharedOwner(name),
                 )
             }
-            SyntaxExprKind::ArenaNew { .. } => {
-                return Err(LowerError {
-                    message: "generational arena construction is parsed, but arena semantic lowering is not enabled in this commit".to_owned(),
-                    span: expr.span,
-                });
+            SyntaxExprKind::ArenaNew { element_type } => {
+                let element_type = self
+                    .record_environment
+                    .resolve_type_name(element_type, expr.span)?;
+                let element_type = lowered_value_type(&element_type);
+                (
+                    ExprKind::ArenaNew {
+                        element_type: element_type.clone(),
+                    },
+                    ValueType::Arena(Box::new(element_type)),
+                )
             }
             SyntaxExprKind::SequenceNew { element_type } => {
                 let element_type = self
@@ -1761,6 +2071,16 @@ fn collect_expr_identifier_uses(expr: &SyntaxExpr, uses: &mut HashMap<String, us
                     then_body,
                     else_body,
                     ..
+                }
+                | StmtKind::ArenaLookup {
+                    then_body,
+                    else_body,
+                    ..
+                }
+                | StmtKind::ArenaRemove {
+                    then_body,
+                    else_body,
+                    ..
                 } => {
                     self.apply_mutability(then_body);
                     self.apply_mutability(else_body);
@@ -1768,7 +2088,8 @@ fn collect_expr_identifier_uses(expr: &SyntaxExpr, uses: &mut HashMap<String, us
                 StmtKind::Assign { .. }
                 | StmtKind::Print(_)
                 | StmtKind::Return(_)
-                | StmtKind::SequenceAppend { .. } => {}
+                | StmtKind::SequenceAppend { .. }
+                | StmtKind::ArenaInsert { .. } => {}
             }
         }
     }
