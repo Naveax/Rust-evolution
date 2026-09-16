@@ -70,7 +70,7 @@ jobs:
           assert report['verdict'] == 'RUNTIME-ARENA-ID-GENERATIONAL-CANDIDATE', report
           assert report['recommended_surface'] == 'CONTEXTUAL-ARENA-HANDLE-CANDIDATE', report
           assert report['case_count'] >= 24, report
-          assert report['compile_boundary_case_count'] >= 4, report
+          assert report['compile_boundary_case_count'] >= 5, report
           assert report['expectation_mismatches'] == 0, report
           assert report['runtime_identity_candidate_count'] >= 8, report
           assert report['no_arena_identity_rejection_count'] >= 2, report
@@ -78,12 +78,17 @@ jobs:
           assert report['tombstone_control_count'] >= 1, report
           assert report['shared_owner_control_count'] >= 2, report
           assert report['surface_candidate_count'] >= 5, report
-          assert report['borrow_boundary_count'] >= 4, report
-          assert report['cost_evidence_count'] >= 2, report
+          assert report['borrow_boundary_count'] >= 5, report
+          assert report['cost_evidence_count'] >= 4, report
           assert report['identity_wrap_fail_closed'] is True, report
           assert report['generation_wrap_retires_slot'] is True, report
           assert report['contextual_words_available'] is True, report
           assert report['handle_copy_word_count'] == 3, report
+          assert report['reference_equivalent_work'] is True, report
+          assert report['reference_handle_size_equal'] is True, report
+          assert report['candidate_operation_count'] == 7, report
+          assert report['reference_operation_count'] == 7, report
+          assert report['candidate_handle_size_bytes'] == report['reference_handle_size_bytes'], report
           assert report['uses_global_handle_table'] is False, report
           assert report['uses_refcount_for_handle_copy'] is False, report
           assert report['uses_unsafe_pointer_graph'] is False, report
