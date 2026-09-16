@@ -27,7 +27,15 @@ fn generational_arena_reference_is_independent_and_generated_runtime_has_no_hidd
     assert!(generated.contains("slot.generation == u64::MAX"));
     assert!(generated.contains("checked_add(1).unwrap_or(0)"));
 
-    for forbidden in ["unsafe", "RefCell", "Mutex", "RwLock", "HashMap", "Rc::clone", "Arc<"] {
+    for forbidden in [
+        "unsafe",
+        "RefCell",
+        "Mutex",
+        "RwLock",
+        "HashMap",
+        "Rc::clone",
+        "Arc<",
+    ] {
         assert!(
             !generated.contains(forbidden),
             "generated arena benchmark must not contain hidden runtime mechanism {forbidden:?}"

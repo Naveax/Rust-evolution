@@ -26,7 +26,8 @@ fn compile_rust(label: &str, rust: &str) -> PathBuf {
         .join("../../target/arena-runtime-matrix")
         .join(label);
     if root.exists() {
-        fs::remove_dir_all(&root).expect("stale arena runtime matrix directory should be removable");
+        fs::remove_dir_all(&root)
+            .expect("stale arena runtime matrix directory should be removable");
     }
     fs::create_dir_all(&root).expect("arena runtime matrix directory should be creatable");
     let input = root.join("case.rs");
@@ -107,7 +108,11 @@ fn main() {{
     let output = Command::new(binary)
         .output()
         .expect("generation retirement/drop matrix should run");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "ok\n");
 }
 
@@ -147,6 +152,10 @@ fn generated_shared_owner_lookup_borrows_without_hidden_rc_clone() {
     let output = Command::new(binary)
         .output()
         .expect("shared-owner arena matrix should run");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "9\n");
 }
