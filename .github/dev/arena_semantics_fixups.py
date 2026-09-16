@@ -18,11 +18,11 @@ if text.count(old) != 1:
     raise SystemExit(f"arena support field match anchor count: {text.count(old)}")
 codegen.write_text(text.replace(old, new, 1))
 
-# The graph fixture stores typed Node handles, not integer handles.
+# Sequence construction uses an explicit turbofish in generated Rust.
 compile_test = Path("crates/evo-codegen-rust/tests/arena_compile.rs")
 text = compile_test.read_text()
 old = 'assert!(rust.contains("Vec<__EvoHandle<i64>>"));'
-new = 'assert!(rust.contains("Vec<__EvoHandle<__EvoRecord_Node>>"));'
+new = 'assert!(rust.contains("Vec::<__EvoHandle<i64>>::new()"));'
 if text.count(old) != 1:
-    raise SystemExit(f"arena graph handle assertion anchor count: {text.count(old)}")
+    raise SystemExit(f"arena handle-sequence assertion anchor count: {text.count(old)}")
 compile_test.write_text(text.replace(old, new, 1))
