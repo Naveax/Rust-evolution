@@ -31,6 +31,7 @@ jobs:
         run: |
           python3 .github/dev/normalize_arena_syntax_patch.py
           python3 .github/dev/arena_syntax_v0_patch.py
+          python3 .github/dev/fix_arena_constructor_rejection.py
           cargo fmt --all
 
       - name: Focused syntax and formatter tests
