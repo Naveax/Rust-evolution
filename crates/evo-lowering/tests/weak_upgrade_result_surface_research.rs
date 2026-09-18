@@ -154,7 +154,7 @@ fn rustc() -> OsString {
 }
 
 fn rustc_vv() -> String {
-    let output = Command::new(rustc()).arg("-Vv").output().expect("rustc -Vv");
+    let output = Command::new(rustc())\n        .arg("-Vv")\n        .output()\n        .expect("rustc -Vv");
     assert!(output.status.success());
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }
@@ -189,7 +189,7 @@ fn run_case(case: &Case, root: &Path) -> Finding {
     Finding {
         compile_matched,
         rust_ran: true,
-        runtime_matched: run.status.success() && case.stdout.is_none_or(|expected| expected == stdout),
+        runtime_matched: run.status.success()\n            && case.stdout.is_none_or(|expected| expected == stdout),
     }
 }
 
