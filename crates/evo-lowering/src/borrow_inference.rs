@@ -100,6 +100,26 @@ fn collect_statement_effects(
                 collect_statement_effects(then_body, parameter, effects);
                 collect_statement_effects(else_body, parameter, effects);
             }
+            SyntaxStmtKind::ArenaInsert { owner, value, .. } => {
+                if owner == parameter {
+                    effects.inspect_uses += 1;
+                }
+                collect_expr_effects(value, parameter, UseMode::Consume, effects);
+            }
+            SyntaxStmtKind::ArenaRemove {
+                owner,
+                handle,
+                then_body,
+                else_body,
+                ..
+            } => {
+                if owner == parameter {
+                    effects.inspect_uses += 1;
+                }
+                collect_expr_effects(handle, parameter, UseMode::Consume, effects);
+                collect_statement_effects(then_body, parameter, effects);
+                collect_statement_effects(else_body, parameter, effects);
+            }
             SyntaxStmtKind::Match { value, arms } => {
                 collect_expr_effects(value, parameter, UseMode::Consume, effects);
                 for arm in arms {
@@ -127,7 +147,8 @@ fn collect_expr_effects(
         | SyntaxExprKind::String(_)
         | SyntaxExprKind::Bool(_)
         | SyntaxExprKind::InputInt
-        | SyntaxExprKind::SequenceNew { .. } => {}
+        | SyntaxExprKind::SequenceNew { .. }
+        | SyntaxExprKind::ArenaNew { .. } => {}
         SyntaxExprKind::Identifier(name) => {
             if name == parameter {
                 match mode {

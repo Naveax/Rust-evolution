@@ -1,7 +1,7 @@
 use evo_lexer::Span;
 use evo_lowering::{
-    BinaryOp, Expr, ExprKind, Function, ParameterPassingMode, Program, RecordIr, RecordType, Stmt,
-    StmtKind, ValueType,
+    BinaryOp, Expr, ExprKind, Function, ParameterPassingMode, Program, RecordHandleType, RecordIr,
+    RecordType, Stmt, StmtKind, ValueType,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +56,10 @@ impl Generator {
     }
 
     fn generate(mut self, program: &Program) -> GeneratedRust {
+        if program_uses_arena_support(program) {
+            self.push_unmapped(arena_runtime_support());
+        }
+
         for record in &program.records {
             self.write_record(record);
             self.push_unmapped("\n");
@@ -230,6 +234,84 @@ impl Generator {
                 }
                 self.push_mapped_line(format!("{padding}}}\n"), statement.span);
             }
+            StmtKind::ArenaInsert {
+                owner,
+                value,
+                binding,
+            } => {
+                self.push_mapped_line(
+                    format!(
+                        "{padding}let {} = __evo_arena_insert(&mut {}, {});\n",
+                        generated_identifier(binding),
+                        generated_identifier(owner),
+                        render_expr(value)
+                    ),
+                    statement.span,
+                );
+            }
+            StmtKind::ArenaLookup {
+                owner,
+                handle,
+                binding,
+                binding_by_reference,
+                binding_used,
+                then_body,
+                else_body,
+            } => {
+                let pattern = if !binding_used {
+                    "_".to_owned()
+                } else if *binding_by_reference {
+                    generated_identifier(binding)
+                } else {
+                    format!("&{}", generated_identifier(binding))
+                };
+                self.push_mapped_line(
+                    format!(
+                        "{padding}if let Some({pattern}) = __evo_arena_get(&{}, {}) {{\n",
+                        generated_identifier(owner),
+                        render_expr(handle)
+                    ),
+                    statement.span,
+                );
+                for statement in then_body {
+                    self.write_statement(statement, indent + 1);
+                }
+                self.push_mapped_line(format!("{padding}}} else {{\n"), statement.span);
+                for statement in else_body {
+                    self.write_statement(statement, indent + 1);
+                }
+                self.push_mapped_line(format!("{padding}}}\n"), statement.span);
+            }
+            StmtKind::ArenaRemove {
+                owner,
+                handle,
+                binding,
+                binding_used,
+                then_body,
+                else_body,
+            } => {
+                let pattern = if *binding_used {
+                    generated_identifier(binding)
+                } else {
+                    "_".to_owned()
+                };
+                self.push_mapped_line(
+                    format!(
+                        "{padding}if let Some({pattern}) = __evo_arena_remove(&mut {}, {}) {{\n",
+                        generated_identifier(owner),
+                        render_expr(handle)
+                    ),
+                    statement.span,
+                );
+                for statement in then_body {
+                    self.write_statement(statement, indent + 1);
+                }
+                self.push_mapped_line(format!("{padding}}} else {{\n"), statement.span);
+                for statement in else_body {
+                    self.write_statement(statement, indent + 1);
+                }
+                self.push_mapped_line(format!("{padding}}}\n"), statement.span);
+            }
             StmtKind::If {
                 condition,
                 then_body,
@@ -285,6 +367,8 @@ fn rust_type(value_type: &ValueType) -> String {
         }
         ValueType::SharedRef(inner) => format!("&{}", rust_type(inner)),
         ValueType::Sequence(inner) => format!("Vec<{}>", rust_type(inner)),
+        ValueType::Arena(inner) => format!("__EvoArena<{}>", rust_type(inner)),
+        ValueType::Handle(inner) => format!("__EvoHandle<{}>", rust_type(inner)),
     }
 }
 
@@ -294,6 +378,21 @@ fn rust_record_type(value_type: &RecordType) -> String {
         RecordType::Bool => "bool".to_owned(),
         RecordType::String => "&'static str".to_owned(),
         RecordType::Named(name) => generated_record_name(name),
+        RecordType::Handle(payload) => {
+            format!("__EvoHandle<{}>", rust_record_handle_type(payload))
+        }
+    }
+}
+
+fn rust_record_handle_type(value_type: &RecordHandleType) -> String {
+    match value_type {
+        RecordHandleType::Integer => "i64".to_owned(),
+        RecordHandleType::Bool => "bool".to_owned(),
+        RecordHandleType::String => "&'static str".to_owned(),
+        RecordHandleType::Record(name) => generated_record_name(name),
+        RecordHandleType::SharedOwner(name) => {
+            format!("std::rc::Rc<{}>", generated_record_name(name))
+        }
     }
 }
 
@@ -360,6 +459,9 @@ fn render_expr(expr: &Expr) -> String {
         ExprKind::SequenceNew { element_type } => {
             format!("Vec::<{}>::new()", rust_type(element_type))
         }
+        ExprKind::ArenaNew { element_type } => {
+            format!("__evo_arena_new::<{}>()", rust_type(element_type))
+        }
         ExprKind::Binary { left, op, right } => format!(
             "({} {} {})",
             render_expr(left),
@@ -402,6 +504,167 @@ fn generated_record_field_name(source_name: &str) -> String {
     format!("__evo_field_{source_name}")
 }
 
+fn arena_runtime_support() -> &'static str {
+    concat!(
+        "struct __EvoHandle<T> {\n",
+        "    arena: u64,\n",
+        "    index: usize,\n",
+        "    generation: u64,\n",
+        "    _marker: std::marker::PhantomData<fn() -> T>,\n",
+        "}\n",
+        "impl<T> Copy for __EvoHandle<T> {}\n",
+        "impl<T> Clone for __EvoHandle<T> {\n",
+        "    fn clone(&self) -> Self { *self }\n",
+        "}\n",
+        "struct __EvoSlot<T> {\n",
+        "    generation: u64,\n",
+        "    value: Option<T>,\n",
+        "    retired: bool,\n",
+        "}\n",
+        "struct __EvoArena<T> {\n",
+        "    id: u64,\n",
+        "    slots: Vec<__EvoSlot<T>>,\n",
+        "    free: Vec<usize>,\n",
+        "}\n",
+        "std::thread_local! {\n",
+        "    static __EVO_NEXT_ARENA_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };\n",
+        "}\n",
+        "fn __evo_next_arena_id() -> u64 {\n",
+        "    __EVO_NEXT_ARENA_ID.with(|next| {\n",
+        "        let id = next.get();\n",
+        "        if id == 0 { panic!(\"arena identity exhausted\"); }\n",
+        "        next.set(id.checked_add(1).unwrap_or(0));\n",
+        "        id\n",
+        "    })\n",
+        "}\n",
+        "fn __evo_arena_new<T>() -> __EvoArena<T> {\n",
+        "    __EvoArena { id: __evo_next_arena_id(), slots: Vec::new(), free: Vec::new() }\n",
+        "}\n",
+        "fn __evo_arena_insert<T>(arena: &mut __EvoArena<T>, value: T) -> __EvoHandle<T> {\n",
+        "    if let Some(index) = arena.free.pop() {\n",
+        "        let slot = &mut arena.slots[index];\n",
+        "        debug_assert!(!slot.retired && slot.value.is_none());\n",
+        "        slot.value = Some(value);\n",
+        "        return __EvoHandle { arena: arena.id, index, generation: slot.generation, _marker: std::marker::PhantomData };\n",
+        "    }\n",
+        "    let index = arena.slots.len();\n",
+        "    arena.slots.push(__EvoSlot { generation: 0, value: Some(value), retired: false });\n",
+        "    __EvoHandle { arena: arena.id, index, generation: 0, _marker: std::marker::PhantomData }\n",
+        "}\n",
+        "fn __evo_arena_get<T>(arena: &__EvoArena<T>, handle: __EvoHandle<T>) -> Option<&T> {\n",
+        "    if handle.arena != arena.id { return None; }\n",
+        "    arena.slots.get(handle.index)\n",
+        "        .filter(|slot| !slot.retired && slot.generation == handle.generation)\n",
+        "        .and_then(|slot| slot.value.as_ref())\n",
+        "}\n",
+        "fn __evo_arena_remove<T>(arena: &mut __EvoArena<T>, handle: __EvoHandle<T>) -> Option<T> {\n",
+        "    if handle.arena != arena.id { return None; }\n",
+        "    let slot = arena.slots.get_mut(handle.index)?;\n",
+        "    if slot.retired || slot.generation != handle.generation { return None; }\n",
+        "    let value = slot.value.take()?;\n",
+        "    if slot.generation == u64::MAX {\n",
+        "        slot.retired = true;\n",
+        "    } else {\n",
+        "        slot.generation += 1;\n",
+        "        arena.free.push(handle.index);\n",
+        "    }\n",
+        "    Some(value)\n",
+        "}\n\n",
+    )
+}
+
+fn value_type_uses_arena_support(value_type: &ValueType) -> bool {
+    match value_type {
+        ValueType::Arena(_) | ValueType::Handle(_) => true,
+        ValueType::SharedRef(inner) | ValueType::Sequence(inner) => {
+            value_type_uses_arena_support(inner)
+        }
+        ValueType::Integer
+        | ValueType::Bool
+        | ValueType::String
+        | ValueType::Record(_)
+        | ValueType::SharedOwner(_) => false,
+    }
+}
+
+fn expr_uses_arena_support(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::ArenaNew { .. } => true,
+        ExprKind::SequenceNew { element_type } => value_type_uses_arena_support(element_type),
+        ExprKind::Call { arguments, .. } => arguments.iter().any(expr_uses_arena_support),
+        ExprKind::Construct { fields, .. } => fields
+            .iter()
+            .any(|field| expr_uses_arena_support(&field.value)),
+        ExprKind::FieldAccess { base, .. }
+        | ExprKind::LogicalNot(base)
+        | ExprKind::UnaryMinus(base)
+        | ExprKind::SharedBorrow(base)
+        | ExprKind::SharedOwnerBorrow(base)
+        | ExprKind::SharedAlloc(base)
+        | ExprKind::SharedDuplicate(base) => expr_uses_arena_support(base),
+        ExprKind::Binary { left, right, .. } => {
+            expr_uses_arena_support(left) || expr_uses_arena_support(right)
+        }
+        ExprKind::Integer(_)
+        | ExprKind::String(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Local(_)
+        | ExprKind::InputInt => false,
+    }
+}
+
+fn statement_uses_arena_support(statement: &Stmt) -> bool {
+    match &statement.kind {
+        StmtKind::ArenaInsert { .. }
+        | StmtKind::ArenaLookup { .. }
+        | StmtKind::ArenaRemove { .. } => true,
+        StmtKind::Let { expr, .. }
+        | StmtKind::Assign { expr, .. }
+        | StmtKind::Print(expr)
+        | StmtKind::Return(expr) => expr_uses_arena_support(expr),
+        StmtKind::Repeat { count, body } => {
+            expr_uses_arena_support(count) || body.iter().any(statement_uses_arena_support)
+        }
+        StmtKind::SequenceAppend { value, .. } => expr_uses_arena_support(value),
+        StmtKind::SequenceLookup {
+            index,
+            then_body,
+            else_body,
+            ..
+        } => {
+            expr_uses_arena_support(index)
+                || then_body.iter().any(statement_uses_arena_support)
+                || else_body.iter().any(statement_uses_arena_support)
+        }
+        StmtKind::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            expr_uses_arena_support(condition)
+                || then_body.iter().any(statement_uses_arena_support)
+                || else_body.iter().any(statement_uses_arena_support)
+        }
+    }
+}
+
+fn program_uses_arena_support(program: &Program) -> bool {
+    program
+        .records
+        .iter()
+        .flat_map(|record| &record.fields)
+        .any(|field| matches!(&field.value_type, RecordType::Handle(_)))
+        || program.functions.iter().any(|function| {
+            value_type_uses_arena_support(&function.return_type)
+                || function
+                    .parameters
+                    .iter()
+                    .any(|parameter| value_type_uses_arena_support(&parameter.value_type))
+                || function.body.iter().any(statement_uses_arena_support)
+        })
+        || program.statements.iter().any(statement_uses_arena_support)
+}
+
 fn program_uses_input_int(program: &Program) -> bool {
     program.statements.iter().any(statement_uses_input_int)
         || program
@@ -420,7 +683,9 @@ fn statement_uses_input_int(statement: &Stmt) -> bool {
         StmtKind::Repeat { count, body } => {
             expr_uses_input_int(count) || body.iter().any(statement_uses_input_int)
         }
-        StmtKind::SequenceAppend { value, .. } => expr_uses_input_int(value),
+        StmtKind::SequenceAppend { value, .. } | StmtKind::ArenaInsert { value, .. } => {
+            expr_uses_input_int(value)
+        }
         StmtKind::SequenceLookup {
             index,
             then_body,
@@ -428,6 +693,22 @@ fn statement_uses_input_int(statement: &Stmt) -> bool {
             ..
         } => {
             expr_uses_input_int(index)
+                || then_body.iter().any(statement_uses_input_int)
+                || else_body.iter().any(statement_uses_input_int)
+        }
+        StmtKind::ArenaLookup {
+            handle,
+            then_body,
+            else_body,
+            ..
+        }
+        | StmtKind::ArenaRemove {
+            handle,
+            then_body,
+            else_body,
+            ..
+        } => {
+            expr_uses_input_int(handle)
                 || then_body.iter().any(statement_uses_input_int)
                 || else_body.iter().any(statement_uses_input_int)
         }
@@ -464,7 +745,8 @@ fn expr_uses_input_int(expr: &Expr) -> bool {
         | ExprKind::String(_)
         | ExprKind::Bool(_)
         | ExprKind::Local(_)
-        | ExprKind::SequenceNew { .. } => false,
+        | ExprKind::SequenceNew { .. }
+        | ExprKind::ArenaNew { .. } => false,
     }
 }
 

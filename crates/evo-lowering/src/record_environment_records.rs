@@ -14,12 +14,17 @@ pub(crate) enum SemanticType {
     SharedOwner(String),
     SharedRef(Box<SemanticType>),
     Sequence(Box<SemanticType>),
+    Arena(Box<SemanticType>),
+    Handle(Box<SemanticType>),
 }
 
 impl SemanticType {
     #[must_use]
     pub(crate) fn is_trivially_reusable_v0(&self) -> bool {
-        !matches!(self, Self::Record(_) | Self::SharedOwner(_) | Self::Sequence(_))
+        !matches!(
+            self,
+            Self::Record(_) | Self::SharedOwner(_) | Self::Sequence(_) | Self::Arena(_)
+        )
     }
 }
 
@@ -86,6 +91,12 @@ impl RecordEnvironment {
             SyntaxTypeName::Sequence(inner) => self
                 .resolve_type_name(inner, span)
                 .map(|inner| SemanticType::Sequence(Box::new(inner))),
+            SyntaxTypeName::Arena(inner) => self
+                .resolve_type_name(inner, span)
+                .map(|inner| SemanticType::Arena(Box::new(inner))),
+            SyntaxTypeName::Handle(inner) => self
+                .resolve_type_name(inner, span)
+                .map(|inner| SemanticType::Handle(Box::new(inner))),
         }
     }
 
@@ -291,6 +302,15 @@ fn resolve_record_schemas(
                     }
                     SemanticType::Record(name.clone())
                 }
+                SyntaxFieldType::Handle(payload) => SemanticType::Handle(Box::new(
+                    resolve_record_handle_payload(
+                        payload,
+                        record_names,
+                        &field.name,
+                        &record.name,
+                        field.span,
+                    )?,
+                )),
             };
 
             fields.push(ResolvedField {
@@ -308,6 +328,51 @@ fn resolve_record_schemas(
     }
 
     Ok(schemas)
+}
+
+fn resolve_record_handle_payload(
+    payload: &SyntaxTypeName,
+    record_names: &HashMap<String, Span>,
+    field_name: &str,
+    record_name: &str,
+    span: Span,
+) -> Result<SemanticType, LowerError> {
+    match payload {
+        SyntaxTypeName::Int => Ok(SemanticType::Integer),
+        SyntaxTypeName::Bool => Ok(SemanticType::Bool),
+        SyntaxTypeName::String => Ok(SemanticType::String),
+        SyntaxTypeName::Named(name) => {
+            if record_names.contains_key(name) {
+                Ok(SemanticType::Record(name.clone()))
+            } else {
+                Err(LowerError {
+                    message: format!(
+                        "unknown record type {name:?} for handle field {field_name:?} in record {record_name:?}"
+                    ),
+                    span,
+                })
+            }
+        }
+        SyntaxTypeName::SharedOwner(name) => {
+            if record_names.contains_key(name) {
+                Ok(SemanticType::SharedOwner(name.clone()))
+            } else {
+                Err(LowerError {
+                    message: format!(
+                        "unknown shared-owner record type {name:?} for handle field {field_name:?} in record {record_name:?}"
+                    ),
+                    span,
+                })
+            }
+        }
+        SyntaxTypeName::SharedRef(_)
+        | SyntaxTypeName::Sequence(_)
+        | SyntaxTypeName::Arena(_)
+        | SyntaxTypeName::Handle(_) => Err(LowerError {
+            message: "record handle fields require an arena payload type".to_owned(),
+            span,
+        }),
+    }
 }
 
 fn reject_recursive_by_value_layouts(schemas: &[RecordSchema]) -> Result<(), LowerError> {
@@ -385,6 +450,8 @@ fn semantic_type_label(value_type: &SemanticType) -> String {
         SemanticType::SharedOwner(name) => format!("shared {name}"),
         SemanticType::SharedRef(inner) => format!("&{}", semantic_type_label(inner)),
         SemanticType::Sequence(inner) => format!("seq {}", semantic_type_label(inner)),
+        SemanticType::Arena(inner) => format!("arena {}", semantic_type_label(inner)),
+        SemanticType::Handle(inner) => format!("handle {}", semantic_type_label(inner)),
     }
 }
 

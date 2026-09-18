@@ -187,7 +187,9 @@ fn collect_matches(
             | SyntaxStmtKind::Print(_)
             | SyntaxStmtKind::Return(_)
             | SyntaxStmtKind::SequenceAppend { .. }
-            | SyntaxStmtKind::SequenceLookup { .. } => {}
+            | SyntaxStmtKind::SequenceLookup { .. }
+            | SyntaxStmtKind::ArenaInsert { .. }
+            | SyntaxStmtKind::ArenaRemove { .. } => {}
         }
     }
 }
@@ -215,7 +217,10 @@ fn collect_constructor_statements(
                 collect_constructor_statements(then_body, environment, lowered);
                 collect_constructor_statements(else_body, environment, lowered);
             }
-            SyntaxStmtKind::SequenceAppend { .. } | SyntaxStmtKind::SequenceLookup { .. } => {}
+            SyntaxStmtKind::SequenceAppend { .. }
+            | SyntaxStmtKind::SequenceLookup { .. }
+            | SyntaxStmtKind::ArenaInsert { .. }
+            | SyntaxStmtKind::ArenaRemove { .. } => {}
             SyntaxStmtKind::Match { value, arms } => {
                 collect_constructor_expr(value, environment, lowered);
                 for arm in arms {
@@ -278,7 +283,8 @@ fn collect_constructor_expr(
         | SyntaxExprKind::Bool(_)
         | SyntaxExprKind::Identifier(_)
         | SyntaxExprKind::InputInt
-        | SyntaxExprKind::SequenceNew { .. } => {}
+        | SyntaxExprKind::SequenceNew { .. }
+        | SyntaxExprKind::ArenaNew { .. } => {}
     }
 }
 
@@ -304,6 +310,7 @@ fn lower_record_field_type(
             SchemaType::Enum(name.clone())
         }
         SyntaxRecordFieldType::Named(name) => SchemaType::Record(name.clone()),
+        SyntaxRecordFieldType::Handle(_) => unreachable!("arena handle fields are rejected before enum IR promotion"),
     }
 }
 

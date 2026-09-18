@@ -77,7 +77,9 @@ fn validate_statements(
             | SyntaxStmtKind::Print(_)
             | SyntaxStmtKind::Return(_)
             | SyntaxStmtKind::SequenceAppend { .. }
-            | SyntaxStmtKind::SequenceLookup { .. } => {}
+            | SyntaxStmtKind::SequenceLookup { .. }
+            | SyntaxStmtKind::ArenaInsert { .. }
+            | SyntaxStmtKind::ArenaRemove { .. } => {}
         }
     }
     Ok(())

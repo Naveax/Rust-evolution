@@ -95,7 +95,9 @@ fn collect_statements(
             | SyntaxStmtKind::Print(_)
             | SyntaxStmtKind::Return(_)
             | SyntaxStmtKind::SequenceAppend { .. }
-            | SyntaxStmtKind::SequenceLookup { .. } => {}
+            | SyntaxStmtKind::SequenceLookup { .. }
+            | SyntaxStmtKind::ArenaInsert { .. }
+            | SyntaxStmtKind::ArenaRemove { .. } => {}
         }
     }
     Ok(())
@@ -229,7 +231,9 @@ fn statement_always_returns(statement: &SyntaxStmt, environment: &MatchEnvironme
         | SyntaxStmtKind::Print(_)
         | SyntaxStmtKind::Repeat { .. }
         | SyntaxStmtKind::SequenceAppend { .. }
-        | SyntaxStmtKind::SequenceLookup { .. } => false,
+        | SyntaxStmtKind::SequenceLookup { .. }
+        | SyntaxStmtKind::ArenaInsert { .. }
+        | SyntaxStmtKind::ArenaRemove { .. } => false,
     }
 }
 

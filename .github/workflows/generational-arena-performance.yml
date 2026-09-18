@@ -1,0 +1,68 @@
+name: Generational arena performance
+
+on:
+  pull_request:
+    paths:
+      - 'benchmarks/cases/generational-arena-v0/**'
+      - 'crates/evo-parser/**'
+      - 'crates/evo-formatter/**'
+      - 'crates/evo-lowering/**'
+      - 'crates/evo-codegen-rust/**'
+      - 'crates/evo-bench/tests/generational_arena_reference.rs'
+      - '.github/workflows/generational-arena-performance.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'benchmarks/cases/generational-arena-v0/**'
+      - 'crates/evo-parser/**'
+      - 'crates/evo-formatter/**'
+      - 'crates/evo-lowering/**'
+      - 'crates/evo-codegen-rust/**'
+      - 'crates/evo-bench/tests/generational_arena_reference.rs'
+      - '.github/workflows/generational-arena-performance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generational-slot-parity:
+    name: ubuntu-24.04 / Rust 1.98.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Generational arena focused tests
+        run: |
+          cargo test -p evo-parser --test arena_syntax_v0
+          cargo test -p evo-formatter --test arena_syntax_v0
+          cargo test -p evo-lowering --test arena_semantics_v0
+          cargo test -p evo-codegen-rust --test arena_compile
+          cargo test -p evo-codegen-rust --test arena_runtime_matrix
+          cargo test -p evo-codegen-rust --test sequence_compile
+          cargo test -p evo-bench --test generational_arena_reference
+
+      - name: Generational arena differential gate
+        id: arena_bench
+        run: cargo run -p evo-bench -- run benchmarks/cases/generational-arena-v0 --out target/evo-bench-generational-arena
+
+      - name: Upload generational arena report
+        if: always() && steps.arena_bench.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evo-bench-generational-arena-ubuntu-24.04
+          path: target/evo-bench-generational-arena/
+          if-no-files-found: warn

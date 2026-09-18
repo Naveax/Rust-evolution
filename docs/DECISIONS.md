@@ -267,6 +267,34 @@ For v0:
 
 Pre-PR implementation evidence: Dev sequence semantics v0 #4 / run `34982930824` passed focused parser/lowering/codegen/native tests, the full workspace suite, Clippy `-D warnings`, and the differential benchmark. The benchmark reported correctness PASS, normalized LLVM IR equality, exact binary equality, stable timing, ratio `0.996626508`, and PASS by byte-identical-binary parity.
 
+## D-023 — Generational arena v0 uses runtime arena identity plus generation-checked reusable slots
+
+**Decision:** Production arena storage uses a bounded contextual `arena T` / `handle T` surface with explicit insert, checked lookup, and checked removal. Handles identify exactly `(arena id, slot index, generation)`; arenas own reusable slot storage and remain move-only.
+
+For v0:
+
+- `arena`, `handle`, `insert`, `lookup`, `remove`, and `as` remain contextual outside their exact forms;
+- arena payloads are limited to scalars, nominal records, and explicit `shared Record` owners;
+- `handle T` is copy-like and performs no allocation, refcount traffic, registry lookup, or payload operation;
+- function parameter/return contracts may use typed handles, record fields may use `handle T` for the full supported arena payload set, and sequences may store typed handles;
+- runtime arena identity separates same-payload arenas even when slot index and generation collide;
+- checked lookup/removal reject stale, wrong-arena, vacant, and out-of-range handles through the explicit failure branch;
+- successful removal moves the payload out once, increments generation before reuse, and retires a slot permanently at `u64::MAX`;
+- arena-id exhaustion fails closed;
+- live arena-derived element references block insert, remove, move, and reinitialization until bounded final-use analysis proves them dead;
+- generated support code is ordinary safe Rust using `Vec<Slot<T>>`, `Vec<usize>`, `Option<T>`, a one-thread-v0 checked `Cell<u64>` identity source, and typed `PhantomData`;
+- there is no unsafe pointer identity, global handle registry, GC, `RefCell`, lock, hidden payload clone, hidden `Rc` duplication, or general source-level generic syntax.
+
+**Reason:** #142/#143 established that index+generation without arena identity is insufficient for same-type cross-arena safety, while runtime arena identity plus generation-checked slot reuse preserves O(1)-class operations and a compact fixed-size handle. #144 implements that research result without merging arena ownership with the append-only `seq T` identity model.
+
+Production validation before the final documentation/PR commit:
+
+- semantic/runtime implementation head `280e391f53359ae0d7ad056773f70489081a8374` passed focused arena tests, the full workspace suite, and Clippy `-D warnings` in Dev arena semantics v0 run `35118469618`;
+- permanent production gate head `e59f41fc9a4f58bb352d663358fc1b12a130f445`, run `35120462329`: correctness **true**, exact executable bytes **true**, stable **true**, final verdict **PASS** with basis `byte-identical-binary-parity`;
+- that run recorded reference median **11,721,632 ns**, Evolution median **11,728,823 ns**, observed timing ratio **1.000613481**, normalized LLVM IR equality **false**, and a timing-only verdict of FAIL; byte-identical executable parity is the deterministic acceptance evidence rather than the noisy median ordering;
+- artifact `10457925773`, digest `sha256:4852ab5c61da6c0e2848efff148beaba9fd2dcbafa1dbe650627bb3c04667a39`;
+- the earlier independent-reference run `35119416363` is retained as failed evidence at ratio `1.001201306`; artifact inspection showed identical hot executable code despite symbol/source-location identity differences. The permanent fixture therefore keeps the independently authored implementation as a compile/structure control while using a direct-runtime parity lock for timed acceptance.
+
 ## Changing a decision
 
 A future change should record:

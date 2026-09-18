@@ -34,6 +34,7 @@ pub enum RecordFieldType {
     Bool,
     String,
     Named(String),
+    Handle(Box<TypeName>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +76,8 @@ pub enum TypeName {
     SharedOwner(String),
     SharedRef(Box<TypeName>),
     Sequence(Box<TypeName>),
+    Arena(Box<TypeName>),
+    Handle(Box<TypeName>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +114,18 @@ pub enum StmtKind {
     SequenceLookup {
         owner: String,
         index: Expr,
+        binding: String,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
+    ArenaInsert {
+        owner: String,
+        value: Expr,
+        binding: String,
+    },
+    ArenaRemove {
+        owner: String,
+        handle: Expr,
         binding: String,
         then_body: Vec<Stmt>,
         else_body: Vec<Stmt>,
@@ -175,6 +190,9 @@ pub enum ExprKind {
     SharedAlloc(Box<Expr>),
     SharedDuplicate(Box<Expr>),
     SequenceNew {
+        element_type: TypeName,
+    },
+    ArenaNew {
         element_type: TypeName,
     },
     Binary {
@@ -511,12 +529,12 @@ impl<'a> Parser<'a> {
                     span: field_name_token.span,
                 });
             };
-            let type_token = self.current().clone();
             let type_name = self.parse_record_field_type()?;
+            let type_end = self.tokens[self.index.saturating_sub(1)].span;
             fields.push(RecordField {
                 name: field_name,
                 type_name,
-                span: field_name_token.span.join(type_token.span),
+                span: field_name_token.span.join(type_end),
             });
             self.require_statement_terminator()?;
             self.skip_newlines();
@@ -533,6 +551,18 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_record_field_type(&mut self) -> Result<RecordFieldType, ParseError> {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "handle") {
+            let marker = self.advance().span;
+            if !self.arena_element_type_starts_at(self.index) {
+                return Err(ParseError {
+                    message: "record handle fields require an arena payload type".to_owned(),
+                    span: marker,
+                });
+            }
+            return Ok(RecordFieldType::Handle(Box::new(
+                self.parse_arena_element_type()?,
+            )));
+        }
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared")
             && self
                 .tokens
@@ -698,6 +728,18 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type_name(&mut self) -> Result<TypeName, ParseError> {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "arena")
+            && self.arena_element_type_starts_at(self.index + 1)
+        {
+            self.advance();
+            return Ok(TypeName::Arena(Box::new(self.parse_arena_element_type()?)));
+        }
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "handle")
+            && self.arena_element_type_starts_at(self.index + 1)
+        {
+            self.advance();
+            return Ok(TypeName::Handle(Box::new(self.parse_arena_element_type()?)));
+        }
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "seq")
             && self.sequence_element_type_starts_at(self.index + 1)
         {
@@ -757,6 +799,16 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_sequence_element_type(&mut self) -> Result<TypeName, ParseError> {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "handle") {
+            let marker = self.advance().span;
+            if !self.arena_element_type_starts_at(self.index) {
+                return Err(ParseError {
+                    message: "sequence handle elements require an arena payload type".to_owned(),
+                    span: marker,
+                });
+            }
+            return Ok(TypeName::Handle(Box::new(self.parse_arena_element_type()?)));
+        }
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared") {
             let marker = self.advance().span;
             let token = self.advance();
@@ -797,8 +849,60 @@ impl<'a> Parser<'a> {
                 .tokens
                 .get(index + 1)
                 .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_))),
+            Some(TokenKind::Identifier(name)) if name == "handle" => {
+                self.arena_element_type_starts_at(index + 1)
+            }
             Some(TokenKind::Identifier(_)) => true,
             _ => false,
+        }
+    }
+
+    fn arena_element_type_starts_at(&self, index: usize) -> bool {
+        match self.tokens.get(index).map(|token| &token.kind) {
+            Some(TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString) => true,
+            Some(TokenKind::Identifier(name)) if name == "shared" => self
+                .tokens
+                .get(index + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_))),
+            Some(TokenKind::Identifier(_)) | Some(TokenKind::Ampersand) => true,
+            _ => false,
+        }
+    }
+
+    fn parse_arena_element_type(&mut self) -> Result<TypeName, ParseError> {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared") {
+            let marker = self.advance().span;
+            let token = self.advance();
+            return match token.kind {
+                TokenKind::Identifier(name) => Ok(TypeName::SharedOwner(name)),
+                _ => Err(ParseError {
+                    message: "arena shared-owner payloads require a nominal record type".to_owned(),
+                    span: marker.join(token.span),
+                }),
+            };
+        }
+        let token = self.advance();
+        match token.kind {
+            TokenKind::TypeInt => Ok(TypeName::Int),
+            TokenKind::TypeBool => Ok(TypeName::Bool),
+            TokenKind::TypeString => Ok(TypeName::String),
+            TokenKind::Identifier(name) if matches!(name.as_str(), "arena" | "handle" | "seq") => {
+                Err(ParseError {
+                    message:
+                        "nested arena/handle/sequence payload types are not supported in arena v0"
+                            .to_owned(),
+                    span: token.span,
+                })
+            }
+            TokenKind::Identifier(name) => Ok(TypeName::Named(name)),
+            TokenKind::Ampersand => Err(ParseError {
+                message: "reference arena payload types are not supported in v0".to_owned(),
+                span: token.span,
+            }),
+            _ => Err(ParseError {
+                message: "expected arena payload type".to_owned(),
+                span: token.span,
+            }),
         }
     }
 
@@ -1054,6 +1158,12 @@ impl<'a> Parser<'a> {
             TokenKind::Case => Err(self.error_here("unexpected 'case' without matching 'match'")),
             TokenKind::Identifier(name) => {
                 let start = self.advance().span;
+                if name == "insert" && !matches!(self.current().kind, TokenKind::Equal) {
+                    return self.parse_arena_insert(start);
+                }
+                if name == "remove" && !matches!(self.current().kind, TokenKind::Equal) {
+                    return self.parse_arena_remove(start);
+                }
                 if name == "append" && !matches!(self.current().kind, TokenKind::Equal) {
                     return self.parse_sequence_append(start);
                 }
@@ -1075,6 +1185,109 @@ impl<'a> Parser<'a> {
                 "expected binding, 'print', 'return', 'repeat', 'if', or 'match' statement",
             )),
         }
+    }
+
+    fn parse_arena_insert(&mut self, start: Span) -> Result<Stmt, ParseError> {
+        let owner_token = self.advance();
+        let TokenKind::Identifier(owner) = owner_token.kind else {
+            return Err(ParseError {
+                message: "expected arena owner after 'insert'".to_owned(),
+                span: owner_token.span,
+            });
+        };
+        self.expect_kind(TokenKind::Comma, "expected ',' after arena owner")?;
+        let value = self.parse_expression()?;
+        let as_token = self.advance();
+        if !matches!(&as_token.kind, TokenKind::Identifier(name) if name == "as") {
+            return Err(ParseError {
+                message: "expected contextual 'as' after inserted value".to_owned(),
+                span: as_token.span,
+            });
+        }
+        let binding_token = self.advance();
+        let TokenKind::Identifier(binding) = binding_token.kind else {
+            return Err(ParseError {
+                message: "expected handle binding after insert 'as'".to_owned(),
+                span: binding_token.span,
+            });
+        };
+        Ok(Stmt {
+            kind: StmtKind::ArenaInsert {
+                owner,
+                value,
+                binding,
+            },
+            span: start.join(binding_token.span),
+        })
+    }
+
+    fn parse_arena_remove(&mut self, start: Span) -> Result<Stmt, ParseError> {
+        let owner_token = self.advance();
+        let TokenKind::Identifier(owner) = owner_token.kind else {
+            return Err(ParseError {
+                message: "expected arena owner after 'remove'".to_owned(),
+                span: owner_token.span,
+            });
+        };
+        self.expect_kind(TokenKind::Comma, "expected ',' after arena owner")?;
+        let handle = self.parse_expression()?;
+        let as_token = self.advance();
+        if !matches!(&as_token.kind, TokenKind::Identifier(name) if name == "as") {
+            return Err(ParseError {
+                message: "expected contextual 'as' after removal handle".to_owned(),
+                span: as_token.span,
+            });
+        }
+        let binding_token = self.advance();
+        let TokenKind::Identifier(binding) = binding_token.kind else {
+            return Err(ParseError {
+                message: "expected success binding after remove 'as'".to_owned(),
+                span: binding_token.span,
+            });
+        };
+        if !matches!(self.current().kind, TokenKind::Newline) {
+            return Err(self.error_here("expected end of line after remove binding"));
+        }
+        self.skip_newlines();
+        let mut then_body = Vec::new();
+        while !matches!(self.current().kind, TokenKind::Else | TokenKind::End) {
+            if self.is_eof() {
+                return Err(self.error_here("missing 'else' and 'end' for remove block"));
+            }
+            let statement = self.parse_statement()?;
+            self.require_statement_terminator()?;
+            then_body.push(statement);
+            self.skip_newlines();
+        }
+        if !matches!(self.current().kind, TokenKind::Else) {
+            return Err(self.error_here("checked remove requires an explicit 'else' branch"));
+        }
+        self.advance();
+        if !matches!(self.current().kind, TokenKind::Newline) {
+            return Err(self.error_here("expected end of line after remove 'else'"));
+        }
+        self.skip_newlines();
+        let mut else_body = Vec::new();
+        while !matches!(self.current().kind, TokenKind::End) {
+            if self.is_eof() {
+                return Err(self.error_here("missing 'end' for remove block"));
+            }
+            let statement = self.parse_statement()?;
+            self.require_statement_terminator()?;
+            else_body.push(statement);
+            self.skip_newlines();
+        }
+        let close = self.advance().span;
+        Ok(Stmt {
+            kind: StmtKind::ArenaRemove {
+                owner,
+                handle,
+                binding,
+                then_body,
+                else_body,
+            },
+            span: start.join(close),
+        })
     }
 
     fn parse_sequence_append(&mut self, start: Span) -> Result<Stmt, ParseError> {
@@ -1480,6 +1693,22 @@ impl<'a> Parser<'a> {
                 span: token.span,
             }),
             TokenKind::Identifier(name)
+                if name == "arena" && self.arena_constructor_starts_here() =>
+            {
+                let element_type = self.parse_arena_element_type()?;
+                self.expect_kind(TokenKind::LParen, "expected '(' after arena payload type")?;
+                let close = self
+                    .expect_kind(
+                        TokenKind::RParen,
+                        "expected ')' for empty arena constructor",
+                    )?
+                    .span;
+                Ok(Expr {
+                    kind: ExprKind::ArenaNew { element_type },
+                    span: token.span.join(close),
+                })
+            }
+            TokenKind::Identifier(name)
                 if name == "seq" && self.sequence_constructor_starts_here() =>
             {
                 let element_type = self.parse_sequence_element_type()?;
@@ -1519,23 +1748,50 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn arena_element_type_width_at(&self, index: usize) -> Option<usize> {
+        match self.tokens.get(index).map(|token| &token.kind) {
+            Some(TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString) => Some(1),
+            Some(TokenKind::Identifier(name)) if name == "shared" => self
+                .tokens
+                .get(index + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+                .then_some(2),
+            Some(TokenKind::Identifier(_)) | Some(TokenKind::Ampersand) => Some(1),
+            _ => None,
+        }
+    }
+
+    fn sequence_element_type_width_at(&self, index: usize) -> Option<usize> {
+        match self.tokens.get(index).map(|token| &token.kind) {
+            Some(TokenKind::Identifier(name)) if name == "handle" => self
+                .arena_element_type_width_at(index + 1)
+                .map(|width| width + 1),
+            _ => self.arena_element_type_width_at(index),
+        }
+    }
+
     fn sequence_constructor_starts_here(&self) -> bool {
-        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "seq")
-            && self.sequence_element_type_starts_at(self.index + 1)
+        if matches!(self.current().kind, TokenKind::Ampersand)
+            || matches!(&self.current().kind, TokenKind::Identifier(name) if name == "seq")
         {
             return true;
         }
-        if !self.sequence_element_type_starts_at(self.index) {
-            return false;
-        }
-        let offset = if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared")
+        self.sequence_element_type_width_at(self.index)
+            .and_then(|width| self.tokens.get(self.index + width))
+            .is_some_and(|token| matches!(token.kind, TokenKind::LParen))
+    }
+
+    fn arena_constructor_starts_here(&self) -> bool {
+        if matches!(self.current().kind, TokenKind::Ampersand)
+            || matches!(
+                &self.current().kind,
+                TokenKind::Identifier(name) if matches!(name.as_str(), "arena" | "handle" | "seq")
+            )
         {
-            2
-        } else {
-            1
-        };
-        self.tokens
-            .get(self.index + offset)
+            return true;
+        }
+        self.arena_element_type_width_at(self.index)
+            .and_then(|width| self.tokens.get(self.index + width))
             .is_some_and(|token| matches!(token.kind, TokenKind::LParen))
     }
 

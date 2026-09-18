@@ -55,6 +55,12 @@ impl<'a> StaticEnvironment<'a> {
                             span: field.span,
                         });
                     }
+                    evo_parser::RecordFieldType::Handle(_) => {
+                        return Err(LowerError {
+                            message: "generational handle record fields are not supported in enum-bearing programs in v0".to_owned(),
+                            span: field.span,
+                        });
+                    }
                 };
                 fields.push((field.name.clone(), value_type));
             }
@@ -320,6 +326,10 @@ impl<'a> StaticEnvironment<'a> {
                 message: "append-only sequences are not supported in enum-bearing programs in v0".to_owned(),
                 span: expr.span,
             }),
+            SyntaxExprKind::ArenaNew { .. } => Err(LowerError {
+                message: "generational arenas are not supported in enum-bearing programs in v0".to_owned(),
+                span: expr.span,
+            }),
             SyntaxExprKind::SharedBorrow(_) => Err(LowerError {
                 message: "immutable reference expressions are not supported in enum-bearing programs in v0"
                     .to_owned(),
@@ -549,6 +559,12 @@ fn validate_statements(
                     span: statement.span,
                 });
             }
+            SyntaxStmtKind::ArenaInsert { .. } | SyntaxStmtKind::ArenaRemove { .. } => {
+                return Err(LowerError {
+                    message: "generational arenas are not supported in enum-bearing programs in v0".to_owned(),
+                    span: statement.span,
+                });
+            }
             SyntaxStmtKind::Match { value, arms } => {
                 validate_match(value, arms, environment, scopes, expected_return)?;
             }
@@ -640,7 +656,9 @@ fn statement_always_returns(statement: &SyntaxStmt) -> bool {
         | SyntaxStmtKind::Print(_)
         | SyntaxStmtKind::Repeat { .. }
         | SyntaxStmtKind::SequenceAppend { .. }
-        | SyntaxStmtKind::SequenceLookup { .. } => false,
+        | SyntaxStmtKind::SequenceLookup { .. }
+        | SyntaxStmtKind::ArenaInsert { .. }
+        | SyntaxStmtKind::ArenaRemove { .. } => false,
     }
 }
 
@@ -672,6 +690,10 @@ fn resolve_type_name(
         TypeName::SharedOwner(_) => Err(LowerError {
             message: "explicit shared-owner function contracts are not supported in enum-bearing programs in v0"
                 .to_owned(),
+            span,
+        }),
+        TypeName::Arena(_) | TypeName::Handle(_) => Err(LowerError {
+            message: "generational arena and handle types are not supported in enum-bearing programs in v0".to_owned(),
             span,
         }),
         TypeName::Sequence(_) => Err(LowerError {
