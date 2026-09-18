@@ -84,7 +84,7 @@ fn generated_record_lookup_borrows_payload_and_releases_before_mutation() {
 fn generated_record_handle_fields_cover_full_arena_payload_set() {
     let (binary, rust) = compile(
         "record-handle-payloads",
-        "record Item\nvalue int\nend\nrecord Handles\ninteger handle int\nboolean handle bool\ntext handle string\nnominal handle Item\nshared_owner handle shared Item\nend\nints = arena int()\ninsert ints, 1 as hi\nbools = arena bool()\ninsert bools, true as hb\ntexts = arena string()\ninsert texts, \"x\" as hs\nrecords = arena Item()\ninsert records, Item(value = 2) as hr\nowner = share Item(value = 3)\nshared_items = arena shared Item()\ninsert shared_items, owner as hshared\nhandles = Handles(integer = hi, boolean = hb, text = hs, nominal = hr, shared_owner = hshared)\nprint 1\n",
+        "record Item\nvalue int\nend\nrecord Handles\ninteger handle int\nboolean handle bool\ntext handle string\nnominal handle Item\nshared_owner handle shared Item\nend\nints = arena int()\ninsert ints, 1 as hi\nbools = arena bool()\ninsert bools, true as hb\ntexts = arena string()\ninsert texts, \"x\" as hs\nrecords = arena Item()\ninsert records, Item(value = 2) as hr\nowner = share Item(value = 3)\nshared_items = arena shared Item()\ninsert shared_items, owner as hshared\nhandles = Handles(integer = hi, boolean = hb, text = hs, nominal = hr, shared_owner = hshared)\nlookup ints, handles.integer as from_field\nprint from_field\nelse\nprint 0\nend\nlookup shared_items, handles.shared_owner as shared_from_field\nprint shared_from_field.value\nelse\nprint 0\nend\n",
     );
     assert!(rust.contains("__EvoHandle<i64>"));
     assert!(rust.contains("__EvoHandle<bool>"));
@@ -97,7 +97,7 @@ fn generated_record_handle_fields_cover_full_arena_payload_set() {
         .output()
         .expect("generated full record-handle payload program should run");
     assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "1\n");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "1\n3\n");
 }
 
 #[test]
