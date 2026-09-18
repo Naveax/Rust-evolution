@@ -1,7 +1,7 @@
 use evo_lexer::Span;
 use evo_lowering::{
-    BinaryOp, Expr, ExprKind, Function, ParameterPassingMode, Program, RecordIr, RecordType, Stmt,
-    StmtKind, ValueType,
+    BinaryOp, Expr, ExprKind, Function, ParameterPassingMode, Program, RecordHandleType, RecordIr,
+    RecordType, Stmt, StmtKind, ValueType,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -378,7 +378,21 @@ fn rust_record_type(value_type: &RecordType) -> String {
         RecordType::Bool => "bool".to_owned(),
         RecordType::String => "&'static str".to_owned(),
         RecordType::Named(name) => generated_record_name(name),
-        RecordType::Handle(name) => format!("__EvoHandle<{}>", generated_record_name(name)),
+        RecordType::Handle(payload) => {
+            format!("__EvoHandle<{}>", rust_record_handle_type(payload))
+        }
+    }
+}
+
+fn rust_record_handle_type(value_type: &RecordHandleType) -> String {
+    match value_type {
+        RecordHandleType::Integer => "i64".to_owned(),
+        RecordHandleType::Bool => "bool".to_owned(),
+        RecordHandleType::String => "&'static str".to_owned(),
+        RecordHandleType::Record(name) => generated_record_name(name),
+        RecordHandleType::SharedOwner(name) => {
+            format!("std::rc::Rc<{}>", generated_record_name(name))
+        }
     }
 }
 

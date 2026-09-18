@@ -34,7 +34,7 @@ pub enum RecordFieldType {
     Bool,
     String,
     Named(String),
-    Handle(String),
+    Handle(Box<TypeName>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -553,14 +553,15 @@ impl<'a> Parser<'a> {
     fn parse_record_field_type(&mut self) -> Result<RecordFieldType, ParseError> {
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "handle") {
             let marker = self.advance().span;
-            let token = self.advance();
-            return match token.kind {
-                TokenKind::Identifier(name) => Ok(RecordFieldType::Handle(name)),
-                _ => Err(ParseError {
-                    message: "record handle fields require a nominal record type".to_owned(),
-                    span: marker.join(token.span),
-                }),
-            };
+            if !self.arena_element_type_starts_at(self.index) {
+                return Err(ParseError {
+                    message: "record handle fields require an arena payload type".to_owned(),
+                    span: marker,
+                });
+            }
+            return Ok(RecordFieldType::Handle(Box::new(
+                self.parse_arena_element_type()?,
+            )));
         }
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared")
             && self

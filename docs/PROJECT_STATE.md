@@ -80,7 +80,7 @@ Implemented invariants:
 - removal moves payload ownership out once, invalidates the old handle, increments generation before reuse, and retires a generation-max slot;
 - arena-id exhaustion fails closed;
 - live move-only element references block insert, remove, arena move, and reinitialization until bounded final-use release;
-- `handle T` works in function contracts, `handle Record` works in record fields without recursive-layout classification, and `seq handle T` supports adjacency-list-class storage;
+- `handle T` works in function contracts and record fields across the supported arena payload set; `handle Node` self-edges avoid recursive-layout classification, and `seq handle T` supports adjacency-list-class storage;
 - shared-owner lookup/removal does not insert hidden `Rc::clone`;
 - generated support code is ordinary safe Rust with `Vec`, `Option`, `Cell`, and `PhantomData`; no unsafe pointer identity, registry, GC, `RefCell`, lock, or hidden refcount layer.
 

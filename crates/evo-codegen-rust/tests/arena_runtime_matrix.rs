@@ -204,6 +204,9 @@ fn main() {{
     assert_eq!(reused.generation, first.generation + 1);
     assert!(__evo_arena_get(&first_arena, first).is_none());
     assert_eq!(__evo_arena_get(&first_arena, reused), Some(&42));
+    let copied = reused;
+    assert_eq!(__evo_arena_get(&first_arena, copied), Some(&42));
+    assert_eq!(__evo_arena_get(&first_arena, reused), Some(&42));
 
     let wrong_arena = __EvoHandle {{
         arena: second_arena.id,

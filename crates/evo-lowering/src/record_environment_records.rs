@@ -302,18 +302,15 @@ fn resolve_record_schemas(
                     }
                     SemanticType::Record(name.clone())
                 }
-                SyntaxFieldType::Handle(name) => {
-                    if !record_names.contains_key(name) {
-                        return Err(LowerError {
-                            message: format!(
-                                "unknown record type {name:?} for handle field {:?} in record {:?}",
-                                field.name, record.name
-                            ),
-                            span: field.span,
-                        });
-                    }
-                    SemanticType::Handle(Box::new(SemanticType::Record(name.clone())))
-                }
+                SyntaxFieldType::Handle(payload) => SemanticType::Handle(Box::new(
+                    resolve_record_handle_payload(
+                        payload,
+                        record_names,
+                        &field.name,
+                        &record.name,
+                        field.span,
+                    )?,
+                )),
             };
 
             fields.push(ResolvedField {
@@ -331,6 +328,51 @@ fn resolve_record_schemas(
     }
 
     Ok(schemas)
+}
+
+fn resolve_record_handle_payload(
+    payload: &SyntaxTypeName,
+    record_names: &HashMap<String, Span>,
+    field_name: &str,
+    record_name: &str,
+    span: Span,
+) -> Result<SemanticType, LowerError> {
+    match payload {
+        SyntaxTypeName::Int => Ok(SemanticType::Integer),
+        SyntaxTypeName::Bool => Ok(SemanticType::Bool),
+        SyntaxTypeName::String => Ok(SemanticType::String),
+        SyntaxTypeName::Named(name) => {
+            if record_names.contains_key(name) {
+                Ok(SemanticType::Record(name.clone()))
+            } else {
+                Err(LowerError {
+                    message: format!(
+                        "unknown record type {name:?} for handle field {field_name:?} in record {record_name:?}"
+                    ),
+                    span,
+                })
+            }
+        }
+        SyntaxTypeName::SharedOwner(name) => {
+            if record_names.contains_key(name) {
+                Ok(SemanticType::SharedOwner(name.clone()))
+            } else {
+                Err(LowerError {
+                    message: format!(
+                        "unknown shared-owner record type {name:?} for handle field {field_name:?} in record {record_name:?}"
+                    ),
+                    span,
+                })
+            }
+        }
+        SyntaxTypeName::SharedRef(_)
+        | SyntaxTypeName::Sequence(_)
+        | SyntaxTypeName::Arena(_)
+        | SyntaxTypeName::Handle(_) => Err(LowerError {
+            message: "record handle fields require an arena payload type".to_owned(),
+            span,
+        }),
+    }
 }
 
 fn reject_recursive_by_value_layouts(schemas: &[RecordSchema]) -> Result<(), LowerError> {

@@ -79,3 +79,23 @@ fn generated_record_lookup_borrows_payload_and_releases_before_mutation() {
         "record Item\nvalue int\nend\nitems = arena Item()\ninsert items, Item(value = 1) as h\nlookup items, h as item\nprint item.value\ninsert items, Item(value = 2) as h2\nremove items, h as removed\nprint removed.value\nelse\nprint 0\nend\nlookup items, h2 as second\nprint second.value\nelse\nprint 0\nend\nelse\nprint 0\nend\n",
     );
 }
+
+#[test]
+fn generated_record_handle_fields_cover_full_arena_payload_set() {
+    let (binary, rust) = compile(
+        "record-handle-payloads",
+        "record Item\nvalue int\nend\nrecord Handles\ninteger handle int\nboolean handle bool\ntext handle string\nnominal handle Item\nshared_owner handle shared Item\nend\nints = arena int()\ninsert ints, 1 as hi\nbools = arena bool()\ninsert bools, true as hb\ntexts = arena string()\ninsert texts, \"x\" as hs\nrecords = arena Item()\ninsert records, Item(value = 2) as hr\nowner = share Item(value = 3)\nshared_items = arena shared Item()\ninsert shared_items, owner as hshared\nhandles = Handles(integer = hi, boolean = hb, text = hs, nominal = hr, shared_owner = hshared)\nprint 1\n",
+    );
+    assert!(rust.contains("__EvoHandle<i64>"));
+    assert!(rust.contains("__EvoHandle<bool>"));
+    assert!(rust.contains("__EvoHandle<&'static str>"));
+    assert!(rust.contains("__EvoHandle<__EvoRecord_Item>"));
+    assert!(rust.contains("__EvoHandle<std::rc::Rc<__EvoRecord_Item>>"));
+    assert!(!rust.contains("unsafe"));
+
+    let output = Command::new(binary)
+        .output()
+        .expect("generated full record-handle payload program should run");
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "1\n");
+}

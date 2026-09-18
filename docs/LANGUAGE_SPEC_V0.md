@@ -107,7 +107,7 @@ parameter           := IDENTIFIER function_type_name
 storage_type_name   := "int" | "bool" | "string" | IDENTIFIER
 arena_element_type  := "int" | "bool" | "string" | IDENTIFIER | "shared" IDENTIFIER
 handle_type         := "handle" arena_element_type
-record_field_type   := storage_type_name | "handle" IDENTIFIER
+record_field_type   := storage_type_name | "handle" arena_element_type
 sequence_element_type
                     := "int" | "bool" | "string" | IDENTIFIER | "shared" IDENTIFIER | handle_type
 function_type_name  := storage_type_name
@@ -458,7 +458,7 @@ The v0 arena type rules are:
 - `arena T()` constructs an empty arena;
 - `handle T` is a copy-like identity value for exactly `(arena id, slot index, generation)`;
 - function parameters and returns may use `arena T` and `handle T`;
-- record fields may use `handle Record`; such a field is fixed-size identity and does not create recursive by-value record layout;
+- record fields may use `handle T` for any supported arena payload `T`; such fields are fixed-size identity and do not create recursive by-value record layout;
 - sequences may store `handle T`, including adjacency-list-class `seq handle Node`, without opening general source-level generic syntax.
 
 Insert is explicit exclusive mutation:
@@ -542,7 +542,7 @@ end
 
 Each record declaration creates one nominal type. Two records with identical fields remain different types.
 
-Supported field types are `int`, `bool`, `string`, declared record types, declared enum types when the resulting by-value nominal layout is acyclic, and `handle Record` fixed-size arena identities. A `handle Node` field inside `record Node` is not a recursive by-value `Node -> Node` edge.
+Supported field types are `int`, `bool`, `string`, declared record types, declared enum types when the resulting by-value nominal layout is acyclic, and `handle T` fixed-size arena identities for the supported arena payload set. A `handle Node` field inside `record Node` is not a recursive by-value `Node -> Node` edge.
 
 Forward acyclic nominal references are accepted. Unknown named field types are rejected. Direct or indirect recursive by-value layouts are rejected rather than silently boxed.
 

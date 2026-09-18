@@ -14,7 +14,7 @@ use evo_parser::{
 };
 use record_constructor::lower_constructor_fields;
 use record_environment::{ConstructorFieldInput, RecordEnvironment, SemanticType};
-pub use record_ir::{RecordFieldIr, RecordIr, RecordType};
+pub use record_ir::{RecordFieldIr, RecordHandleType, RecordIr, RecordType};
 use record_ownership::MoveTracker;
 use record_resolution::{CallNameResolution, resolve_call_name};
 use reference_state::{

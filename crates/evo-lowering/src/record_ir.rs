@@ -1,5 +1,16 @@
 use evo_lexer::Span;
-use evo_parser::{Program as SyntaxProgram, RecordFieldType as SyntaxFieldType};
+use evo_parser::{
+    Program as SyntaxProgram, RecordFieldType as SyntaxFieldType, TypeName as SyntaxTypeName,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordHandleType {
+    Integer,
+    Bool,
+    String,
+    Record(String),
+    SharedOwner(String),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordType {
@@ -7,7 +18,7 @@ pub enum RecordType {
     Bool,
     String,
     Named(String),
-    Handle(String),
+    Handle(RecordHandleType),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +62,22 @@ fn lower_field_type(field_type: &SyntaxFieldType) -> RecordType {
         SyntaxFieldType::Bool => RecordType::Bool,
         SyntaxFieldType::String => RecordType::String,
         SyntaxFieldType::Named(name) => RecordType::Named(name.clone()),
-        SyntaxFieldType::Handle(name) => RecordType::Handle(name.clone()),
+        SyntaxFieldType::Handle(payload) => RecordType::Handle(lower_handle_type(payload)),
+    }
+}
+
+fn lower_handle_type(type_name: &SyntaxTypeName) -> RecordHandleType {
+    match type_name {
+        SyntaxTypeName::Int => RecordHandleType::Integer,
+        SyntaxTypeName::Bool => RecordHandleType::Bool,
+        SyntaxTypeName::String => RecordHandleType::String,
+        SyntaxTypeName::Named(name) => RecordHandleType::Record(name.clone()),
+        SyntaxTypeName::SharedOwner(name) => RecordHandleType::SharedOwner(name.clone()),
+        SyntaxTypeName::SharedRef(_)
+        | SyntaxTypeName::Sequence(_)
+        | SyntaxTypeName::Arena(_)
+        | SyntaxTypeName::Handle(_) => {
+            unreachable!("parser restricts record handle fields to arena payload types")
+        }
     }
 }

@@ -12,7 +12,7 @@ fn parses_contextual_arena_surface_and_handle_contracts() {
     );
     assert_eq!(
         program.records[0].fields[0].type_name,
-        RecordFieldType::Handle("Node".to_owned())
+        RecordFieldType::Handle(Box::new(TypeName::Named("Node".to_owned())))
     );
     assert_eq!(
         program.functions[0].parameters[0].type_name,
@@ -75,4 +75,32 @@ fn rejects_nested_or_reference_arena_payloads() {
     let borrowed = parse(&lex("fn bad(items arena &Node) int\nreturn 1\nend\n").unwrap())
         .expect_err("reference payload must fail");
     assert!(borrowed.message.contains("type") || borrowed.message.contains("payload"));
+}
+
+#[test]
+fn record_handle_fields_accept_full_arena_payload_set() {
+    let program = parse_source(
+        "record Item\nvalue int\nend\nrecord Handles\ninteger handle int\nboolean handle bool\ntext handle string\nnominal handle Item\nshared_owner handle shared Item\nend\n",
+    );
+    let fields = &program.records[1].fields;
+    assert_eq!(
+        fields[0].type_name,
+        RecordFieldType::Handle(Box::new(TypeName::Int))
+    );
+    assert_eq!(
+        fields[1].type_name,
+        RecordFieldType::Handle(Box::new(TypeName::Bool))
+    );
+    assert_eq!(
+        fields[2].type_name,
+        RecordFieldType::Handle(Box::new(TypeName::String))
+    );
+    assert_eq!(
+        fields[3].type_name,
+        RecordFieldType::Handle(Box::new(TypeName::Named("Item".to_owned())))
+    );
+    assert_eq!(
+        fields[4].type_name,
+        RecordFieldType::Handle(Box::new(TypeName::SharedOwner("Item".to_owned())))
+    );
 }

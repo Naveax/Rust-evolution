@@ -276,7 +276,7 @@ For v0:
 - `arena`, `handle`, `insert`, `lookup`, `remove`, and `as` remain contextual outside their exact forms;
 - arena payloads are limited to scalars, nominal records, and explicit `shared Record` owners;
 - `handle T` is copy-like and performs no allocation, refcount traffic, registry lookup, or payload operation;
-- function parameter/return contracts may use typed handles, record fields may use `handle Record`, and sequences may store typed handles;
+- function parameter/return contracts may use typed handles, record fields may use `handle T` for the full supported arena payload set, and sequences may store typed handles;
 - runtime arena identity separates same-payload arenas even when slot index and generation collide;
 - checked lookup/removal reject stale, wrong-arena, vacant, and out-of-range handles through the explicit failure branch;
 - successful removal moves the payload out once, increments generation before reuse, and retires a slot permanently at `u64::MAX`;

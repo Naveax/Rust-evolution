@@ -1,6 +1,6 @@
 use evo_diagnostics::render_error;
 use evo_lexer::lex;
-use evo_lowering::{RecordType, StmtKind, ValueType, lower};
+use evo_lowering::{RecordHandleType, RecordType, StmtKind, ValueType, lower};
 use evo_parser::parse;
 use std::path::Path;
 
@@ -97,7 +97,7 @@ fn handle_fields_are_fixed_size_graph_edges_not_recursive_records() {
         .expect("self handle edge should be sized");
     assert_eq!(
         program.records[0].fields[0].value_type,
-        RecordType::Handle("Node".to_owned())
+        RecordType::Handle(RecordHandleType::Record("Node".to_owned()))
     );
 }
 
@@ -135,4 +135,33 @@ fn live_arena_reference_diagnostic_keeps_lookup_as_related_location() {
     assert!(rendered.contains(" --> arena-related.evo:7:1"));
     assert!(rendered.contains("note: immutable reference \"item\" was created here"));
     assert!(rendered.contains(" --> arena-related.evo:6:1"));
+}
+
+#[test]
+fn record_handle_fields_preserve_full_arena_payload_types() {
+    let program = lower_source(
+        "record Item\nvalue int\nend\nrecord Handles\ninteger handle int\nboolean handle bool\ntext handle string\nnominal handle Item\nshared_owner handle shared Item\nend\n",
+    )
+    .expect("record handle fields should accept the full arena payload set");
+    let fields = &program.records[1].fields;
+    assert_eq!(
+        fields[0].value_type,
+        RecordType::Handle(RecordHandleType::Integer)
+    );
+    assert_eq!(
+        fields[1].value_type,
+        RecordType::Handle(RecordHandleType::Bool)
+    );
+    assert_eq!(
+        fields[2].value_type,
+        RecordType::Handle(RecordHandleType::String)
+    );
+    assert_eq!(
+        fields[3].value_type,
+        RecordType::Handle(RecordHandleType::Record("Item".to_owned()))
+    );
+    assert_eq!(
+        fields[4].value_type,
+        RecordType::Handle(RecordHandleType::SharedOwner("Item".to_owned()))
+    );
 }
