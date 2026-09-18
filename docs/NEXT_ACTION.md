@@ -59,17 +59,18 @@ Locked production semantics:
 
 ## Immediate execution order
 
-1. Commit the final documentation, related-location diagnostic test, shared-owner removal-transfer matrix, and permanent workflow trigger cleanup.
-2. Open the #144 production PR from `feature/generational-arena-v0` to `main`.
-3. Require the exact final PR head to pass:
+PR #145 is open on the production branch.
+
+1. Push only evidence-backed fixes to the PR head; do not rerun failed historical SHAs.
+2. Require the exact final PR head to pass:
    - normal CI on Ubuntu 24.04, Windows and macOS;
    - Generational arena performance;
    - Append-only sequence performance when naturally triggered;
    - Explicit shared owner performance when naturally triggered;
-   - every other naturally triggered ownership/research regression.
-4. Review the exact final diff and merge only with expected-head protection.
-5. Track natural exact-main postmerge CI and Generational arena performance without duplicate dispatches.
-6. Close #144 completed only after required exact-main postmerge gates are green.
+   - Generational arena surface research and every other naturally triggered regression.
+3. Review the exact final diff and merge only with expected-head protection.
+4. Track natural exact-main postmerge CI and Generational arena performance without duplicate dispatches.
+5. Close #144 completed only after required exact-main postmerge gates are green.
 
 ## Separate ownership/research lanes
 

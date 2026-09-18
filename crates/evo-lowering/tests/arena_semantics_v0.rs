@@ -123,7 +123,8 @@ fn sequence_handle_lookup_is_copy_like_not_borrowing() {
 #[test]
 fn live_arena_reference_diagnostic_keeps_lookup_as_related_location() {
     let source = "record Item\nvalue int\nend\nitems = arena Item()\ninsert items, Item(value = 1) as h\nlookup items, h as item\ninsert items, Item(value = 2) as h2\nprint item.value\nelse\nprint 0\nend\n";
-    let error = lower_source(source).expect_err("insert with live arena element reference must fail");
+    let error =
+        lower_source(source).expect_err("insert with live arena element reference must fail");
     let rendered = render_error(
         Path::new("arena-related.evo"),
         source,

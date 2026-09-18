@@ -113,12 +113,13 @@ Do not silently fold these into #144:
 
 ## Current operational sequence
 
-1. Land the final #144 documentation/diagnostic/runtime-matrix commit on `feature/generational-arena-v0`.
-2. Open the #144 production PR against exact main `368eb9a...`.
-3. Require one exact final PR head to pass normal Ubuntu/Windows/macOS CI, Generational arena performance, and all naturally triggered append-only/shared-owner/research regressions.
-4. Review the exact final diff and merge only with expected-head protection.
-5. Require natural exact-main postmerge CI and Generational arena performance before closing #144 completed.
-6. Choose the next graph/ownership successor only after #144 is durably closed; do not smuggle Weak, interior mutability, cross-thread ownership, or generalized generics into this slice.
+PR #145 is open from `feature/generational-arena-v0` to exact main `368eb9a...`.
+
+1. Keep one exact PR head and fix only evidence-backed gate failures; historical failed heads remain evidence.
+2. Require normal Ubuntu/Windows/macOS CI, Generational arena performance, and all naturally triggered append-only/shared-owner/research regressions on that exact head.
+3. Review the exact final diff and merge only with expected-head protection.
+4. Require natural exact-main postmerge CI and Generational arena performance before closing #144 completed.
+5. Choose the next graph/ownership successor only after #144 is durably closed; do not smuggle Weak, interior mutability, cross-thread ownership, or generalized generics into this slice.
 
 ## CI / handoff invariant
 
