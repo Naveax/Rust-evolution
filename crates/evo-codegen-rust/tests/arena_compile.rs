@@ -99,3 +99,20 @@ fn generated_record_handle_fields_cover_full_arena_payload_set() {
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout), "1\n");
 }
+
+#[test]
+fn generated_handle_assignment_copies_and_both_handles_remain_usable() {
+    let (binary, rust) = compile(
+        "handle-copy",
+        "items = arena int()\ninsert items, 7 as h\ncopy = h\nlookup items, h as original\nprint original\nelse\nprint 0\nend\nlookup items, copy as duplicated\nprint duplicated\nelse\nprint 0\nend\n",
+    );
+    assert!(rust.contains("let __evo_copy = __evo_h;"));
+    assert!(!rust.contains("Rc::clone"));
+    assert!(!rust.contains("Arc<"));
+
+    let output = Command::new(binary)
+        .output()
+        .expect("copied handle program should run");
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n7\n");
+}
