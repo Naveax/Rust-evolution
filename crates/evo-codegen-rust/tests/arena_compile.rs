@@ -74,10 +74,12 @@ fn generated_handle_graph_storage_compiles_without_refcount_scaffolding() {
 
 #[test]
 fn generated_record_lookup_borrows_payload_and_releases_before_mutation() {
-    let _ = compile(
+    let (_, rust) = compile(
         "record-nll",
         "record Item\nvalue int\nend\nitems = arena Item()\ninsert items, Item(value = 1) as h\nlookup items, h as item\nprint item.value\ninsert items, Item(value = 2) as h2\nremove items, h as removed\nprint removed.value\nelse\nprint 0\nend\nlookup items, h2 as second\nprint second.value\nelse\nprint 0\nend\nelse\nprint 0\nend\n",
     );
+    assert!(!rust.contains(".clone()"));
+    assert!(!rust.contains("Clone::clone"));
 }
 
 #[test]
