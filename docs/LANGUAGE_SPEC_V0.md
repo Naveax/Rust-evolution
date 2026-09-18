@@ -64,7 +64,8 @@ Accepted source lowers to ordinary static Rust constructs and native code.
 - `,` separates function parameters, call arguments, and named record-constructor fields.
 - Current keywords are `print`, `repeat`, `if`, `else`, `end`, `true`, `false`, `input_int`, `and`, `or`, `not`, `fn`, `return`, `record`, `enum`, `match`, `case`, `int`, `bool`, and `string`.
 - `shared`, `share`, and `dup` remain ordinary identifier tokens. The parser interprets them contextually only in the bounded shared-owner type/prefix positions; calls such as `share(...)` and ordinary bindings/names remain compatible.
-- `seq`, `append`, `lookup`, and `as` also remain ordinary identifier tokens. The parser interprets them contextually only for the bounded append-only sequence type/constructor and statement forms; ordinary bindings, names, and calls remain compatible outside those exact positions.
+- `seq`, `append`, `lookup`, and `as` also remain ordinary identifier tokens. The parser interprets them contextually only for the bounded append-only sequence type/constructor and checked-lookup forms; ordinary bindings, names, and calls remain compatible outside those exact positions.
+- `arena`, `handle`, `insert`, and `remove` remain ordinary identifier tokens. The parser interprets them contextually only for the bounded generational-arena type/constructor, typed-handle, insert, and checked-remove forms.
 - Keyword matching respects identifier boundaries.
 - A lone `!` is not logical negation. `not` is the user-facing operator.
 
@@ -92,7 +93,7 @@ top_level_item      := record_definition
 record_definition   := "record" IDENTIFIER NEWLINE+
                        record_field_list "end"
 record_field_list   := (NEWLINE* record_field NEWLINE+)* NEWLINE*
-record_field        := IDENTIFIER storage_type_name
+record_field        := IDENTIFIER record_field_type
 
 enum_definition     := "enum" IDENTIFIER NEWLINE+
                        enum_variant_list "end"
@@ -104,12 +105,17 @@ function_definition := "fn" IDENTIFIER "(" parameters? ")" function_type_name NE
 parameters          := parameter ("," parameter)*
 parameter           := IDENTIFIER function_type_name
 storage_type_name   := "int" | "bool" | "string" | IDENTIFIER
+arena_element_type  := "int" | "bool" | "string" | IDENTIFIER | "shared" IDENTIFIER
+handle_type         := "handle" arena_element_type
+record_field_type   := storage_type_name | "handle" IDENTIFIER
 sequence_element_type
-                    := "int" | "bool" | "string" | IDENTIFIER | "shared" IDENTIFIER
+                    := "int" | "bool" | "string" | IDENTIFIER | "shared" IDENTIFIER | handle_type
 function_type_name  := storage_type_name
                      | "&" IDENTIFIER
                      | "shared" IDENTIFIER
                      | "seq" sequence_element_type
+                     | "arena" arena_element_type
+                     | handle_type
 
 function_block      := (NEWLINE* function_statement (NEWLINE+ | EOF))* NEWLINE*
 function_statement  := statement | return_statement
@@ -120,13 +126,18 @@ statement           := binding
                      | if_statement
                      | match_statement
                      | sequence_append
-                     | sequence_lookup
+                     | checked_lookup
+                     | arena_insert
+                     | arena_remove
 
 binding             := IDENTIFIER "=" expression
 print_statement     := "print" expression
 return_statement    := "return" expression
 sequence_append     := "append" IDENTIFIER "," expression
-sequence_lookup     := "lookup" IDENTIFIER "," expression "as" IDENTIFIER NEWLINE+
+checked_lookup      := "lookup" IDENTIFIER "," expression "as" IDENTIFIER NEWLINE+
+                       block "else" NEWLINE+ block "end"
+arena_insert        := "insert" IDENTIFIER "," expression "as" IDENTIFIER
+arena_remove        := "remove" IDENTIFIER "," expression "as" IDENTIFIER NEWLINE+
                        block "else" NEWLINE+ block "end"
 repeat_statement    := "repeat" expression NEWLINE+ block "end"
 if_statement        := "if" expression NEWLINE+ block
@@ -160,6 +171,7 @@ primary             := INTEGER
                      | "true"
                      | "false"
                      | sequence_constructor
+                     | arena_constructor
                      | IDENTIFIER
                      | call_or_constructor
                      | enum_constructor
@@ -168,6 +180,7 @@ primary             := INTEGER
 
 sequence_constructor
                     := "seq" sequence_element_type "(" ")"
+arena_constructor   := "arena" arena_element_type "(" ")"
 call_or_constructor := IDENTIFIER "(" call_or_named_fields? ")"
 call_or_named_fields
                     := arguments | named_fields
@@ -192,7 +205,7 @@ For compatibility, top-level `fn` declarations remain accepted by the current pa
 
 `return` is valid only inside a function body. Top-level `return` is an error.
 
-`repeat`, `if`, `match`, and checked `lookup` may nest inside top-level code or function bodies. `if` may omit `else`; `lookup` always requires an explicit `else`. Unmatched `case`, `end`, or `else`, missing required `end`, and malformed match/lookup forms are parser errors.
+`repeat`, `if`, `match`, checked `lookup`, and checked `remove` may nest inside top-level code or function bodies. `if` may omit `else`; `lookup` and `remove` always require an explicit `else`. Unmatched `case`, `end`, or `else`, missing required `end`, and malformed checked-operation forms are parser errors.
 
 ### Expression precedence
 
@@ -266,7 +279,9 @@ The semantic layer recognizes:
 - nominal enum types by declared name;
 - first-class immutable references to nominal record values (`&T`);
 - explicit one-thread immutable shared-owner handles to nominal record values (`shared T`);
-- owned append-only sequences (`seq T`) for the bounded v0 element set.
+- owned append-only sequences (`seq T`) for the bounded v0 element set;
+- owned generational arenas (`arena T`) for the bounded arena payload set;
+- copy-like typed generational handles (`handle T`).
 
 ### Immutable references v0
 
@@ -359,7 +374,7 @@ end
 The v0 type and construction rules are:
 
 - `seq T` is an owned, move-only sequence type;
-- `T` may be `int`, `bool`, `string`, a declared nominal record, or `shared Record`;
+- `T` may be `int`, `bool`, `string`, a declared nominal record, `shared Record`, or `handle U` for a supported arena payload `U`;
 - nested `seq` elements and reference element types are rejected;
 - `seq T()` constructs an empty sequence;
 - there is no general user-facing generic type syntax introduced by this feature.
@@ -386,7 +401,7 @@ The index must be an integer. Lowering converts it with `usize::try_from` and th
 
 Binding ownership follows the element category:
 
-- scalar elements bind by value, matching the copy-like scalar model;
+- scalar and `handle T` elements bind by value, matching the copy-like value model;
 - nominal record elements bind as immutable references tied to the source sequence;
 - `shared Record` elements bind as references to the stored `Rc<Record>` handle, so payload field reads use ordinary Rust dereference behavior without `Rc::clone`;
 - an unused move-only lookup binding does not artificially extend a borrow.
@@ -407,6 +422,94 @@ checked lookup         -> usize::try_from(index).ok().and_then(|i| owner.get(i))
 The accepted differential case proves correctness, normalized LLVM IR parity and exact binary parity against the direct Rust `Vec<i64>` reference workload.
 
 Explicit v0 exclusions: removal/pop/delete, slot holes, slot reuse, generation counters, stable arena identity, iterators/ranges/algorithms, mutable references, nested sequence/reference element types, general generic syntax, hidden clone/copy of move-only values, hidden `Rc`/`Arc` duplication, `RefCell`, locks, GC, runtime ownership registries, and unsafe pointer tables.
+
+### Generational arenas v0
+
+Evolution's removable/reusable graph-foundation collection is a separate bounded owner type, not an extension of sequence removal:
+
+```text
+record Item
+    value int
+end
+
+items = arena Item()
+insert items, Item(value = 1) as h
+
+lookup items, h as item
+    print item.value
+else
+    print 0
+end
+
+remove items, h as removed
+    print removed.value
+else
+    print 0
+end
+```
+
+`arena`, `handle`, `insert`, and `remove` are contextual parser words only. Existing `lookup ... as ... else ... end` syntax is owner-agnostic at the surface; semantic lowering distinguishes `seq T` integer-index lookup from `arena T` typed-handle lookup.
+
+The v0 arena type rules are:
+
+- `arena T` is owned and move-only;
+- arena payload `T` may be `int`, `bool`, `string`, a declared nominal record, or `shared Record`;
+- nested arena, handle, sequence, and reference payloads are rejected;
+- `arena T()` constructs an empty arena;
+- `handle T` is a copy-like identity value for exactly `(arena id, slot index, generation)`;
+- function parameters and returns may use `arena T` and `handle T`;
+- record fields may use `handle Record`; such a field is fixed-size identity and does not create recursive by-value record layout;
+- sequences may store `handle T`, including adjacency-list-class `seq handle Node`, without opening general source-level generic syntax.
+
+Insert is explicit exclusive mutation:
+
+```text
+insert items, value as h
+```
+
+The owner must be an available `arena T` and the payload must have exactly type `T`. Move-only payloads move into the arena with no implicit clone. A successful insert returns a fresh `handle T`. Reusable free slots are popped from an O(1)-class free-index stack; otherwise storage grows normally.
+
+Arena lookup is checked:
+
+```text
+lookup items, h as item
+    # success
+else
+    # stale, wrong arena, vacant, or out of range
+end
+```
+
+The handle payload type must match the arena payload type statically. Runtime lookup additionally checks arena identity, slot bounds, occupancy, and generation. Wrong-arena, stale-generation, vacant, and out-of-range handles enter `else` without panic. Scalars bind by value. Move-only records and explicit shared-owner payloads bind through immutable references tied to the arena owner; shared-owner lookup does not insert `Rc::clone`.
+
+Removal is also checked and moves the payload out exactly once:
+
+```text
+remove items, h as removed
+    # owned removed payload
+else
+    # invalid handle; arena unchanged
+end
+```
+
+Successful removal invalidates the old handle. A reusable slot increments its generation before entering the free stack. If the generation is already `u64::MAX`, the slot is retired permanently instead of wrapping. Arena identity allocation is monotonic and nonzero; exhaustion fails closed instead of silently wrapping.
+
+A live move-only element reference blocks insert/reuse-capable mutation, removal, arena move, and exact-type arena reinitialization. The existing bounded last-use analysis releases that conflict after the final proven use. Diagnostics keep the conflicting operation as the primary span and the lookup that created the live reference as a related source location.
+
+Generated Rust uses ordinary safe support structures equivalent to:
+
+```text
+Handle<T> { arena: u64, index: usize, generation: u64 }
+Slot<T> { generation: u64, value: Option<T>, retired: bool }
+Arena<T> { id: u64, slots: Vec<Slot<T>>, free: Vec<usize> }
+```
+
+Arena ids come from a checked one-thread-v0 thread-local `Cell<u64>` used only at arena construction. Handles carry `PhantomData` only for static payload typing. The production matrix verifies a three-machine-word handle on the supported 64-bit CI architecture, stale/wrong-arena rejection, generation reuse, generation exhaustion retirement, arena-id exhaustion, single-drop payload transfer/destruction, fixed-size graph edges, sequence handle storage, and shared-owner no-hidden-clone behavior.
+
+There is no process-global handle registry, per-handle reference count, GC, `RefCell`, lock, pointer-address identity, unsafe raw-pointer graph, hidden payload clone, or general Evolution generic syntax.
+
+The permanent `generational-arena-v0` differential gate keeps an independent idiomatic Rust control implementation while timing against a source-location/symbol-parity-locked direct safe-Rust reference. The accepted gate proves correctness and byte-identical executable parity; timing noise cannot manufacture a regression when both timed artifacts are the same executable bytes.
+
+Explicit v0 exclusions: mutable references, cross-thread arena synchronization, static per-arena-instance type provenance, arena nesting, arbitrary generic payload composition, independent payload lifetime masquerading as arena ownership, process-global handle tables, hidden clone/refcount/GC, unsafe pointer registries, and allocator tuning unrelated to the accepted identity/reuse model.
 
 Scalar rules:
 
@@ -439,7 +542,7 @@ end
 
 Each record declaration creates one nominal type. Two records with identical fields remain different types.
 
-Supported field types are `int`, `bool`, `string`, declared record types, and declared enum types when the resulting by-value nominal layout is acyclic.
+Supported field types are `int`, `bool`, `string`, declared record types, declared enum types when the resulting by-value nominal layout is acyclic, and `handle Record` fixed-size arena identities. A `handle Node` field inside `record Node` is not a recursive by-value `Node -> Node` edge.
 
 Forward acyclic nominal references are accepted. Unknown named field types are rejected. Direct or indirect recursive by-value layouts are rejected rather than silently boxed.
 

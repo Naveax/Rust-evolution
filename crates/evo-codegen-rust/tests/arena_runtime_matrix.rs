@@ -159,3 +159,25 @@ fn generated_shared_owner_lookup_borrows_without_hidden_rc_clone() {
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "9\n");
 }
+
+#[test]
+fn generated_shared_owner_remove_transfers_without_hidden_rc_clone() {
+    let rust = generated(
+        "record Item\nvalue int\nend\nowner = share Item(value = 11)\nitems = arena shared Item()\ninsert items, owner as h\nremove items, h as removed\nprint removed.value\nelse\nprint 0\nend\nlookup items, h as stale\nprint 999\nelse\nprint 1\nend\n",
+    );
+    assert!(rust.contains("std::rc::Rc::new"));
+    assert!(rust.contains("__evo_arena_remove"));
+    assert!(!rust.contains("Rc::clone"));
+    assert!(!rust.contains("unsafe"));
+
+    let binary = compile_rust("shared-owner-remove-transfer", &rust);
+    let output = Command::new(binary)
+        .output()
+        .expect("shared-owner removal transfer matrix should run");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "11\n1\n");
+}

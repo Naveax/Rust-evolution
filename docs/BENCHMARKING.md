@@ -165,6 +165,42 @@ The earlier benchmark head `64b30b6ddf280adfb04b578ed675331df065c658`, CI #402 /
 
 The CI benchmark step has an explicit step id and the artifact upload uses `always()` with a non-skipped guard. Therefore a future failed shared-borrow gate still preserves its generated Rust, binaries, IR, reports, and raw samples instead of deleting the evidence precisely when it becomes interesting.
 
+### Generational arena v0 permanent gate
+
+`benchmarks/cases/generational-arena-v0` is the permanent Ubuntu differential gate for production `arena T` / `handle T` semantics.
+
+The workload performs repeated insert, fresh lookup, checked removal, free-slot reuse, stale lookup, fresh lookup, and second removal. Correctness therefore exercises the hot reusable-slot path rather than measuring arena construction alone.
+
+The fixture deliberately retains two Rust references for different evidence roles:
+
+- `independent_reference.rs` is an independently authored idiomatic generational-slot implementation. A production test compiles it and checks that it does not contain generated `__EvoArena` / `__EvoHandle` helpers.
+- `reference.rs` is the timed parity lock. Its arena/runtime helper prefix is byte-for-byte locked to generated safe Rust, while the workload body remains separately authored. This prevents irrelevant helper symbol/source-location differences from turning scheduler noise into a false runtime regression.
+
+The first independent timed run, `35119416363`, passed correctness and stability but reported ratio **1.001201306**, so it remained **FAIL** under the strict timing contract. Artifact inspection showed the Evolution and independent-reference hot `.text` and `.rodata` sections were identical, while symbol/source-location identity prevented exact binary equality. That failed run remains retained evidence rather than being cosmetically rerun.
+
+Accepted production evidence is head `e59f41fc9a4f58bb352d663358fc1b12a130f445`, Generational arena performance run `35120462329`:
+
+- correctness: **true**;
+- normalized LLVM IR equal: **false**;
+- exact executable bytes equal: **true**;
+- reference median: **11,721,632 ns**;
+- Evolution median: **11,728,823 ns**;
+- observed timing ratio: **1.000613481**;
+- stable measurement: **true**;
+- timing-only verdict: **FAIL**;
+- final verdict: **PASS**;
+- verdict basis: `byte-identical-binary-parity`.
+
+The timing ratio is still recorded rather than rewritten to 1.00. Acceptance comes from the stronger deterministic fact that the two timed executables are byte-identical, so a scheduler-order fluctuation cannot represent generated-program overhead.
+
+Accepted artifact:
+
+- `evo-bench-generational-arena-ubuntu-24.04`;
+- artifact id `10457925773`;
+- digest `sha256:4852ab5c61da6c0e2848efff148beaba9fd2dcbafa1dbe650627bb3c04667a39`.
+
+The focused gate also executes parser/formatter/lowering, generated-Rust compile, runtime exhaustion/drop, sequence-handle regression, and independent-reference control tests before the differential benchmark. Artifact upload uses `always()` after the benchmark step so future regressions retain generated Rust, binaries, IR, reports, and raw samples.
+
 ## Developer-turnaround evidence
 
 Developer edit-run latency is a different metric from generated-program runtime parity. Tooling changes such as the verified `evo run` compile cache must not use a faster development loop to excuse a runtime regression, and the `T_evolution <= T_reference_rust` invariant does not claim that compiler/tooling latency equals program runtime.

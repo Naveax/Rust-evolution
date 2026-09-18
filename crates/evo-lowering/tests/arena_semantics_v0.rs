@@ -1,6 +1,8 @@
+use evo_diagnostics::render_error;
 use evo_lexer::lex;
 use evo_lowering::{RecordType, StmtKind, ValueType, lower};
 use evo_parser::parse;
+use std::path::Path;
 
 fn lower_source(source: &str) -> Result<evo_lowering::Program, evo_lowering::LowerError> {
     let tokens = lex(source).expect("arena semantic source should lex");
@@ -116,4 +118,20 @@ fn sequence_handle_lookup_is_copy_like_not_borrowing() {
         !binding_by_reference,
         "handles must copy without pinning the sequence"
     );
+}
+
+#[test]
+fn live_arena_reference_diagnostic_keeps_lookup_as_related_location() {
+    let source = "record Item\nvalue int\nend\nitems = arena Item()\ninsert items, Item(value = 1) as h\nlookup items, h as item\ninsert items, Item(value = 2) as h2\nprint item.value\nelse\nprint 0\nend\n";
+    let error = lower_source(source).expect_err("insert with live arena element reference must fail");
+    let rendered = render_error(
+        Path::new("arena-related.evo"),
+        source,
+        &error.message,
+        error.span,
+    );
+    assert!(rendered.contains("cannot insert into arena local \"items\""));
+    assert!(rendered.contains(" --> arena-related.evo:7:1"));
+    assert!(rendered.contains("note: immutable reference \"item\" was created here"));
+    assert!(rendered.contains(" --> arena-related.evo:6:1"));
 }

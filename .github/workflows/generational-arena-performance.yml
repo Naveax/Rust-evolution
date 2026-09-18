@@ -13,7 +13,6 @@ on:
   push:
     branches:
       - main
-      - feature/generational-arena-v0
     paths:
       - 'benchmarks/cases/generational-arena-v0/**'
       - 'crates/evo-parser/**'

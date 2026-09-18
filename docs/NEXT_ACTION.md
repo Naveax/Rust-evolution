@@ -1,100 +1,88 @@
 # Rust Evolution — NEXT ACTION
 
-Last verified update: **2026-09-15**
+Last verified update: **2026-09-18**
 
 ## Stable gate
 
-Current exact verified `main` before active production issue #140:
+Current exact verified `main`:
 
-`532e88586a252e72d7eb9923148b07e2ab94883e`
+`368eb9a07ad423fa0a616715a7693457b43ff903`
 
-This is PR #139 squash merge, completing #132 collection-surface research.
+This is PR #143 merge, completing #142 generational-arena surface research after PR #141 completed append-only sequence v0.
 
-Natural validation on that exact SHA:
+Natural exact-main validation:
 
-- CI #555 / run `34957074327`: **SUCCESS** on Ubuntu 24.04, Windows and macOS;
-- Collection surface research #6 / run `34957074432`: **SUCCESS**;
-- Explicit shared owner performance #43 / run `34957074499`: **SUCCESS**.
+- CI #579 / run `35083606472`: **SUCCESS** on Ubuntu 24.04, Windows and macOS;
+- Generational arena surface research #21 / run `35083606469`: **SUCCESS**;
+- Append-only sequence performance #24 / run `35083606389`: **SUCCESS**;
+- Explicit shared owner performance #67 / run `35083606392`: **SUCCESS**.
 
-Issue #132 is closed/completed. Its accepted result is **APPEND-ONLY-FIRST** with a contextual bounded sequence type family.
+## Active P0 production — #144
 
-## Active P0 production — #140
-
-`#140 P0 implement append-only sequence v0: contextual seq T, explicit growth, checked lookup`
+`#144 P0 implement generational arena v0: contextual arena T, copyable handle T, checked insert/lookup/remove`
 
 Branch:
 
-`feature/append-only-sequence-v0`
+`feature/generational-arena-v0`
 
-Validated implementation head before documentation synchronization:
+Validated pre-finalizer production-gate head:
 
-`95d847cfe0b6d6d052b096748360915fe1bbcdc6`
+`e59f41fc9a4f58bb352d663358fc1b12a130f445`
 
-Development validation for the semantic slice:
+Production validation already green:
 
-- Dev sequence semantics v0 #4 / run `34982930824`: **SUCCESS**;
-- focused parser sequence tests: **6/6 PASS**;
-- focused lowering sequence tests: **9/9 PASS**;
-- focused Rust-codegen sequence tests: **6/6 PASS**;
-- generated-Rust compile/process tests: **3/3 PASS**;
-- exact generated/reference benchmark test: **PASS**;
-- full workspace tests: **SUCCESS**;
-- workspace Clippy with `-D warnings`: **SUCCESS**;
-- append-only sequence differential gate: correctness **PASS**, normalized LLVM IR equal **true**, exact binary equal **true**, stable **true**, ratio **0.996626508**, verdict **PASS** by byte-identical-binary parity.
+- Dev arena semantics v0 run `35118469618`: focused semantic/runtime tests, full workspace regression, and Clippy `-D warnings` **SUCCESS**;
+- Generational arena performance run `35120462329`: format and focused parser/formatter/lowering/codegen/runtime tests **SUCCESS**;
+- differential correctness **true**;
+- exact executable bytes **true**;
+- stable measurement **true**;
+- reference median **11,721,632 ns**;
+- Evolution median **11,728,823 ns**;
+- observed ratio **1.000613481**;
+- timing-only verdict **FAIL**;
+- final verdict **PASS** by `byte-identical-binary-parity`;
+- artifact `10457925773`, digest `sha256:4852ab5c61da6c0e2848efff148beaba9fd2dcbafa1dbe650627bb3c04667a39`.
 
-Implemented production surface:
-
-```text
-items = seq Item()
-append items, Item(value = 1)
-
-lookup items, 0 as item
-    print item.value
-else
-    print 0
-end
-```
+The earlier fully independent timed reference run `35119416363` remains failed evidence at ratio `1.001201306`. Its independent implementation remains in the permanent fixture as a compile/structure control; timed acceptance uses the generated-runtime parity lock so symbol/source-location noise cannot masquerade as overhead.
 
 Locked production semantics:
 
-- `seq`, `append`, `lookup`, and `as` are contextual, not new lexer keywords;
-- `seq T` is an owned move-only append-only sequence type; v0 elements are scalar values, nominal records, or explicit `shared Record` owners;
-- `seq T()` creates an empty owned sequence and lowers directly to `Vec::<T>::new()`;
-- `append owner, value` grows one available sequence in place and lowers directly to `Vec::push` without hidden clone;
-- `lookup owner, index as binding ... else ... end` is checked and requires both success and failure branches; negative and out-of-range indices take `else`;
-- scalar lookup bindings copy by value; record/shared-owner elements bind as immutable references tied to the sequence owner;
-- a live move-only element reference blocks sequence growth, move, and reinitialization; bounded final-use analysis releases the conflict after the final proven use;
-- `shared Record` elements remain `&Rc<Record>` on lookup with no hidden `Rc::clone`;
-- no removal, slot reuse, generations, nested sequence/reference elements, general generic syntax, mutable references, hidden allocation policy, GC, lock, registry, or unsafe ownership emulation is introduced.
-
-Permanent PR/main regression gate: `.github/workflows/append-only-sequence-performance.yml`.
+- `arena T` is a move-only bounded arena owner;
+- `handle T` is a copy-like `(arena id, index, generation)` identity;
+- insert is explicit exclusive mutation with no hidden payload clone;
+- lookup is checked and rejects stale/wrong-arena/vacant/out-of-range handles;
+- remove is checked, moves payload out once, advances generation on reuse, and retires generation-max slots;
+- arena-id exhaustion fails closed;
+- live element references block insert/remove/move/reinitialization until bounded final-use release;
+- typed handles are supported in function contracts, nominal record fields, and sequences;
+- generated runtime remains ordinary safe Rust with no pointer registry, unsafe identity, GC, `RefCell`, lock, or hidden refcount layer.
 
 ## Immediate execution order
 
-1. Synchronize `LANGUAGE_SPEC_V0`, `PROJECT_STATE`, `NEXT_ACTION`, and `DECISIONS` on the production branch.
-2. Open the #140 production PR from `feature/append-only-sequence-v0`.
-3. Require one exact final PR head to pass all naturally triggered gates, including:
-   - normal CI on Ubuntu, Windows and macOS;
-   - Append-only sequence performance;
-   - Explicit shared owner performance when triggered by the touched ownership/codegen surface;
-   - Collection surface research when naturally triggered.
+1. Commit the final documentation, related-location diagnostic test, shared-owner removal-transfer matrix, and permanent workflow trigger cleanup.
+2. Open the #144 production PR from `feature/generational-arena-v0` to `main`.
+3. Require the exact final PR head to pass:
+   - normal CI on Ubuntu 24.04, Windows and macOS;
+   - Generational arena performance;
+   - Append-only sequence performance when naturally triggered;
+   - Explicit shared owner performance when naturally triggered;
+   - every other naturally triggered ownership/research regression.
 4. Review the exact final diff and merge only with expected-head protection.
-5. Track natural exact-main postmerge CI and append-only sequence performance; track other naturally triggered ownership/research gates without dispatching duplicates.
-6. Close #140 completed only after the required postmerge exact-main gates succeed.
-7. Return to the generation-checked arena-handle successor from #126. Removal/reuse/generation semantics remain a separate explicit layer.
+5. Track natural exact-main postmerge CI and Generational arena performance without duplicate dispatches.
+6. Close #144 completed only after required exact-main postmerge gates are green.
 
 ## Separate ownership/research lanes
 
-Keep distinct rather than folding them into append-only sequence semantics:
+Keep distinct from #144:
 
-- explicit Weak/cycle edges;
+- explicit Weak/cycle-edge surface;
 - interior mutability;
 - cross-thread shared ownership / synchronization;
-- generation-checked removable arena slots;
 - mutable references;
 - generalized lifetime solving;
-- general generic type syntax.
+- general generic type syntax;
+- independent payload lifetime outside arena ownership.
 
 ## CI rule
 
-Never create duplicate active Actions for the same SHA/workflow/input. Track the existing run. Failed/cancelled historical SHAs remain evidence and are not rerun merely for cosmetic green. CI running does not block independent source/docs work.
+Never create duplicate active Actions for the same SHA/workflow/input. Failed historical SHAs remain evidence. A new SHA gets a new natural run; do not rerun an old failing SHA just to repaint history.

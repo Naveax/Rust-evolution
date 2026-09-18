@@ -1,6 +1,6 @@
 # Rust Evolution — Project State
 
-Last verified update: **2026-09-15**
+Last verified update: **2026-09-18**
 
 This is the durable project handoff. Always re-read live GitHub issue/PR/Actions state before changing code.
 
@@ -8,174 +8,121 @@ This is the durable project handoff. Always re-read live GitHub issue/PR/Actions
 
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
-- Exact verified stable main before active production #140: `532e88586a252e72d7eb9923148b07e2ab94883e`
+- Exact verified stable main: `368eb9a07ad423fa0a616715a7693457b43ff903`
 - Rust toolchain: **1.98.0**
 - Production flags: edition 2024, opt-level 3, codegen-units 1
-- Natural exact-main CI #555 / run `34957074327`: **SUCCESS** on Ubuntu 24.04, Windows and macOS
-- Natural exact-main Collection surface research #6 / run `34957074432`: **SUCCESS**
-- Natural exact-main Explicit shared owner performance #43 / run `34957074499`: **SUCCESS**
+- Natural exact-main CI #579 / run `35083606472`: **SUCCESS** on Ubuntu 24.04, Windows and macOS
+- Natural exact-main Generational arena surface research #21 / run `35083606469`: **SUCCESS**
+- Natural exact-main Append-only sequence performance #24 / run `35083606389`: **SUCCESS**
+- Natural exact-main Explicit shared owner performance #67 / run `35083606392`: **SUCCESS**
 
-`532e885...` is PR #139 squash merge. Issue #132 collection-surface research is closed/completed with the accepted **APPEND-ONLY-FIRST** result.
+`368eb9a...` is PR #143 merge, completing #142 generational-arena surface research. PR #141 previously merged append-only sequence v0 and closed #140.
 
-## Build / compile sequence
+## Ownership / collection foundations already on main
 
-- #76: build latency baseline established; single-file native builds are rustc-dominated.
-- #79 / PR #81: verified unchanged-build cache accepted.
-- #82 / PR #84: changed-source rustc incremental research **REJECT / DEFER**.
-- #85 / PR #86: link-time attribution established the current `rustc -> cc -> lld` path.
-- #87 / PR #88: alternative linker experiment **REJECT / DEFER**.
-- #89 / PR #90: opt-level 3 -> 2 candidate **REJECT / DEFER**.
-- #91 / PR #92: compile-memory baseline **DEFER / NO ACTION**.
-- #93 / PR #94: binary-size baseline **DEFER / NO ACTION**; controlled Evolution/reference binaries were byte-identical across the accepted corpus.
+### Immutable references and explicit shared owners
 
-Dependency-build, proc-macro cost and workspace scaling remain deferred until Evolution has a real package/dependency graph.
+The bounded `&T` reference model, inferred call-duration shared borrows, and explicit one-thread `shared T` / `share` / `dup` owners remain implemented. Shared-owner duplication is explicit; ordinary moves/calls/returns do not insert hidden refcount traffic.
 
-## Ownership ergonomics implemented
+### Append-only sequences — #140 / PR #141 completed
 
-### Inferred shared-borrow parameters
+Production `seq T`, explicit `append`, and checked `lookup ... else ... end` lower directly to safe `Vec<T>` / `push` / `get`. Move-only element references participate in the existing bounded final-use liveness model. Sequence removal/reuse remains separate from arena semantics.
 
-`Owned` and call-duration `SharedBorrow` parameter modes are distinct. SharedBorrow is non-owning and does not create a stored or escaping reference.
+### Generational arena research — #142 / PR #143 completed
 
-### First-class immutable references
+Accepted result: **RUNTIME-ARENA-ID-GENERATIONAL-CANDIDATE / CONTEXTUAL-ARENA-HANDLE-CANDIDATE**.
 
-`&T` / `&expr` are implemented for the bounded nominal slice with deterministic provenance, stored reference locals, source-owner move/reinitialization conflicts, bounded final-use liveness and direct safe Rust reference lowering.
+The accepted identity is `(arena id, slot index, generation)`; reusable slots advance generation, generation exhaustion retires a slot, and arena-id exhaustion must fail closed.
 
-### Explicit one-thread shared owners
-
-Production source surface:
-
-```text
-shared Item
-share expr
-dup owner
-```
-
-Direct generated Rust mapping remains ordinary safe `Rc<T>`:
-
-```text
-shared Item -> std::rc::Rc<Item>
-share expr  -> Rc::new(expr)
-dup expr    -> Rc::clone(&expr)
-```
-
-Locked invariants:
-
-- shared owners are distinct from owned values, first-class immutable references, and inferred SharedBorrow parameters;
-- allocation and owner duplication are explicit only;
-- ordinary assignment, by-value calls and returns move handles without hidden count increments;
-- payload references remain tied to the specific source handle;
-- moving/reinitializing that source handle rejects while its dependent reference may still be live;
-- bounded final-use analysis releases the source after the final proven reference use;
-- move-only payload extraction through shared ownership rejects instead of cloning;
-- no hidden `Arc`, `RefCell`, synchronization, GC, global ownership registry or unsafe ownership emulation.
-
-The permanent Explicit shared owner performance workflow remains a regression gate for changes that touch the relevant language/compiler surface.
-
-## Cyclic / graph ownership research sequence
-
-### Arena/generational handles — #126 / PR #131 completed
-
-Durable report: `docs/ARENA_GENERATIONAL_HANDLES_RESEARCH.md`.
-
-Accepted result:
-
-- aggregate gate: **REQUIRES-COLLECTION-SURFACE**;
-- graph-identity recommendation: **GENERATIONAL-HANDLE-CANDIDATE**;
-- plain numeric indices are acceptable only while removal/reuse cannot silently rebind identity;
-- reusable/removable slots require generation checking;
-- independent node lifetime remains a shared-owner problem rather than an arena problem.
-
-### Collection surface — #132 / PR #139 completed
-
-Durable report: `docs/COLLECTION_SURFACE_RESEARCH.md`.
-
-Accepted result:
-
-- verdict: **APPEND-ONLY-FIRST**;
-- recommended surface: **CONTEXTUAL-SEQUENCE-TYPE-CANDIDATE**;
-- append/growth plus checked lookup maps directly to ordinary safe Rust storage;
-- append-only numeric indices remain logically stable across physical `Vec` reallocation;
-- shifting removal can silently rebind identity, while hole-preserving removal introduces an explicit occupancy model;
-- live element references must block conflicting container growth/move until bounded final-use release proves them dead;
-- removal, holes, generations and reusable arena slots remain later explicit layers.
-
-## Active production — #140 append-only sequence v0
+## Active P0 production — #144 generational arena v0
 
 Branch:
 
-`feature/append-only-sequence-v0`
+`feature/generational-arena-v0`
 
-Validated implementation head before documentation synchronization:
+Validated production-gate head before the final documentation/PR commit:
 
-`95d847cfe0b6d6d052b096748360915fe1bbcdc6`
+`e59f41fc9a4f58bb352d663358fc1b12a130f445`
 
-Development evidence:
-
-- Dev sequence semantics v0 #4 / run `34982930824`: **SUCCESS**;
-- focused parser/lowering/codegen/generated-Rust tests: **PASS**;
-- workspace tests: **SUCCESS**;
-- workspace Clippy `-D warnings`: **SUCCESS**;
-- append-only differential benchmark: correctness **true**, normalized LLVM IR equal **true**, exact binary equal **true**, stable **true**, ratio **0.996626508**, verdict **PASS** by byte-identical-binary parity.
-
-Production source surface:
+Implemented source surface:
 
 ```text
-items = seq Item()
-append items, Item(value = 1)
+items = arena Item()
+insert items, Item(value = 1) as h
 
-lookup items, 0 as item
+lookup items, h as item
     print item.value
+else
+    print 0
+end
+
+remove items, h as removed
+    print removed.value
 else
     print 0
 end
 ```
 
+Type forms:
+
+```text
+arena Item
+handle Item
+```
+
 Implemented invariants:
 
-- `seq`, `append`, `lookup`, and `as` remain contextual identifiers;
-- `seq T` is an owned move-only append-only sequence;
-- supported v0 element types are scalars, declared nominal records, and explicit `shared Record`; nested sequence/reference element types remain rejected;
-- empty construction lowers to `Vec::<T>::new()`;
-- append lowers to direct `Vec::push` and moves move-only payloads without hidden clone;
-- lookup converts the signed index with `usize::try_from`, uses direct `Vec::get`, and requires an explicit success/failure branch;
-- negative and out-of-range indices take the `else` branch;
-- scalar elements bind by value; move-only record/shared-owner elements bind through an immutable element reference;
-- live move-only element references block sequence growth, move, and reinitialization source-natively;
-- existing bounded last-use analysis releases that conflict after the final proven reference use;
-- shared-owner element lookup keeps `&Rc<T>` behavior without hidden `Rc::clone`;
-- sequence parameters become mutable in generated Rust only when grown;
-- unused move-only lookup bindings do not artificially pin the sequence;
-- generated Rust remains ordinary safe `Vec<T>` / `push` / `get` with no `unsafe`, `RefCell`, lock, GC, registry, or custom runtime.
+- `arena`, `handle`, `insert`, and `remove` remain contextual identifiers outside exact forms;
+- `arena T` is move-only owned storage for the bounded scalar/record/explicit-shared-owner payload set;
+- `handle T` is copy-like fixed-size identity carrying arena id, slot index, and generation;
+- same-payload arenas are runtime-distinct; stale, wrong-arena, vacant, and out-of-range handles take checked failure branches;
+- insert consumes move-only payloads without hidden clone and returns a fresh handle;
+- removal moves payload ownership out once, invalidates the old handle, increments generation before reuse, and retires a generation-max slot;
+- arena-id exhaustion fails closed;
+- live move-only element references block insert, remove, arena move, and reinitialization until bounded final-use release;
+- `handle T` works in function contracts, `handle Record` works in record fields without recursive-layout classification, and `seq handle T` supports adjacency-list-class storage;
+- shared-owner lookup/removal does not insert hidden `Rc::clone`;
+- generated support code is ordinary safe Rust with `Vec`, `Option`, `Cell`, and `PhantomData`; no unsafe pointer identity, registry, GC, `RefCell`, lock, or hidden refcount layer.
 
-Permanent regression workflow: `.github/workflows/append-only-sequence-performance.yml`.
+Validation evidence:
 
-## Separate / deferred research tracks
+- Dev arena semantics v0 run `35118469618`: focused semantic/runtime tests, workspace regression, and Clippy `-D warnings` **SUCCESS**;
+- Generational arena performance run `35120462329` on head `e59f41fc...`: focused parser/formatter/lowering/codegen/runtime tests **SUCCESS**;
+- differential correctness **true**, exact binary **true**, stable **true**, final verdict **PASS** by `byte-identical-binary-parity`;
+- observed timing ratio **1.000613481** is retained as timing-only FAIL evidence rather than rounded away;
+- artifact `10457925773`, digest `sha256:4852ab5c61da6c0e2848efff148beaba9fd2dcbafa1dbe650627bb3c04667a39`;
+- the earlier independent timed run `35119416363` remains retained failed evidence at ratio `1.001201306`.
 
-Do not silently fold these into append-only sequence semantics:
+Permanent regression workflow: `.github/workflows/generational-arena-performance.yml`.
 
-- explicit Weak/cycle-edge surface;
-- interior mutability;
-- cross-thread shared ownership / `Arc` / synchronization;
+## Explicit exclusions
+
+Do not silently fold these into #144:
+
+- general Evolution generic syntax;
+- general-purpose vectors/maps/sets or algorithms;
 - mutable references;
-- generalized/user-written lifetime solving;
-- general generic type syntax;
-- sequence removal/pop/delete;
-- hole reuse and generation-checked reusable arena slots;
-- shared-owner record fields / enum payloads;
-- hidden allocation policy, owner duplication, deep clone, GC or runtime ownership maps.
+- cross-thread `Arc`/synchronization;
+- static per-runtime-arena-instance type provenance;
+- independent payload lifetime outside arena ownership;
+- hidden clone/refcount/GC;
+- process-global handle registries/tables;
+- unsafe pointer identity;
+- arena nesting/arbitrary generic payload composition;
+- unrelated allocator tuning.
 
 ## Current operational sequence
 
-1. Synchronize implementation-backed language and handoff docs for #140.
-2. Open the #140 production PR from `feature/append-only-sequence-v0`.
-3. Require one exact final PR head to pass normal CI plus the Append-only sequence performance gate and all other naturally triggered ownership/research regressions.
-4. Review the final PR diff and merge only with expected-head protection.
-5. Require natural exact-main postmerge CI and append-only sequence performance before closing #140 completed.
-6. Return to the generation-checked arena-handle candidate from #126; removal/reuse/generation remains a separate explicit layer.
+1. Land the final #144 documentation/diagnostic/runtime-matrix commit on `feature/generational-arena-v0`.
+2. Open the #144 production PR against exact main `368eb9a...`.
+3. Require one exact final PR head to pass normal Ubuntu/Windows/macOS CI, Generational arena performance, and all naturally triggered append-only/shared-owner/research regressions.
+4. Review the exact final diff and merge only with expected-head protection.
+5. Require natural exact-main postmerge CI and Generational arena performance before closing #144 completed.
+6. Choose the next graph/ownership successor only after #144 is durably closed; do not smuggle Weak, interior mutability, cross-thread ownership, or generalized generics into this slice.
 
 ## CI / handoff invariant
 
-Never create duplicate active Actions for the same SHA/workflow/input. Track the existing run. Failed/cancelled historical SHAs remain evidence and are not rerun merely for color. CI running does not block independent source/docs work.
+Never create duplicate active Actions for the same SHA/workflow/input. Historical failed SHAs remain evidence and are not rerun merely for cosmetic green. CI running does not block independent source/docs work.
 
 Authority hierarchy:
 
