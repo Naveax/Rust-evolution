@@ -354,7 +354,7 @@ jobs:
           fn generated_record_handle_fields_cover_full_arena_payload_set() {
               let (binary, rust) = compile(
                   "record-handle-payloads",
-                  "record Item\nvalue int\nend\nrecord Handles\ninteger handle int\nboolean handle bool\ntext handle string\nrecord handle Item\nshared_owner handle shared Item\nend\nints = arena int()\ninsert ints, 1 as hi\nbools = arena bool()\ninsert bools, true as hb\ntexts = arena string()\ninsert texts, \"x\" as hs\nrecords = arena Item()\ninsert records, Item(value = 2) as hr\nowner = share Item(value = 3)\nshared_items = arena shared Item()\ninsert shared_items, owner as hshared\nhandles = Handles(integer = hi, boolean = hb, text = hs, record = hr, shared_owner = hshared)\nprint 1\n",
+                  "record Item\nvalue int\nend\nrecord Handles\ninteger handle int\nboolean handle bool\ntext handle string\nrecord handle Item\nshared_owner handle shared Item\nend\nints = arena int()\ninsert ints, 1 as hi\nbools = arena bool()\ninsert bools, true as hb\ntexts = arena string()\ninsert texts, \\\"x\\\" as hs\nrecords = arena Item()\ninsert records, Item(value = 2) as hr\nowner = share Item(value = 3)\nshared_items = arena shared Item()\ninsert shared_items, owner as hshared\nhandles = Handles(integer = hi, boolean = hb, text = hs, record = hr, shared_owner = hshared)\nprint 1\n",
               );
               assert!(rust.contains("__EvoHandle<i64>"));
               assert!(rust.contains("__EvoHandle<bool>"));
