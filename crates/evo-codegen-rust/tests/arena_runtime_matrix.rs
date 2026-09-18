@@ -181,3 +181,49 @@ fn generated_shared_owner_remove_transfers_without_hidden_rc_clone() {
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "11\n1\n");
 }
+
+#[test]
+fn generated_runtime_allocates_distinct_ids_and_reuses_same_slot_with_next_generation() {
+    let prefix = arena_runtime_prefix();
+    let rust = format!(
+        r#"{prefix}
+fn main() {{
+    let mut first_arena = __evo_arena_new::<i64>();
+    let second_arena = __evo_arena_new::<i64>();
+    assert_ne!(first_arena.id, 0);
+    assert_ne!(second_arena.id, 0);
+    assert_ne!(first_arena.id, second_arena.id);
+
+    let first = __evo_arena_insert(&mut first_arena, 41);
+    assert_eq!(__evo_arena_get(&first_arena, first), Some(&41));
+    assert_eq!(__evo_arena_remove(&mut first_arena, first), Some(41));
+    assert!(__evo_arena_get(&first_arena, first).is_none());
+
+    let reused = __evo_arena_insert(&mut first_arena, 42);
+    assert_eq!(reused.index, first.index);
+    assert_eq!(reused.generation, first.generation + 1);
+    assert!(__evo_arena_get(&first_arena, first).is_none());
+    assert_eq!(__evo_arena_get(&first_arena, reused), Some(&42));
+
+    let wrong_arena = __EvoHandle {{
+        arena: second_arena.id,
+        index: reused.index,
+        generation: reused.generation,
+        _marker: std::marker::PhantomData,
+    }};
+    assert!(__evo_arena_get(&first_arena, wrong_arena).is_none());
+    println!("ok");
+}}
+"#
+    );
+    let binary = compile_rust("identity-reuse-direct", &rust);
+    let output = Command::new(binary)
+        .output()
+        .expect("direct identity/reuse runtime matrix should run");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok\n");
+}
