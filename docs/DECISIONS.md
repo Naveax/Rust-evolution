@@ -295,6 +295,64 @@ Production validation before the final documentation/PR commit:
 - artifact `10457925773`, digest `sha256:4852ab5c61da6c0e2848efff148beaba9fd2dcbafa1dbe650627bb3c04667a39`;
 - the earlier independent-reference run `35119416363` is retained as failed evidence at ratio `1.001201306`; artifact inspection showed identical hot executable code despite symbol/source-location identity differences. The permanent fixture therefore keeps the independently authored implementation as a compile/structure control while using a direct-runtime parity lock for timed acceptance.
 
+## D-024 — Dynamic borrow guards stay lexical over an explicit owned cell
+
+**Decision:** The accepted research direction for single-thread dynamic borrowing is an explicit owned cell plus lexical guard acquisition, not implicit interior mutability or a first-class escaping guard value.
+
+Accepted research surface:
+
+~~~text
+state = cell Item(value = 1)
+
+borrow state as view
+    ...
+end
+
+borrow_mut state as edit
+    ...
+end
+
+try_borrow state as view
+    ...
+else
+    ...
+end
+
+try_borrow_mut state as edit
+    ...
+else
+    ...
+end
+~~~
+
+For the accepted research decision:
+
+- `cell T` is the bounded explicit owned runtime-borrow-checked container surface;
+- `cell expr` explicitly moves an owned payload into that container;
+- the direct Rust model is inline `RefCell<T>`;
+- `borrow` / `borrow_mut` are panicking shared/exclusive acquisition forms;
+- `try_borrow` / `try_borrow_mut` expose acquisition failure through explicit branches;
+- guard bindings are lexical to their body/success branch and scope exit releases the guard;
+- returned or otherwise escaping guards remain outside this decision because they require a first-class guard/lifetime contract;
+- `Rc` shared ownership and `RefCell` dynamic borrowing remain separate mechanisms; `Rc<RefCell<T>>` is composition evidence, not authorization for an implicit nested source type;
+- ordinary `cell(...)` function-call compatibility is preserved because `cell` remains contextual;
+- no implicit `RefCell`, `Rc`, `Arc`, lock, allocation, clone, owner duplication, panic suppression, registry, GC, unsafe aliasing or generalized lifetime solver is implied;
+- payload replacement and field/index mutation through an exclusive guard are not selected by this decision and are isolated in successor research #148.
+
+**Reason:** The accepted Rust 1.98 matrix shows that the useful runtime-borrow lifetime can remain lexical for the bounded first slice while panicking/fallible acquisition, owner composition, move behavior and cross-thread boundaries stay explicit. Escaping guards and mutable-place syntax introduce separate language obligations and therefore remain separate research problems.
+
+Accepted evidence:
+
+- PR #147 final head `7acb51495799d3b25e2f9dd9f425011584ad22fe`;
+- exact-head CI `35596923275`: **SUCCESS** on Ubuntu, Windows and macOS;
+- exact-head research `35596923400`: **SUCCESS**;
+- exact-head research artifact `10642096339`, digest `sha256:3b9ee0fcabf028ce82c694af84df4dccb054e658546ab97d77f80da25c04e358`;
+- 21 matrix cases, 0 mismatches, verdict **LEXICAL-GUARDS-FIRST**, recommended cell surface **EXPLICIT-OWNED-CELL**;
+- squash merge `b3b3eebe5c1d41b47e26e3bb2bc00db5a34c32c9`;
+- exact-main CI `35610602607`: **SUCCESS** on Ubuntu, Windows and macOS;
+- exact-main research `35610602634`: **SUCCESS**;
+- exact-main research artifact `10643971376`, digest `sha256:007ab949a38a6ca060953e7007ec09d90b8a09c9f671e19e2b1ad9442dcd57a7`.
+
 ## Changing a decision
 
 A future change should record:

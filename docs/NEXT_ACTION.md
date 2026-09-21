@@ -1,89 +1,101 @@
 # Rust Evolution — NEXT ACTION
 
-Last verified update: **2026-09-18**
+Last verified update: **2026-09-21**
 
 ## Stable gate
 
 Current exact verified `main`:
 
-`368eb9a07ad423fa0a616715a7693457b43ff903`
+`b3b3eebe5c1d41b47e26e3bb2bc00db5a34c32c9`
 
-This is PR #143 merge, completing #142 generational-arena surface research after PR #141 completed append-only sequence v0.
+This is PR #147 squash merge, accepting the bounded dynamic-borrow guard research decision after #145 completed generational arena v0.
 
-Natural exact-main validation:
+Natural exact-main validation on `b3b3eebe...`:
 
-- CI #579 / run `35083606472`: **SUCCESS** on Ubuntu 24.04, Windows and macOS;
-- Generational arena surface research #21 / run `35083606469`: **SUCCESS**;
-- Append-only sequence performance #24 / run `35083606389`: **SUCCESS**;
-- Explicit shared owner performance #67 / run `35083606392`: **SUCCESS**.
+- CI `35610602607`: **SUCCESS** on Ubuntu 24.04, Windows and macOS
+- Dynamic borrow guard research `35610602634`: **SUCCESS**
+- Append-only sequence performance `35610602465`: **SUCCESS**
+- Explicit shared owner performance `35610602480`: **SUCCESS**
+- Generational arena performance `35610602782`: **SUCCESS**
 
-## Active P0 production — #144
+## Immediate P0 — finish #138 / PR #146
 
-`#144 P0 implement generational arena v0: contextual arena T, copyable handle T, checked insert/lookup/remove`
+Current branch:
 
-Branch:
+`research/weak-upgrade-result-v0`
 
-`feature/generational-arena-v0`
+Exact base:
 
-Validated pre-finalizer production-gate head:
+`b3b3eebe5c1d41b47e26e3bb2bc00db5a34c32c9`
 
-`e59f41fc9a4f58bb352d663358fc1b12a130f445`
+Exact head:
 
-Production validation already green:
+`3b07d49d14d46de4f2e45ee228960b3fd1ac1ba0`
 
-- Dev arena semantics v0 run `35118469618`: focused semantic/runtime tests, full workspace regression, and Clippy `-D warnings` **SUCCESS**;
-- Generational arena performance run `35120462329`: format and focused parser/formatter/lowering/codegen/runtime tests **SUCCESS**;
-- differential correctness **true**;
-- exact executable bytes **true**;
-- stable measurement **true**;
-- reference median **11,721,632 ns**;
-- Evolution median **11,728,823 ns**;
-- observed ratio **1.000613481**;
-- timing-only verdict **FAIL**;
-- final verdict **PASS** by `byte-identical-binary-parity`;
-- artifact `10457925773`, digest `sha256:4852ab5c61da6c0e2848efff148beaba9fd2dcbafa1dbe650627bb3c04667a39`.
+Current evidence:
 
-The earlier fully independent timed reference run `35119416363` remains failed evidence at ratio `1.001201306`. Its independent implementation remains in the permanent fixture as a compile/structure control; timed acceptance uses the generated-runtime parity lock so symbol/source-location noise cannot masquerade as overhead.
+- Windows normal CI: **SUCCESS**
+- macOS normal CI: **SUCCESS**
+- Ubuntu normal CI: queued
+- Checked Weak upgrade result research: queued
+- sequence/shared-owner/arena performance: queued
 
-Locked production semantics:
+Execution order:
 
-- `arena T` is a move-only bounded arena owner;
-- `handle T` is a copy-like `(arena id, index, generation)` identity;
-- insert is explicit exclusive mutation with no hidden payload clone;
-- lookup is checked and rejects stale/wrong-arena/vacant/out-of-range handles;
-- remove is checked, moves payload out once, advances generation on reuse, and retires generation-max slots;
-- arena-id exhaustion fails closed;
-- live element references block insert/remove/move/reinitialization until bounded final-use release;
-- typed handles are supported in function contracts, nominal record fields, and sequences;
-- generated runtime remains ordinary safe Rust with no pointer registry, unsafe identity, GC, `RefCell`, lock, or hidden refcount layer.
+1. do not change the head unless an exact-head gate produces a concrete failure;
+2. if a gate fails, patch only the demonstrated cause and let the new SHA trigger naturally;
+3. when all exact-head gates are green, inspect the Weak research artifact for exact SHA, Rust 1.98.0, zero mismatches and `SCOPED-UPGRADE-CANDIDATE`;
+4. merge PR #146 with expected-head protection;
+5. require natural exact-main normal CI plus natural exact-main Checked Weak upgrade result research;
+6. close #138 only after those postmerge gates are green.
 
-## Immediate execution order
+## Next production gate — #137
 
-PR #145 is open on the production branch.
+#137 stays blocked until #138 is completed on exact main.
 
-1. Push only evidence-backed fixes to the PR head; do not rerun failed historical SHAs.
-2. Require the exact final PR head to pass:
-   - normal CI on Ubuntu 24.04, Windows and macOS;
-   - Generational arena performance;
-   - Append-only sequence performance when naturally triggered;
-   - Explicit shared owner performance when naturally triggered;
-   - Generational arena surface research and every other naturally triggered regression.
-3. Review the exact final diff and merge only with expected-head protection.
-4. Track natural exact-main postmerge CI and Generational arena performance without duplicate dispatches.
-5. Close #144 completed only after required exact-main postmerge gates are green.
+First production slice is already mapped across parser, lowering, formatter and Rust codegen:
 
-## Separate ownership/research lanes
+- contextual `weak T`;
+- non-consuming `downgrade owner`;
+- checked `upgrade edge as owner ... else ... end`;
+- branch-local success binding of `shared T`;
+- direct `std::rc::Weak<T>`, `Rc::downgrade`, and `Weak::upgrade`;
+- local/function Weak handles first;
+- unsupported record/enum/sequence/arena/nested Weak storage remains fail-closed unless separately proven;
+- whole-program enum-bearing parity is mandatory.
 
-Keep distinct from #144:
+Do not create the production branch before #138 exact-main completion.
 
-- explicit Weak/cycle-edge surface;
-- interior mutability;
-- cross-thread shared ownership / synchronization;
-- mutable references;
-- generalized lifetime solving;
-- general generic type syntax;
-- independent payload lifetime outside arena ownership.
+## Parallel READY research — #148
+
+#148 is unblocked by completed #134.
+
+Prepared branch:
+
+`research/exclusive-guard-mutation-surface-v0`
+
+Prepared clean head:
+
+`7fa1a81c122d981c17b28a19a5ea7e69c6e9e4ed`
+
+The branch contains exactly three research files and no production semantics. Pre-registered verdict: **WHOLE-PAYLOAD-REPLACE-CANDIDATE** with bounded research surface `replace guard with expr`.
+
+Open its PR only when doing so will not unnecessarily amplify an active hosted-runner backlog.
+
+## Prepared infrastructure
+
+Before opening these PRs, rebase onto the current exact main and re-audit the resulting diff:
+
+- #149 `infra/benchmark-provenance-v0` — prepared head `a091de92d58fbc5df8583ec45098b86a3d2b7ca7`
+- #150 `infra/research-workflow-provenance-v0` — prepared head `44f0618ccf102b18b4f3a061548c126fcdcfd8b1`
+- #151 `infra/tooling-evidence-provenance-v0` — stacked prepared head `dfd3972bf1577a5af156d93854fd1baf8ada6fb1`
+
+#150 naturally fans out into many research workflows, so do not open it during a runner-capacity bottleneck merely to create more queued rectangles on a web page.
+
+## Separate blocked lane — #133
+
+Current-main normal CI is green. A new current-main Cross-thread shared ownership research dispatch is still required. Do not rerun the exhausted historical cancelled attempt.
 
 ## CI rule
 
-Never create duplicate active Actions for the same SHA/workflow/input. Failed historical SHAs remain evidence. A new SHA gets a new natural run; do not rerun an old failing SHA just to repaint history.
+Never create duplicate active Actions for the same SHA/workflow/input. Keep one exact head per active PR. Historical failures remain evidence. Merge only with expected-head protection and require natural exact-main postmerge proof.

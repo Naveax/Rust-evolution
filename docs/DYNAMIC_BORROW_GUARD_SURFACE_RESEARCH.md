@@ -1,6 +1,6 @@
 # Dynamic borrow guard surface v0 research
 
-Acceptance rule: the research decision is authoritative only when the executable matrix, exact-head CI, artifact provenance, merge, and natural exact-main validation recorded on issue #134 are all green. Until then, this document describes a bounded candidate, not production semantics.
+Status: **ACCEPTED RESEARCH DECISION**. The executable matrix, exact-head CI, exact-SHA artifact, squash merge, and natural exact-main validation recorded on issue #134 are green. This document records the accepted research direction; it still does not make the surface production language semantics.
 
 Issue: #134. Parent research: #121 / PR #128.
 
@@ -12,7 +12,7 @@ This track is research-only. It adds no production cell, mutation, guard, or int
 
 Can the first explicit single-thread dynamic-borrow slice keep runtime guards lexical and local, so Evolution can expose RefCell-like checking without immediately adding a first-class escaping guard type or generalized lifetime solver?
 
-The leading bounded hypothesis is **LEXICAL-GUARDS-FIRST**.
+The accepted bounded result is **LEXICAL-GUARDS-FIRST** with recommended owned-cell surface **EXPLICIT-OWNED-CELL**.
 
 ## Candidate owned-cell and acquisition contract
 
@@ -129,7 +129,7 @@ Pinned Rust 1.98 evidence covers at minimum:
 
 The source-surface probe also requires candidate words to remain ordinary identifiers outside exact candidate positions, proves that an ordinary `cell(...)` function call still parses, pins the current parser rejection boundaries for both `cell T` and `cell expr`, and verifies that the lexical/fallible guard block spellings are not accidentally accepted by the current production parser.
 
-## Pre-registered decision
+## Accepted decision
 
 The dedicated workflow derives its verdict from measured matrix/surface predicates. A successful result records guard verdict **LEXICAL-GUARDS-FIRST** together with recommended cell surface **EXPLICIT-OWNED-CELL** (`cell T` + `cell expr`). It emits that pair only if:
 
@@ -142,7 +142,19 @@ The dedicated workflow derives its verdict from measured matrix/surface predicat
 - ordinary references and cross-thread synchronization remain separate;
 - exact-SHA JSON, CSV, and Markdown provenance is produced.
 
-A mismatch keeps #134 research open and requires evidence-driven revision rather than widening the language surface.
+Acceptance evidence is fixed to the exact-head and exact-main runs recorded below. Any future widening requires new research rather than silently extending this decision.
+
+## Accepted evidence
+
+- final PR #147 head: `7acb51495799d3b25e2f9dd9f425011584ad22fe`;
+- exact-head CI `35596923275`: **SUCCESS** on Ubuntu, Windows and macOS;
+- exact-head research `35596923400`: **SUCCESS**;
+- exact-head research artifact `10642096339`, digest `sha256:3b9ee0fcabf028ce82c694af84df4dccb054e658546ab97d77f80da25c04e358`;
+- squash merge: `b3b3eebe5c1d41b47e26e3bb2bc00db5a34c32c9`;
+- exact-main CI `35610602607`: **SUCCESS** on Ubuntu, Windows and macOS;
+- exact-main research `35610602634`: **SUCCESS**;
+- exact-main research artifact `10643971376`, digest `sha256:007ab949a38a6ca060953e7007ec09d90b8a09c9f671e19e2b1ad9442dcd57a7`;
+- issue #134: **closed completed**.
 
 ## Hard boundaries
 
@@ -159,4 +171,4 @@ This candidate does not authorize:
 - general mutable references;
 - general field/index mutable-place syntax;
 - payload replacement or field mutation through `borrow_mut` before successor #148 selects a bounded mutation surface;
-- a production interior-mutability feature before exact-head and exact-main research evidence is green.
+- production payload mutation through an exclusive guard before successor #148 selects a bounded mutation surface.
