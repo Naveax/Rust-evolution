@@ -75,6 +75,13 @@ jobs:
           assert len(rows) == data['case_count'], (len(rows), data)
           assert all(row['git_sha'] == data['git_sha'] for row in rows), rows
           assert 'LEXICAL-GUARDS-FIRST' in markdown, markdown
+          for candidate in (
+              'borrow cell as view',
+              'borrow_mut cell as edit',
+              'try_borrow cell as view',
+              'try_borrow_mut cell as edit',
+          ):
+              assert candidate in markdown, (candidate, markdown)
           print(json.dumps(data, indent=2))
           PY
       - uses: actions/upload-artifact@v4
