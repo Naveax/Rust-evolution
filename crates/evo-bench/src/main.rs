@@ -2,6 +2,7 @@ mod compiler;
 mod config;
 mod execution;
 
+use compiler::RUSTC_BUILD_ARGS;
 use compiler::{
     compare_binary_bytes, compare_normalized_ir, compile_binary, compile_llvm_ir,
     parse_host_target, rustc_program, rustc_verbose,
@@ -20,9 +21,9 @@ use execution::{Execution, execute_with_timeout, measure_blocking};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 const MEASUREMENT_MODE: &str = "process-wall-clock";
 const TIMING_OUTPUT_POLICY: &str =
     "correctness captures stdout/stderr; timed samples redirect both streams to null symmetrically";
@@ -51,8 +52,18 @@ struct Measurement {
 #[derive(Debug)]
 struct RunReport {
     config: CaseConfig,
+    git_sha: String,
     rustc_verbose: String,
     target: String,
+    host_os: &'static str,
+    host_arch: &'static str,
+    ci_provider: Option<String>,
+    runner_name: Option<String>,
+    runner_os: Option<String>,
+    runner_arch: Option<String>,
+    cpu_model: Option<String>,
+    cpu_governor: Option<String>,
+    build_flags: &'static [&'static str],
     correctness: Correctness,
     measurement: Option<Measurement>,
     normalized_llvm_ir_equal: bool,
@@ -127,6 +138,14 @@ fn usage() -> String {
 
 fn run_case(case_dir: &Path, output_dir: &Path, config: CaseConfig) -> Result<RunReport, String> {
     prepare_output_dir(output_dir)?;
+
+    let git_sha = resolve_git_sha()?;
+    let ci_provider = ci_provider();
+    let runner_name = env_metadata("RUNNER_NAME");
+    let runner_os = env_metadata("RUNNER_OS");
+    let runner_arch = env_metadata("RUNNER_ARCH");
+    let cpu_model = read_cpu_model();
+    let cpu_governor = read_cpu_governor();
 
     let evolution_source_path = case_dir.join("evolution.evo");
     let reference_source_path = case_dir.join("reference.rs");
@@ -209,8 +228,18 @@ fn run_case(case_dir: &Path, output_dir: &Path, config: CaseConfig) -> Result<Ru
 
     Ok(RunReport {
         config,
+        git_sha,
         rustc_verbose,
         target,
+        host_os: env::consts::OS,
+        host_arch: env::consts::ARCH,
+        ci_provider,
+        runner_name,
+        runner_os,
+        runner_arch,
+        cpu_model,
+        cpu_governor,
+        build_flags: RUSTC_BUILD_ARGS,
         correctness,
         measurement,
         normalized_llvm_ir_equal,
@@ -430,7 +459,17 @@ fn render_json(report: &RunReport) -> String {
             "{{\n",
             "  \"schema_version\": {schema_version},\n",
             "  \"benchmark_name\": {name},\n",
+            "  \"git_sha\": {git_sha},\n",
             "  \"target\": {target},\n",
+            "  \"host_os\": {host_os},\n",
+            "  \"host_arch\": {host_arch},\n",
+            "  \"ci_provider\": {ci_provider},\n",
+            "  \"runner_name\": {runner_name},\n",
+            "  \"runner_os\": {runner_os},\n",
+            "  \"runner_arch\": {runner_arch},\n",
+            "  \"cpu_model\": {cpu_model},\n",
+            "  \"cpu_governor\": {cpu_governor},\n",
+            "  \"build_flags\": {build_flags},\n",
             "  \"rustc_verbose\": {rustc},\n",
             "  \"warmup\": {warmup},\n",
             "  \"samples\": {samples},\n",
@@ -455,7 +494,17 @@ fn render_json(report: &RunReport) -> String {
         ),
         schema_version = SCHEMA_VERSION,
         name = json_string(&report.config.name),
+        git_sha = json_string(&report.git_sha),
         target = json_string(&report.target),
+        host_os = json_string(report.host_os),
+        host_arch = json_string(report.host_arch),
+        ci_provider = json_optional_string(report.ci_provider.as_deref()),
+        runner_name = json_optional_string(report.runner_name.as_deref()),
+        runner_os = json_optional_string(report.runner_os.as_deref()),
+        runner_arch = json_optional_string(report.runner_arch.as_deref()),
+        cpu_model = json_optional_string(report.cpu_model.as_deref()),
+        cpu_governor = json_optional_string(report.cpu_governor.as_deref()),
+        build_flags = json_string_array(report.build_flags),
         rustc = json_string(&report.rustc_verbose),
         warmup = report.config.warmup,
         samples = report.config.samples,
@@ -503,7 +552,31 @@ fn render_markdown(report: &RunReport) -> String {
     let mut text = String::new();
     text.push_str("# Rust Evolution benchmark report\n\n");
     text.push_str(&format!("- Benchmark: `{}`\n", report.config.name));
+    text.push_str(&format!("- Git SHA: `{}`\n", report.git_sha));
     text.push_str(&format!("- Target: `{}`\n", report.target));
+    text.push_str(&format!("- Host: `{}/{}`\n", report.host_os, report.host_arch));
+    text.push_str(&format!(
+        "- CI provider: {}\n",
+        report.ci_provider.as_deref().unwrap_or("local")
+    ));
+    text.push_str(&format!(
+        "- Runner: {} / {} / {}\n",
+        report.runner_name.as_deref().unwrap_or("unknown"),
+        report.runner_os.as_deref().unwrap_or("unknown"),
+        report.runner_arch.as_deref().unwrap_or("unknown")
+    ));
+    text.push_str(&format!(
+        "- CPU model: {}\n",
+        report.cpu_model.as_deref().unwrap_or("unknown")
+    ));
+    text.push_str(&format!(
+        "- CPU governor: {}\n",
+        report.cpu_governor.as_deref().unwrap_or("unknown")
+    ));
+    text.push_str(&format!(
+        "- Build flags: `{}`\n",
+        report.build_flags.join(" ")
+    ));
     text.push_str(&format!(
         "- Warmup/sample count: {}/{}\n",
         report.config.warmup, report.config.samples
@@ -601,6 +674,7 @@ fn render_raw_samples(report: &RunReport) -> String {
 
 fn print_summary(report: &RunReport) {
     println!("benchmark: {}", report.config.name);
+    println!("git sha: {}", report.git_sha);
     println!("correctness: {}", report.correctness.passed);
     println!(
         "normalized LLVM IR equal: {}",
@@ -658,6 +732,97 @@ fn executable_name(stem: &str) -> String {
     format!("{stem}{}", env::consts::EXE_SUFFIX)
 }
 
+fn resolve_git_sha() -> Result<String, String> {
+    if let Some(explicit) = env::var_os("EVO_GIT_SHA") {
+        return validate_git_sha(&explicit.to_string_lossy());
+    }
+
+    if env::var_os("EVO_REQUIRE_GIT_SHA").is_some() {
+        return Err(
+            "EVO_REQUIRE_GIT_SHA is set but EVO_GIT_SHA was not provided; exact benchmark provenance is required"
+                .to_owned(),
+        );
+    }
+
+    let output = Command::new("git").args(["rev-parse", "HEAD"]).output();
+    if let Ok(output) = output
+        && output.status.success()
+    {
+        let value = String::from_utf8_lossy(&output.stdout);
+        if let Ok(sha) = validate_git_sha(value.trim()) {
+            return Ok(sha);
+        }
+    }
+
+    Ok("unknown".to_owned())
+}
+
+fn validate_git_sha(input: &str) -> Result<String, String> {
+    let value = input.trim();
+    if value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(value.to_ascii_lowercase())
+    } else {
+        Err(format!(
+            "benchmark git SHA must be exactly 40 hexadecimal characters, got {value:?}"
+        ))
+    }
+}
+
+fn ci_provider() -> Option<String> {
+    (env::var_os("GITHUB_ACTIONS").as_deref() == Some(std::ffi::OsStr::new("true")))
+        .then(|| "github-actions".to_owned())
+}
+
+fn env_metadata(name: &str) -> Option<String> {
+    env::var(name).ok().and_then(|value| non_empty(&value))
+}
+
+fn read_cpu_model() -> Option<String> {
+    if env::consts::OS != "linux" {
+        return None;
+    }
+
+    let text = fs::read_to_string("/proc/cpuinfo").ok()?;
+    text.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        if matches!(key.trim(), "model name" | "Hardware") {
+            non_empty(value)
+        } else {
+            None
+        }
+    })
+}
+
+fn read_cpu_governor() -> Option<String> {
+    if env::consts::OS != "linux" {
+        return None;
+    }
+
+    fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
+        .ok()
+        .and_then(|value| non_empty(&value))
+}
+
+fn non_empty(input: &str) -> Option<String> {
+    let value = input.trim();
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+fn json_optional_string(input: Option<&str>) -> String {
+    input.map_or_else(|| "null".to_owned(), json_string)
+}
+
+fn json_string_array(input: &[&str]) -> String {
+    format!(
+        "[{}]",
+        input
+            .iter()
+            .map(|value| json_string(value))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
 fn json_string(input: &str) -> String {
     let mut output = String::with_capacity(input.len() + 2);
     output.push('"');
@@ -678,10 +843,28 @@ fn json_string(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::json_string;
+    use super::{json_optional_string, json_string, json_string_array, validate_git_sha};
 
     #[test]
     fn escapes_json_control_characters() {
         assert_eq!(json_string("a\n\"b\\c"), "\"a\\n\\\"b\\\\c\"");
+    }
+
+    #[test]
+    fn serializes_optional_and_array_metadata() {
+        assert_eq!(json_optional_string(None), "null");
+        assert_eq!(json_optional_string(Some("x")), "\"x\"");
+        assert_eq!(json_string_array(&["-C", "opt-level=3"]), "[\"-C\",\"opt-level=3\"]");
+    }
+
+    #[test]
+    fn validates_exact_git_sha_shape() {
+        let upper = "ABCDEF0123456789ABCDEF0123456789ABCDEF01";
+        assert_eq!(
+            validate_git_sha(upper).expect("valid SHA"),
+            "abcdef0123456789abcdef0123456789abcdef01"
+        );
+        assert!(validate_git_sha("abc").is_err());
+        assert!(validate_git_sha("gggggggggggggggggggggggggggggggggggggggg").is_err());
     }
 }
