@@ -390,14 +390,16 @@ fn surface_evidence() -> SurfaceEvidence {
     );
     let cell_constructor_candidate_current_parser_rejects =
         lex(cell_constructor).is_ok_and(|tokens| {
-            parse(&tokens)
-                .is_err_and(|error| error.message.contains("expected end of line after statement"))
+            parse(&tokens).is_err_and(|error| {
+                error
+                    .message
+                    .contains("expected end of line after statement")
+            })
         });
 
     let lexical = concat!("borrow state as view\n", "print view\n", "end\n",);
     let lexical_borrow_candidate_current_parser_rejects = lex(lexical).is_ok_and(|tokens| {
-        parse(&tokens)
-            .is_err_and(|error| error.message.contains("expected '=' after binding name"))
+        parse(&tokens).is_err_and(|error| error.message.contains("expected '=' after binding name"))
     });
 
     let fallible = concat!(
@@ -407,11 +409,9 @@ fn surface_evidence() -> SurfaceEvidence {
         "print 0\n",
         "end\n",
     );
-    let fallible_borrow_candidate_current_parser_rejects =
-        lex(fallible).is_ok_and(|tokens| {
-            parse(&tokens)
-                .is_err_and(|error| error.message.contains("expected '=' after binding name"))
-        });
+    let fallible_borrow_candidate_current_parser_rejects = lex(fallible).is_ok_and(|tokens| {
+        parse(&tokens).is_err_and(|error| error.message.contains("expected '=' after binding name"))
+    });
 
     SurfaceEvidence {
         contextual_words_are_identifiers,
