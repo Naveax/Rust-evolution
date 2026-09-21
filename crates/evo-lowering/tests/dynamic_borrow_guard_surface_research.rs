@@ -353,11 +353,7 @@ fn surface_evidence() -> SurfaceEvidence {
     let ordinary_identifier_compatibility =
         lex(ordinary).is_ok_and(|tokens| parse(&tokens).is_ok());
 
-    let lexical = concat!(
-        "borrow state as view\n",
-        "print view\n",
-        "end\n",
-    );
+    let lexical = concat!("borrow state as view\n", "print view\n", "end\n",);
     let lexical_borrow_candidate_current_parser_rejects =
         lex(lexical).is_ok_and(|tokens| parse(&tokens).is_err());
 
@@ -429,11 +425,27 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
     writeln!(json, "  \"case_count\": {},", CASES.len()).unwrap();
     writeln!(json, "  \"expectation_mismatches\": {mismatches},").unwrap();
     writeln!(json, "  \"lexical_guard_case_count\": {lexical_count},").unwrap();
-    writeln!(json, "  \"guard_value_type_case_count\": {guard_value_count},").unwrap();
-    writeln!(json, "  \"explicit_rc_refcell_case_count\": {composition_count},").unwrap();
+    writeln!(
+        json,
+        "  \"guard_value_type_case_count\": {guard_value_count},"
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"explicit_rc_refcell_case_count\": {composition_count},"
+    )
+    .unwrap();
     writeln!(json, "  \"owned_mut_instead_count\": {owned_mut_count},").unwrap();
-    writeln!(json, "  \"concurrency_boundary_count\": {concurrency_count},").unwrap();
-    writeln!(json, "  \"reject_hidden_cost_count\": {reject_hidden_cost_count},").unwrap();
+    writeln!(
+        json,
+        "  \"concurrency_boundary_count\": {concurrency_count},"
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"reject_hidden_cost_count\": {reject_hidden_cost_count},"
+    )
+    .unwrap();
     writeln!(
         json,
         "  \"contextual_words_are_identifiers\": {},",
@@ -509,7 +521,11 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
         "- returned/escaping guards require a first-class guard value/lifetime contract: **yes**"
     )
     .unwrap();
-    writeln!(markdown, "- production guard escape authorized by this research: **no**").unwrap();
+    writeln!(
+        markdown,
+        "- production guard escape authorized by this research: **no**"
+    )
+    .unwrap();
     writeln!(markdown, "\n## Candidate source contract\n").unwrap();
     writeln!(markdown, "```text").unwrap();
     writeln!(markdown, "borrow cell as view").unwrap();
