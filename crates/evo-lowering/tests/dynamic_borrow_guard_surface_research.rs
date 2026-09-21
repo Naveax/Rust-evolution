@@ -162,7 +162,7 @@ const CASES: &[Case] = &[
         compile: false,
         run_success: false,
         stdout: None,
-        stderr_contains: Some("cannot borrow data in dereference of"),
+        stderr_contains: Some("cannot assign to data in dereference of"),
         source: r#"use std::cell::RefCell;fn main(){let cell=RefCell::new(7_i64);let guard=cell.borrow();*guard+=1;}"#,
     },
     Case {
