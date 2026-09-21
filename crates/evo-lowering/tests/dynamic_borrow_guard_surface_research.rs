@@ -462,9 +462,7 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
     writeln!(json, "}}").unwrap();
     fs::write(out.join("report.json"), json).expect("json report should be writable");
 
-    let mut csv = String::from(
-        "git_sha,name,classification,compile_matched,run_matched\n",
-    );
+    let mut csv = String::from("git_sha,name,classification,compile_matched,run_matched\n");
     for (case, finding) in CASES.iter().zip(findings) {
         writeln!(
             csv,
@@ -484,8 +482,16 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
     writeln!(markdown, "- verdict: **LEXICAL-GUARDS-FIRST**").unwrap();
     writeln!(markdown, "- cases: **{}**", CASES.len()).unwrap();
     writeln!(markdown, "- expectation mismatches: **{mismatches}**").unwrap();
-    writeln!(markdown, "- lexical/local guards are sufficient for the bounded first slice: **yes**").unwrap();
-    writeln!(markdown, "- returned/escaping guards require a first-class guard value/lifetime contract: **yes**").unwrap();
+    writeln!(
+        markdown,
+        "- lexical/local guards are sufficient for the bounded first slice: **yes**"
+    )
+    .unwrap();
+    writeln!(
+        markdown,
+        "- returned/escaping guards require a first-class guard value/lifetime contract: **yes**"
+    )
+    .unwrap();
     writeln!(markdown, "- production guard escape authorized by this research: **no**").unwrap();
     writeln!(markdown, "\n## Candidate source contract\n").unwrap();
     writeln!(markdown, "```text").unwrap();
@@ -505,7 +511,9 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
     writeln!(markdown, "```\n").unwrap();
     writeln!(
         markdown,
-        "The binding is lexical to the success/body scope. Scope exit releases the Rust guard. Panicking and fallible acquisition remain distinct. Returned or otherwise escaping guards are outside the bounded candidate."
+        "The binding is lexical to the success/body scope. Scope exit releases the Rust guard. \
+         Panicking and fallible acquisition remain distinct. Returned or otherwise escaping guards \
+         are outside the bounded candidate."
     )
     .unwrap();
     writeln!(markdown, "\n## Matrix\n").unwrap();
