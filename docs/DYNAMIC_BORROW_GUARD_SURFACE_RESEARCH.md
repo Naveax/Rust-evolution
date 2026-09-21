@@ -1,6 +1,6 @@
 # Dynamic borrow guard surface v0 research
 
-Status: **RESEARCH IN PROGRESS**
+Acceptance rule: the research decision is authoritative only when the executable matrix, exact-head CI, artifact provenance, merge, and natural exact-main validation recorded on issue #134 are all green. Until then, this document describes a bounded candidate, not production semantics.
 
 Issue: #134. Parent research: #121 / PR #128.
 
@@ -120,7 +120,7 @@ The source-surface probe also requires candidate words to remain ordinary identi
 
 ## Pre-registered decision
 
-The dedicated workflow emits **LEXICAL-GUARDS-FIRST** only if:
+The dedicated workflow derives its verdict from measured matrix/surface predicates and emits **LEXICAL-GUARDS-FIRST** only if:
 
 - all compile/runtime expectations match;
 - lexical/local guard cases cover the bounded dynamic-borrow semantics;
