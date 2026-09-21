@@ -403,12 +403,29 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
     let owned_mut_count = count(findings, Classification::OwnedMutInstead);
     let concurrency_count = count(findings, Classification::RequiresConcurrencyDesign);
     let reject_hidden_cost_count = count(findings, Classification::RejectHiddenCost);
+    let lexical_guards_sufficient = mismatches == 0
+        && lexical_count >= 10
+        && guard_value_count >= 2
+        && composition_count >= 2
+        && owned_mut_count >= 2
+        && concurrency_count >= 1
+        && reject_hidden_cost_count >= 2
+        && surface.contextual_words_are_identifiers
+        && surface.ordinary_identifier_compatibility
+        && surface.lexical_borrow_candidate_current_parser_rejects
+        && surface.fallible_borrow_candidate_current_parser_rejects;
+    let verdict = if lexical_guards_sufficient {
+        "LEXICAL-GUARDS-FIRST"
+    } else {
+        "DEFER"
+    };
+    assert_eq!(verdict, "LEXICAL-GUARDS-FIRST");
 
     let mut json = String::new();
     writeln!(json, "{{").unwrap();
     writeln!(json, "  \"git_sha\": {sha:?},").unwrap();
     writeln!(json, "  \"rustc_vv\": {rustc:?},").unwrap();
-    writeln!(json, "  \"verdict\": \"LEXICAL-GUARDS-FIRST\",").unwrap();
+    writeln!(json, "  \"verdict\": {verdict:?},").unwrap();
     writeln!(json, "  \"case_count\": {},", CASES.len()).unwrap();
     writeln!(json, "  \"expectation_mismatches\": {mismatches},").unwrap();
     writeln!(json, "  \"lexical_guard_case_count\": {lexical_count},").unwrap();
@@ -479,7 +496,7 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
     let mut markdown = String::new();
     writeln!(markdown, "# Dynamic borrow guard surface v0 research\n").unwrap();
     writeln!(markdown, "- git_sha: `{sha}`").unwrap();
-    writeln!(markdown, "- verdict: **LEXICAL-GUARDS-FIRST**").unwrap();
+    writeln!(markdown, "- verdict: **{verdict}**").unwrap();
     writeln!(markdown, "- cases: **{}**", CASES.len()).unwrap();
     writeln!(markdown, "- expectation mismatches: **{mismatches}**").unwrap();
     writeln!(
