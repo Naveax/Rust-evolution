@@ -74,6 +74,8 @@ jobs:
           assert data['reject_hidden_cost_count'] >= 2, data
           assert data['contextual_words_are_identifiers'] is True, data
           assert data['ordinary_identifier_compatibility'] is True, data
+          assert data['cell_type_candidate_current_parser_rejects'] is True, data
+          assert data['cell_constructor_candidate_current_parser_rejects'] is True, data
           assert data['lexical_borrow_candidate_current_parser_rejects'] is True, data
           assert data['fallible_borrow_candidate_current_parser_rejects'] is True, data
           assert data['escaping_guard_requires_value_type'] is True, data
@@ -83,10 +85,12 @@ jobs:
           assert 'LEXICAL-GUARDS-FIRST' in markdown, markdown
           markdown_lines = set(markdown.splitlines())
           for candidate in (
-              'borrow cell as view',
-              'borrow_mut cell as edit',
-              'try_borrow cell as view',
-              'try_borrow_mut cell as edit',
+              'state = cell Item(value = 1)',
+              'fn inspect(state cell Item) int',
+              'borrow state as view',
+              'borrow_mut state as edit',
+              'try_borrow state as view',
+              'try_borrow_mut state as edit',
           ):
               assert candidate in markdown_lines, (candidate, markdown)
           print(json.dumps(data, indent=2))
