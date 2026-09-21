@@ -130,7 +130,7 @@ The source-surface probe also requires candidate words to remain ordinary identi
 
 ## Pre-registered decision
 
-The dedicated workflow derives its verdict from measured matrix/surface predicates and emits **LEXICAL-GUARDS-FIRST** only if:
+The dedicated workflow derives its verdict from measured matrix/surface predicates. A successful result records guard verdict **LEXICAL-GUARDS-FIRST** together with recommended cell surface **EXPLICIT-OWNED-CELL** (`cell T` + `cell expr`). It emits that pair only if:
 
 - all compile/runtime expectations match;
 - lexical/local guard cases cover the bounded dynamic-borrow semantics;
