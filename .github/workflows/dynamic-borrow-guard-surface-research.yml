@@ -77,6 +77,7 @@ jobs:
           assert data['reject_hidden_cost_count'] >= 2, data
           assert data['contextual_words_are_identifiers'] is True, data
           assert data['ordinary_identifier_compatibility'] is True, data
+          assert data['ordinary_cell_call_parse'] is True, data
           assert data['cell_type_candidate_current_parser_rejects'] is True, data
           assert data['cell_constructor_candidate_current_parser_rejects'] is True, data
           assert data['lexical_borrow_candidate_current_parser_rejects'] is True, data

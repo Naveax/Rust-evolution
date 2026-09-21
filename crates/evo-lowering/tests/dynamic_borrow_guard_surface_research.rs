@@ -243,6 +243,7 @@ const CASES: &[Case] = &[
 struct SurfaceEvidence {
     contextual_words_are_identifiers: bool,
     ordinary_identifier_compatibility: bool,
+    ordinary_cell_call_parse: bool,
     cell_type_candidate_current_parser_rejects: bool,
     cell_constructor_candidate_current_parser_rejects: bool,
     lexical_borrow_candidate_current_parser_rejects: bool,
@@ -355,6 +356,16 @@ fn surface_evidence() -> SurfaceEvidence {
     let ordinary_identifier_compatibility =
         lex(ordinary).is_ok_and(|tokens| parse(&tokens).is_ok());
 
+    let ordinary_cell_call = concat!(
+        "fn cell(value int) int\n",
+        "return value\n",
+        "end\n",
+        "value = cell(7)\n",
+        "print value\n",
+    );
+    let ordinary_cell_call_parse =
+        lex(ordinary_cell_call).is_ok_and(|tokens| parse(&tokens).is_ok());
+
     let cell_type = concat!(
         "record Item\n",
         "value int\n",
@@ -406,6 +417,7 @@ fn surface_evidence() -> SurfaceEvidence {
     SurfaceEvidence {
         contextual_words_are_identifiers,
         ordinary_identifier_compatibility,
+        ordinary_cell_call_parse,
         cell_type_candidate_current_parser_rejects,
         cell_constructor_candidate_current_parser_rejects,
         lexical_borrow_candidate_current_parser_rejects,
@@ -446,6 +458,7 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
         && reject_hidden_cost_count >= 2
         && surface.contextual_words_are_identifiers
         && surface.ordinary_identifier_compatibility
+        && surface.ordinary_cell_call_parse
         && surface.cell_type_candidate_current_parser_rejects
         && surface.cell_constructor_candidate_current_parser_rejects
         && surface.lexical_borrow_candidate_current_parser_rejects
@@ -509,6 +522,12 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
         json,
         "  \"ordinary_identifier_compatibility\": {},",
         surface.ordinary_identifier_compatibility
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"ordinary_cell_call_parse\": {},",
+        surface.ordinary_cell_call_parse
     )
     .unwrap();
     writeln!(
@@ -669,6 +688,7 @@ fn dynamic_borrow_guard_surface_research_selects_lexical_guards_first() {
     let surface = surface_evidence();
     assert!(surface.contextual_words_are_identifiers);
     assert!(surface.ordinary_identifier_compatibility);
+    assert!(surface.ordinary_cell_call_parse);
     assert!(surface.cell_type_candidate_current_parser_rejects);
     assert!(surface.cell_constructor_candidate_current_parser_rejects);
     assert!(surface.lexical_borrow_candidate_current_parser_rejects);

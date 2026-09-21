@@ -48,7 +48,7 @@ end
 
 For the bounded first slice, `cell T` is an explicit owned runtime-borrow-checked container and `cell expr` explicitly moves an owned payload into that container. Its direct Rust model is inline `RefCell<T>`; creating the cell does not itself imply heap allocation, `Rc`, `Arc`, synchronization, or owner duplication.
 
-This bounded spelling avoids opening general Rust-like generic source syntax merely to expose `RefCell<T>`. Ordinary `T` does not implicitly become a cell because that would hide dynamic borrow state. A nested `shared cell T` source algebra is not authorized here; the Rust `Rc<RefCell<T>>` cases remain composition evidence showing that ownership and dynamic borrowing are separate mechanisms.
+This bounded spelling avoids opening general Rust-like generic source syntax merely to expose `RefCell<T>`. Ordinary `T` does not implicitly become a cell because that would hide dynamic borrow state. Because `cell` remains contextual, an existing ordinary call such as `cell(7)` must continue to parse as a function call; the constructor form applies only to the bounded non-call operand shape `cell expr`. A nested `shared cell T` source algebra is not authorized here; the Rust `Rc<RefCell<T>>` cases remain composition evidence showing that ownership and dynamic borrowing are separate mechanisms.
 
 The intended bounded contract is:
 
@@ -126,7 +126,7 @@ Pinned Rust 1.98 evidence covers at minimum:
 20. Arc + Mutex remaining a separate cross-thread synchronization model;
 21. exclusive-owner `RefCell::get_mut` control showing that dynamic borrow checking is unnecessary when exclusive access already exists.
 
-The source-surface probe also requires candidate words to remain ordinary identifiers outside exact candidate positions, pins the current parser rejection boundaries for both `cell T` and `cell expr`, and verifies that the lexical/fallible guard block spellings are not accidentally accepted by the current production parser.
+The source-surface probe also requires candidate words to remain ordinary identifiers outside exact candidate positions, proves that an ordinary `cell(...)` function call still parses, pins the current parser rejection boundaries for both `cell T` and `cell expr`, and verifies that the lexical/fallible guard block spellings are not accidentally accepted by the current production parser.
 
 ## Pre-registered decision
 
