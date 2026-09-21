@@ -546,6 +546,12 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
     writeln!(markdown, "else").unwrap();
     writeln!(markdown, "    ...").unwrap();
     writeln!(markdown, "end").unwrap();
+    writeln!(markdown).unwrap();
+    writeln!(markdown, "try_borrow_mut cell as edit").unwrap();
+    writeln!(markdown, "    ...").unwrap();
+    writeln!(markdown, "else").unwrap();
+    writeln!(markdown, "    ...").unwrap();
+    writeln!(markdown, "end").unwrap();
     writeln!(markdown, "```\n").unwrap();
     writeln!(
         markdown,
