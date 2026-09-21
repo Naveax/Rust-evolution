@@ -455,13 +455,26 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
     } else {
         "DEFER"
     };
+    let recommended_cell_surface = if lexical_guards_sufficient {
+        "EXPLICIT-OWNED-CELL"
+    } else {
+        "NONE"
+    };
     assert_eq!(verdict, "LEXICAL-GUARDS-FIRST");
+    assert_eq!(recommended_cell_surface, "EXPLICIT-OWNED-CELL");
 
     let mut json = String::new();
     writeln!(json, "{{").unwrap();
     writeln!(json, "  \"git_sha\": {sha:?},").unwrap();
     writeln!(json, "  \"rustc_vv\": {rustc:?},").unwrap();
     writeln!(json, "  \"verdict\": {verdict:?},").unwrap();
+    writeln!(
+        json,
+        "  \"recommended_cell_surface\": {recommended_cell_surface:?},"
+    )
+    .unwrap();
+    writeln!(json, "  \"cell_type_surface\": \"cell T\",").unwrap();
+    writeln!(json, "  \"cell_constructor_surface\": \"cell expr\",").unwrap();
     writeln!(json, "  \"case_count\": {},", CASES.len()).unwrap();
     writeln!(json, "  \"expectation_mismatches\": {mismatches},").unwrap();
     writeln!(json, "  \"lexical_guard_case_count\": {lexical_count},").unwrap();
@@ -561,6 +574,11 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
     writeln!(markdown, "# Dynamic borrow guard surface v0 research\n").unwrap();
     writeln!(markdown, "- git_sha: `{sha}`").unwrap();
     writeln!(markdown, "- verdict: **{verdict}**").unwrap();
+    writeln!(
+        markdown,
+        "- recommended cell surface: **{recommended_cell_surface}** (`cell T` + `cell expr`)"
+    )
+    .unwrap();
     writeln!(markdown, "- cases: **{}**", CASES.len()).unwrap();
     writeln!(markdown, "- expectation mismatches: **{mismatches}**").unwrap();
     writeln!(
