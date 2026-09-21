@@ -326,7 +326,7 @@ fn run_case(case: &Case, root: &Path) -> Finding {
 }
 
 fn surface_evidence() -> SurfaceEvidence {
-    let contextual = lex("cell borrow borrow_mut try_borrow try_borrow_mut as release\n")
+    let contextual = lex("cell borrow borrow_mut try_borrow try_borrow_mut as\n")
         .expect("candidate contextual words should lex");
     let identifiers: Vec<_> = contextual
         .iter()
@@ -343,7 +343,6 @@ fn surface_evidence() -> SurfaceEvidence {
             "try_borrow",
             "try_borrow_mut",
             "as",
-            "release",
         ];
 
     let ordinary = concat!(

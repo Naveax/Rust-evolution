@@ -61,9 +61,10 @@ The intended bounded contract is:
 - an exclusive guard conflicts with every overlapping shared or exclusive dynamic guard;
 - mutation through a shared guard is rejected;
 - ordinary owned mutation remains preferred when aliasing does not require runtime borrow checking;
-- returned/escaping guards are not authorized by this candidate.
+- returned/escaping guards are not authorized by this candidate;
+- no explicit `release` source statement is selected; an inner lexical scope is the bounded early-release mechanism, while the Rust `drop` control remains research evidence rather than source syntax.
 
-The exact payload-mutation spelling through an exclusive guard is intentionally not selected here. The current language has no general field/index mutable-place surface, and #134 does not authorize smuggling one into a guard research PR.
+The exact payload-mutation spelling through an exclusive guard is intentionally not selected here. The current language has no general field/index mutable-place surface, and #134 does not authorize smuggling one into a guard research PR. That unresolved production boundary is isolated in hard-gated successor #148; #147 does not authorize mutating payload fields or replacing payload values through an exclusive guard.
 
 ## Why lexical guards first
 
@@ -157,4 +158,5 @@ This candidate does not authorize:
 - cross-thread dynamic borrowing;
 - general mutable references;
 - general field/index mutable-place syntax;
+- payload replacement or field mutation through `borrow_mut` before successor #148 selects a bounded mutation surface;
 - a production interior-mutability feature before exact-head and exact-main research evidence is green.
