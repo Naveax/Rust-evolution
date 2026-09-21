@@ -354,8 +354,10 @@ fn surface_evidence() -> SurfaceEvidence {
         lex(ordinary).is_ok_and(|tokens| parse(&tokens).is_ok());
 
     let lexical = concat!("borrow state as view\n", "print view\n", "end\n",);
-    let lexical_borrow_candidate_current_parser_rejects =
-        lex(lexical).is_ok_and(|tokens| parse(&tokens).is_err());
+    let lexical_borrow_candidate_current_parser_rejects = lex(lexical).is_ok_and(|tokens| {
+        parse(&tokens)
+            .is_err_and(|error| error.message.contains("expected '=' after binding name"))
+    });
 
     let fallible = concat!(
         "try_borrow state as view\n",
@@ -365,7 +367,10 @@ fn surface_evidence() -> SurfaceEvidence {
         "end\n",
     );
     let fallible_borrow_candidate_current_parser_rejects =
-        lex(fallible).is_ok_and(|tokens| parse(&tokens).is_err());
+        lex(fallible).is_ok_and(|tokens| {
+            parse(&tokens)
+                .is_err_and(|error| error.message.contains("expected '=' after binding name"))
+        });
 
     SurfaceEvidence {
         contextual_words_are_identifiers,
