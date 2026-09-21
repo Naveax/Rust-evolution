@@ -64,6 +64,9 @@ jobs:
 
           assert data['git_sha'] == os.environ['EXPECTED_GIT_SHA'], data
           assert data['verdict'] == 'LEXICAL-GUARDS-FIRST', data
+          assert data['recommended_cell_surface'] == 'EXPLICIT-OWNED-CELL', data
+          assert data['cell_type_surface'] == 'cell T', data
+          assert data['cell_constructor_surface'] == 'cell expr', data
           assert data['case_count'] >= 20, data
           assert data['expectation_mismatches'] == 0, data
           assert data['lexical_guard_case_count'] >= 10, data
@@ -83,6 +86,7 @@ jobs:
           assert len(rows) == data['case_count'], (len(rows), data)
           assert all(row['git_sha'] == data['git_sha'] for row in rows), rows
           assert 'LEXICAL-GUARDS-FIRST' in markdown, markdown
+          assert 'recommended cell surface: **EXPLICIT-OWNED-CELL**' in markdown, markdown
           markdown_lines = set(markdown.splitlines())
           for candidate in (
               'state = cell Item(value = 1)',
