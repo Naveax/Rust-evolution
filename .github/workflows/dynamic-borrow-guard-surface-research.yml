@@ -1,0 +1,108 @@
+name: Dynamic borrow guard surface research
+
+on:
+  pull_request:
+    paths:
+      - 'crates/evo-lowering/tests/dynamic_borrow_guard_surface_research.rs'
+      - '.github/workflows/dynamic-borrow-guard-surface-research.yml'
+      - 'docs/DYNAMIC_BORROW_GUARD_SURFACE_RESEARCH.md'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/evo-lowering/tests/dynamic_borrow_guard_surface_research.rs'
+      - '.github/workflows/dynamic-borrow-guard-surface-research.yml'
+      - 'docs/DYNAMIC_BORROW_GUARD_SURFACE_RESEARCH.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  research:
+    runs-on: ubuntu-24.04
+    name: ubuntu-24.04 / Rust 1.98.0
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact checkout provenance
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_GIT_SHA"
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+      - run: rustc -Vv
+      - run: cargo fmt --all -- --check
+      - name: Run dynamic borrow guard surface matrix
+        env:
+          EVO_REQUIRE_PINNED_RUSTC: '1'
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_DYNAMIC_BORROW_GUARD_RESEARCH_OUT: ${{ github.workspace }}/target/evo-dynamic-borrow-guard-surface-research
+        run: >-
+          cargo test -p evo-lowering --test dynamic_borrow_guard_surface_research
+          dynamic_borrow_guard_surface_research_selects_lexical_guards_first
+          -- --ignored --exact --nocapture
+      - name: Validate report
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import csv
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('target/evo-dynamic-borrow-guard-surface-research')
+          data = json.loads((root / 'report.json').read_text())
+          rows = list(csv.DictReader((root / 'report.csv').read_text().splitlines()))
+          markdown = (root / 'report.md').read_text()
+
+          assert data['git_sha'] == os.environ['EXPECTED_GIT_SHA'], data
+          assert data['verdict'] == 'LEXICAL-GUARDS-FIRST', data
+          assert data['recommended_cell_surface'] == 'EXPLICIT-OWNED-CELL', data
+          assert data['cell_type_surface'] == 'cell T', data
+          assert data['cell_constructor_surface'] == 'cell expr', data
+          assert data['case_count'] >= 20, data
+          assert data['expectation_mismatches'] == 0, data
+          assert data['lexical_guard_case_count'] >= 10, data
+          assert data['guard_value_type_case_count'] >= 2, data
+          assert data['explicit_rc_refcell_case_count'] >= 2, data
+          assert data['owned_mut_instead_count'] >= 2, data
+          assert data['concurrency_boundary_count'] >= 1, data
+          assert data['reject_hidden_cost_count'] >= 2, data
+          assert data['contextual_words_are_identifiers'] is True, data
+          assert data['ordinary_identifier_compatibility'] is True, data
+          assert data['ordinary_cell_call_parse'] is True, data
+          assert data['cell_type_candidate_current_parser_rejects'] is True, data
+          assert data['cell_constructor_candidate_current_parser_rejects'] is True, data
+          assert data['lexical_borrow_candidate_current_parser_rejects'] is True, data
+          assert data['fallible_borrow_candidate_current_parser_rejects'] is True, data
+          assert data['escaping_guard_requires_value_type'] is True, data
+          assert data['production_guard_escape_authorized'] is False, data
+          assert len(rows) == data['case_count'], (len(rows), data)
+          assert all(row['git_sha'] == data['git_sha'] for row in rows), rows
+          assert 'LEXICAL-GUARDS-FIRST' in markdown, markdown
+          assert 'recommended cell surface: **EXPLICIT-OWNED-CELL**' in markdown, markdown
+          markdown_lines = set(markdown.splitlines())
+          for candidate in (
+              'state = cell Item(value = 1)',
+              'fn inspect(state cell Item) int',
+              'borrow state as view',
+              'borrow_mut state as edit',
+              'try_borrow state as view',
+              'try_borrow_mut state as edit',
+          ):
+              assert candidate in markdown_lines, (candidate, markdown)
+          print(json.dumps(data, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evo-dynamic-borrow-guard-surface-research-ubuntu-24.04
+          path: target/evo-dynamic-borrow-guard-surface-research
+          if-no-files-found: error
+          retention-days: 30
