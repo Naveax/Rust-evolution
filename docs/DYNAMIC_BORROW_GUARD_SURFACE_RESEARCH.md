@@ -14,31 +14,41 @@ Can the first explicit single-thread dynamic-borrow slice keep runtime guards le
 
 The leading bounded hypothesis is **LEXICAL-GUARDS-FIRST**.
 
-## Candidate acquisition contract
+## Candidate owned-cell and acquisition contract
 
 Candidate spellings under research are contextual words, not production syntax:
 
 ```text
-borrow cell as view
+state = cell Item(value = 1)
+
+fn inspect(state cell Item) int
     ...
 end
 
-borrow_mut cell as edit
+borrow state as view
     ...
 end
 
-try_borrow cell as view
+borrow_mut state as edit
+    ...
+end
+
+try_borrow state as view
     ...
 else
     ...
 end
 
-try_borrow_mut cell as edit
+try_borrow_mut state as edit
     ...
 else
     ...
 end
 ```
+
+For the bounded first slice, `cell T` is an explicit owned runtime-borrow-checked container and `cell expr` explicitly moves an owned payload into that container. Its direct Rust model is inline `RefCell<T>`; creating the cell does not itself imply heap allocation, `Rc`, `Arc`, synchronization, or owner duplication.
+
+This bounded spelling avoids opening general Rust-like generic source syntax merely to expose `RefCell<T>`. Ordinary `T` does not implicitly become a cell because that would hide dynamic borrow state. A nested `shared cell T` source algebra is not authorized here; the Rust `Rc<RefCell<T>>` cases remain composition evidence showing that ownership and dynamic borrowing are separate mechanisms.
 
 The intended bounded contract is:
 
@@ -116,7 +126,7 @@ Pinned Rust 1.98 evidence covers at minimum:
 20. Arc + Mutex remaining a separate cross-thread synchronization model;
 21. exclusive-owner `RefCell::get_mut` control showing that dynamic borrow checking is unnecessary when exclusive access already exists.
 
-The source-surface probe also requires candidate words to remain ordinary identifiers outside exact candidate positions and verifies that the lexical/fallible block spellings are not accidentally accepted by the current production parser.
+The source-surface probe also requires candidate words to remain ordinary identifiers outside exact candidate positions, pins the current parser rejection boundaries for both `cell T` and `cell expr`, and verifies that the lexical/fallible guard block spellings are not accidentally accepted by the current production parser.
 
 ## Pre-registered decision
 
