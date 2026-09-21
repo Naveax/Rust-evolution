@@ -243,6 +243,8 @@ const CASES: &[Case] = &[
 struct SurfaceEvidence {
     contextual_words_are_identifiers: bool,
     ordinary_identifier_compatibility: bool,
+    cell_type_candidate_current_parser_rejects: bool,
+    cell_constructor_candidate_current_parser_rejects: bool,
     lexical_borrow_candidate_current_parser_rejects: bool,
     fallible_borrow_candidate_current_parser_rejects: bool,
 }
@@ -353,6 +355,35 @@ fn surface_evidence() -> SurfaceEvidence {
     let ordinary_identifier_compatibility =
         lex(ordinary).is_ok_and(|tokens| parse(&tokens).is_ok());
 
+    let cell_type = concat!(
+        "record Item\n",
+        "value int\n",
+        "end\n",
+        "fn inspect(state cell Item) int\n",
+        "return 0\n",
+        "end\n",
+    );
+    let cell_type_candidate_current_parser_rejects = lex(cell_type).is_ok_and(|tokens| {
+        parse(&tokens).is_err_and(|error| {
+            error
+                .message
+                .contains("expected ')' after function parameters")
+        })
+    });
+
+    let cell_constructor = concat!(
+        "record Item\n",
+        "value int\n",
+        "end\n",
+        "state = cell Item(value = 1)\n",
+        "print 0\n",
+    );
+    let cell_constructor_candidate_current_parser_rejects =
+        lex(cell_constructor).is_ok_and(|tokens| {
+            parse(&tokens)
+                .is_err_and(|error| error.message.contains("expected end of line after statement"))
+        });
+
     let lexical = concat!("borrow state as view\n", "print view\n", "end\n",);
     let lexical_borrow_candidate_current_parser_rejects = lex(lexical).is_ok_and(|tokens| {
         parse(&tokens)
@@ -375,6 +406,8 @@ fn surface_evidence() -> SurfaceEvidence {
     SurfaceEvidence {
         contextual_words_are_identifiers,
         ordinary_identifier_compatibility,
+        cell_type_candidate_current_parser_rejects,
+        cell_constructor_candidate_current_parser_rejects,
         lexical_borrow_candidate_current_parser_rejects,
         fallible_borrow_candidate_current_parser_rejects,
     }
@@ -413,6 +446,8 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
         && reject_hidden_cost_count >= 2
         && surface.contextual_words_are_identifiers
         && surface.ordinary_identifier_compatibility
+        && surface.cell_type_candidate_current_parser_rejects
+        && surface.cell_constructor_candidate_current_parser_rejects
         && surface.lexical_borrow_candidate_current_parser_rejects
         && surface.fallible_borrow_candidate_current_parser_rejects;
     let verdict = if lexical_guards_sufficient {
@@ -461,6 +496,18 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
         json,
         "  \"ordinary_identifier_compatibility\": {},",
         surface.ordinary_identifier_compatibility
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"cell_type_candidate_current_parser_rejects\": {},",
+        surface.cell_type_candidate_current_parser_rejects
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"cell_constructor_candidate_current_parser_rejects\": {},",
+        surface.cell_constructor_candidate_current_parser_rejects
     )
     .unwrap();
     writeln!(
@@ -533,7 +580,13 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
     .unwrap();
     writeln!(markdown, "\n## Candidate source contract\n").unwrap();
     writeln!(markdown, "```text").unwrap();
-    writeln!(markdown, "borrow cell as view").unwrap();
+    writeln!(markdown, "state = cell Item(value = 1)").unwrap();
+    writeln!(markdown).unwrap();
+    writeln!(markdown, "fn inspect(state cell Item) int").unwrap();
+    writeln!(markdown, "    ...").unwrap();
+    writeln!(markdown, "end").unwrap();
+    writeln!(markdown).unwrap();
+    writeln!(markdown, "borrow state as view").unwrap();
     writeln!(markdown, "    ...").unwrap();
     writeln!(markdown, "end").unwrap();
     writeln!(markdown).unwrap();
@@ -598,6 +651,8 @@ fn dynamic_borrow_guard_surface_research_selects_lexical_guards_first() {
     let surface = surface_evidence();
     assert!(surface.contextual_words_are_identifiers);
     assert!(surface.ordinary_identifier_compatibility);
+    assert!(surface.cell_type_candidate_current_parser_rejects);
+    assert!(surface.cell_constructor_candidate_current_parser_rejects);
     assert!(surface.lexical_borrow_candidate_current_parser_rejects);
     assert!(surface.fallible_borrow_candidate_current_parser_rejects);
 
