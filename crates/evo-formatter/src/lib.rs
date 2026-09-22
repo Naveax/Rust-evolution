@@ -60,6 +60,9 @@ pub fn format_source(source: &str, tokens: &[Token]) -> String {
                     | TokenKind::Match
                     | TokenKind::Case
             ) || matches!(kind, TokenKind::Identifier(name) if matches!(name.as_str(), "lookup" | "remove"))
+                || (matches!(kind, TokenKind::Identifier(name) if name == "upgrade")
+                    && line_tokens.get(1).is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+                    && line_tokens.get(2).is_some_and(|token| matches!(&token.kind, TokenKind::Identifier(name) if name == "as")))
         }) {
             depth += 1;
         }

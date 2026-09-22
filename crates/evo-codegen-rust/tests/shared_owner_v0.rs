@@ -97,3 +97,34 @@ fn shared_owner_codegen_adds_no_hidden_deep_clone_or_custom_runtime() {
     assert!(!generated.contains("reference_count"));
     assert!(!generated.contains("unsafe"));
 }
+
+#[test]
+fn weak_contracts_downgrade_and_checked_upgrade_map_directly_to_std_rc() {
+    let source = format!(
+        "{ITEM}fn forward(edge weak Item) weak Item\nreturn edge\nend\nowner = share Item(value = 7)\nedge = downgrade owner\nkept = forward(edge)\nupgrade kept as live\nprint live.value\nelse\nprint 0\nend\n"
+    );
+    let generated = compile_source(&source);
+    assert!(generated.contains(
+        "fn __evo_fn_forward(__evo_edge: std::rc::Weak<__EvoRecord_Item>) -> std::rc::Weak<__EvoRecord_Item> {"
+    ));
+    assert_eq!(generated.matches("std::rc::Rc::downgrade(").count(), 1);
+    assert_eq!(generated.matches("std::rc::Weak::upgrade(").count(), 1);
+    assert!(generated.contains(
+        "if let Some(__evo_live) = std::rc::Weak::upgrade(&__evo_kept) {"
+    ));
+    assert_eq!(generated.matches("std::rc::Rc::clone(").count(), 0);
+    assert!(!generated.contains("unwrap()"));
+    assert!(!generated.contains("unsafe"));
+    assert!(!generated.contains("ownership_registry"));
+}
+
+#[test]
+fn weak_downgrade_does_not_hide_a_strong_owner_duplicate() {
+    let source = format!(
+        "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nupgrade edge as live\nprint live.value\nelse\nprint 0\nend\nprint owner.value\n"
+    );
+    let generated = compile_source(&source);
+    assert_eq!(generated.matches("std::rc::Rc::new(").count(), 1);
+    assert_eq!(generated.matches("std::rc::Rc::downgrade(").count(), 1);
+    assert_eq!(generated.matches("std::rc::Rc::clone(").count(), 0);
+}

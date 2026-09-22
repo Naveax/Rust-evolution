@@ -63,3 +63,45 @@ fn live_payload_reference_conflict_renders_reference_origin_note() {
     assert!(rendered.contains("note: immutable reference \"r\" was created here"));
     assert!(rendered.contains(" --> shared-owner.evo:5:5"));
 }
+
+#[test]
+fn downgrade_requires_a_shared_owner() {
+    let source = format!("{ITEM}item = Item(value = 1)\nedge = downgrade item\n");
+    let error = lower_error(&source);
+    assert!(error.message.contains("downgrade requires a shared owner"));
+    assert!(error.message.contains("Item"));
+}
+
+#[test]
+fn moved_weak_handle_reuse_is_source_native() {
+    let source = format!(
+        "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nmoved = edge\nupgrade edge as live\nprint live.value\nelse\nprint 0\nend\n"
+    );
+    let error = lower_error(&source);
+    assert!(error.message.contains("moved weak handle"));
+}
+
+#[test]
+fn upgrade_requires_a_weak_owner() {
+    let source = format!(
+        "{ITEM}owner = share Item(value = 1)\nupgrade owner as live\nprint live.value\nelse\nprint 0\nend\n"
+    );
+    let error = lower_error(&source);
+    assert!(error.message.contains("upgrade requires a weak owner"));
+    assert!(error.message.contains("shared Item"));
+}
+
+#[test]
+fn upgrade_success_binding_must_be_fresh_and_not_reassigned() {
+    let collision = format!(
+        "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nlive = 1\nupgrade edge as live\nprint 1\nelse\nprint 0\nend\n"
+    );
+    let error = lower_error(&collision);
+    assert!(error.message.contains("conflicts with an already-visible local"));
+
+    let reassignment = format!(
+        "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nupgrade edge as live\nlive = dup live\nprint live.value\nelse\nprint 0\nend\n"
+    );
+    let error = lower_error(&reassignment);
+    assert!(error.message.contains("reassigning weak upgrade success binding"));
+}
