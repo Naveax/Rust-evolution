@@ -1,0 +1,88 @@
+name: Checked Weak upgrade result surface research
+
+on:
+  pull_request:
+    paths:
+      - 'crates/evo-lowering/tests/weak_upgrade_result_surface_research.rs'
+      - '.github/workflows/weak-upgrade-result-surface-research.yml'
+      - 'docs/WEAK_UPGRADE_RESULT_RESEARCH.md'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/evo-lowering/tests/weak_upgrade_result_surface_research.rs'
+      - '.github/workflows/weak-upgrade-result-surface-research.yml'
+      - 'docs/WEAK_UPGRADE_RESULT_RESEARCH.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  research:
+    runs-on: ubuntu-24.04
+    name: ubuntu-24.04 / Rust 1.98.0
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact checkout provenance
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_GIT_SHA"
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+      - run: rustc -Vv
+      - run: cargo fmt --all -- --check
+      - name: Run checked Weak upgrade result matrix
+        env:
+          EVO_REQUIRE_PINNED_RUSTC: '1'
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_WEAK_UPGRADE_RESULT_RESEARCH_OUT: ${{ github.workspace }}/target/evo-weak-upgrade-result-research
+        run: cargo test -p evo-lowering --test weak_upgrade_result_surface_research weak_upgrade_result_surface_research_selects_scoped_upgrade_candidate -- --ignored --exact --nocapture
+      - name: Validate report
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import csv
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('target/evo-weak-upgrade-result-research')
+          data = json.loads((root / 'report.json').read_text())
+          rows = list(csv.DictReader((root / 'report.csv').read_text().splitlines()))
+          markdown = (root / 'report.md').read_text()
+
+          assert data['git_sha'] == os.environ['EXPECTED_GIT_SHA'], data
+          assert data['verdict'] == 'SCOPED-UPGRADE-CANDIDATE', data
+          assert data['recommended_surface'] == 'SCOPED-UPGRADE-BRANCH', data
+          assert data['case_count'] >= 15, data
+          assert data['scoped_case_count'] >= 10, data
+          assert data['expectation_mismatches'] == 0, data
+          assert data['contextual_words_are_identifiers'] is True, data
+          assert data['ordinary_upgrade_identifier_parse'] is True, data
+          assert data['scoped_upgrade_current_parser_rejects'] is True, data
+          assert data['maybe_shared_type_current_parser_rejects'] is True, data
+          assert data['generic_option_current_parser_rejects'] is True, data
+          assert data['enum_shared_owner_currently_fail_closed'] is True, data
+          assert data['weak_upgrade_non_consuming'] is True, data
+          assert data['first_class_result_required'] is False, data
+          assert len(rows) == data['case_count'], (len(rows), data)
+          assert all(row['git_sha'] == data['git_sha'] for row in rows), rows
+          assert 'SCOPED-UPGRADE-CANDIDATE' in markdown, markdown
+          assert 'upgrade edge as owner' in markdown, markdown
+          assert 'first-class optional shared-owner result required for v0: **no**' in markdown, markdown
+          print(json.dumps(data, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evo-weak-upgrade-result-research-ubuntu-24.04
+          path: target/evo-weak-upgrade-result-research
+          if-no-files-found: error
+          retention-days: 30
