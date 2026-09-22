@@ -105,3 +105,21 @@ fn upgrade_success_binding_must_be_fresh_and_not_reassigned() {
     let error = lower_error(&reassignment);
     assert!(error.message.contains("reassigning weak upgrade success binding"));
 }
+
+#[test]
+fn weak_payload_access_does_not_implicitly_upgrade() {
+    let source = format!(
+        "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nprint edge.value\n"
+    );
+    let error = lower_error(&source);
+    assert!(error.message.contains("field access requires a record value"));
+}
+
+#[test]
+fn weak_success_binding_is_not_visible_after_checked_upgrade() {
+    let source = format!(
+        "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nupgrade edge as live\nprint live.value\nelse\nprint 0\nend\nprint live.value\n"
+    );
+    let error = lower_error(&source);
+    assert!(error.message.contains("outside its scope"));
+}
