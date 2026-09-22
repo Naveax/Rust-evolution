@@ -109,9 +109,7 @@ fn weak_contracts_downgrade_and_checked_upgrade_map_directly_to_std_rc() {
     ));
     assert_eq!(generated.matches("std::rc::Rc::downgrade(").count(), 1);
     assert_eq!(generated.matches("std::rc::Weak::upgrade(").count(), 1);
-    assert!(generated.contains(
-        "if let Some(__evo_live) = std::rc::Weak::upgrade(&__evo_kept) {"
-    ));
+    assert!(generated.contains("if let Some(__evo_live) = std::rc::Weak::upgrade(&__evo_kept) {"));
     assert_eq!(generated.matches("std::rc::Rc::clone(").count(), 0);
     assert!(!generated.contains("unwrap()"));
     assert!(!generated.contains("unsafe"));

@@ -162,13 +162,20 @@ fn downgrade_and_upgrade_are_non_consuming_inspections() {
     let source = format!(
         "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nupgrade edge as first\nprint first.value\nelse\nprint 0\nend\nupgrade edge as second\nprint second.value\nelse\nprint 0\nend\nprint owner.value\n"
     );
-    let program = lower_source(&source).expect("repeated checked upgrade should not consume weak edge");
+    let program =
+        lower_source(&source).expect("repeated checked upgrade should not consume weak edge");
     let StmtKind::Let { expr, .. } = &program.statements[1].kind else {
         panic!("expected weak edge binding");
     };
     assert!(matches!(expr.kind, ExprKind::WeakDowngrade(_)));
-    assert!(matches!(program.statements[2].kind, StmtKind::WeakUpgrade { .. }));
-    assert!(matches!(program.statements[3].kind, StmtKind::WeakUpgrade { .. }));
+    assert!(matches!(
+        program.statements[2].kind,
+        StmtKind::WeakUpgrade { .. }
+    ));
+    assert!(matches!(
+        program.statements[3].kind,
+        StmtKind::WeakUpgrade { .. }
+    ));
 }
 
 #[test]
@@ -208,11 +215,14 @@ fn weak_surface_fails_closed_in_enum_bearing_programs() {
 
 #[test]
 fn weak_payload_access_requires_checked_upgrade() {
-    let source = format!(
-        "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nprint edge.value\n"
-    );
+    let source =
+        format!("{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nprint edge.value\n");
     let error = lower_source(&source).expect_err("weak payload must not be dereferenced directly");
-    assert!(error.message.contains("field access requires a record value"));
+    assert!(
+        error
+            .message
+            .contains("field access requires a record value")
+    );
 }
 
 #[test]
@@ -221,7 +231,11 @@ fn immutable_borrow_cannot_target_a_weak_handle() {
         "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nr = &edge\nprint 0\n"
     );
     let error = lower_source(&source).expect_err("weak handles are not payload references");
-    assert!(error.message.contains("immutable references cannot target weak owners"));
+    assert!(
+        error
+            .message
+            .contains("immutable references cannot target weak owners")
+    );
 }
 
 #[test]
@@ -248,6 +262,7 @@ fn downgrade_is_allowed_while_payload_is_immutably_borrowed() {
     let source = format!(
         "{ITEM}owner = share Item(value = 1)\nr = &owner\nedge = downgrade owner\nprint r.value\nupgrade edge as live\nprint live.value\nelse\nprint 0\nend\n"
     );
-    lower_source(&source)
-        .expect("downgrade only inspects the shared handle and must not conflict with payload borrow");
+    lower_source(&source).expect(
+        "downgrade only inspects the shared handle and must not conflict with payload borrow",
+    );
 }

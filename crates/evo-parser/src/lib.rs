@@ -655,9 +655,7 @@ impl<'a> Parser<'a> {
                         .get(self.index + 1)
                         .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
                 {
-                    return Err(
-                        self.error_here("weak-owner enum payloads are not supported in v0")
-                    );
+                    return Err(self.error_here("weak-owner enum payloads are not supported in v0"));
                 }
                 Some(self.parse_owned_type_name()?)
             };
@@ -1234,9 +1232,7 @@ impl<'a> Parser<'a> {
                 if name == "lookup" && !matches!(self.current().kind, TokenKind::Equal) {
                     return self.parse_sequence_lookup(start);
                 }
-                if name == "upgrade"
-                    && matches!(self.current().kind, TokenKind::Identifier(_))
-                {
+                if name == "upgrade" && matches!(self.current().kind, TokenKind::Identifier(_)) {
                     return self.parse_weak_upgrade(start);
                 }
                 if !matches!(self.current().kind, TokenKind::Equal) {

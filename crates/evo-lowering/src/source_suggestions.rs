@@ -276,9 +276,8 @@ impl SuggestionCatalog {
                     else_body,
                 } => {
                     if visible(scopes, weak).is_none() {
-                        let message = format!(
-                            "use of local {weak:?} before definition or outside its scope"
-                        );
+                        let message =
+                            format!("use of local {weak:?} before definition or outside its scope");
                         register(&message, statement.span, weak, visible_names(scopes));
                     }
                     let record_hint = visible(scopes, weak).cloned().flatten();
@@ -497,7 +496,9 @@ fn register<'a>(
 
 fn named_type(type_name: &TypeName) -> Option<&str> {
     match type_name {
-        TypeName::Named(name) | TypeName::SharedOwner(name) | TypeName::WeakOwner(name) => Some(name),
+        TypeName::Named(name) | TypeName::SharedOwner(name) | TypeName::WeakOwner(name) => {
+            Some(name)
+        }
         TypeName::SharedRef(inner) => named_type(inner),
         TypeName::Sequence(_)
         | TypeName::Arena(_)

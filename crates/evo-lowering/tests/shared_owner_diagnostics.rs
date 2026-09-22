@@ -97,22 +97,33 @@ fn upgrade_success_binding_must_be_fresh_and_not_reassigned() {
         "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nlive = 1\nupgrade edge as live\nprint 1\nelse\nprint 0\nend\n"
     );
     let error = lower_error(&collision);
-    assert!(error.message.contains("conflicts with an already-visible local"));
+    assert!(
+        error
+            .message
+            .contains("conflicts with an already-visible local")
+    );
 
     let reassignment = format!(
         "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nupgrade edge as live\nlive = dup live\nprint live.value\nelse\nprint 0\nend\n"
     );
     let error = lower_error(&reassignment);
-    assert!(error.message.contains("reassigning weak upgrade success binding"));
+    assert!(
+        error
+            .message
+            .contains("reassigning weak upgrade success binding")
+    );
 }
 
 #[test]
 fn weak_payload_access_does_not_implicitly_upgrade() {
-    let source = format!(
-        "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nprint edge.value\n"
-    );
+    let source =
+        format!("{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nprint edge.value\n");
     let error = lower_error(&source);
-    assert!(error.message.contains("field access requires a record value"));
+    assert!(
+        error
+            .message
+            .contains("field access requires a record value")
+    );
 }
 
 #[test]
