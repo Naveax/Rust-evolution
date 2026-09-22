@@ -74,6 +74,7 @@ pub enum TypeName {
     String,
     Named(String),
     SharedOwner(String),
+    WeakOwner(String),
     SharedRef(Box<TypeName>),
     Sequence(Box<TypeName>),
     Arena(Box<TypeName>),
@@ -126,6 +127,12 @@ pub enum StmtKind {
     ArenaRemove {
         owner: String,
         handle: Expr,
+        binding: String,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
+    WeakUpgrade {
+        weak: String,
         binding: String,
         then_body: Vec<Stmt>,
         else_body: Vec<Stmt>,
@@ -189,6 +196,7 @@ pub enum ExprKind {
     SharedBorrow(Box<Expr>),
     SharedAlloc(Box<Expr>),
     SharedDuplicate(Box<Expr>),
+    WeakDowngrade(Box<Expr>),
     SequenceNew {
         element_type: TypeName,
     },
@@ -571,6 +579,14 @@ impl<'a> Parser<'a> {
         {
             return Err(self.error_here("shared-owner record fields are not supported in v0"));
         }
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "weak")
+            && self
+                .tokens
+                .get(self.index + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+        {
+            return Err(self.error_here("weak-owner record fields are not supported in v0"));
+        }
         let token = self.advance();
         match token.kind {
             TokenKind::TypeInt => Ok(RecordFieldType::Int),
@@ -631,6 +647,16 @@ impl<'a> Parser<'a> {
                 {
                     return Err(
                         self.error_here("shared-owner enum payloads are not supported in v0")
+                    );
+                }
+                if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "weak")
+                    && self
+                        .tokens
+                        .get(self.index + 1)
+                        .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+                {
+                    return Err(
+                        self.error_here("weak-owner enum payloads are not supported in v0")
                     );
                 }
                 Some(self.parse_owned_type_name()?)
@@ -771,6 +797,28 @@ impl<'a> Parser<'a> {
             }
         }
 
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "weak") {
+            let next = self.tokens.get(self.index + 1);
+            if let Some(token) = next {
+                match &token.kind {
+                    TokenKind::Identifier(name) => {
+                        let name = name.clone();
+                        self.advance();
+                        self.advance();
+                        return Ok(TypeName::WeakOwner(name));
+                    }
+                    TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString => {
+                        return Err(ParseError {
+                            message: "weak-owner types require a nominal record type in v0"
+                                .to_owned(),
+                            span: self.current().span.join(token.span),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         if !matches!(self.current().kind, TokenKind::Ampersand) {
             return self.parse_owned_type_name();
         }
@@ -799,6 +847,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_sequence_element_type(&mut self) -> Result<TypeName, ParseError> {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "weak") {
+            let marker = self.advance().span;
+            let token = self.advance();
+            return Err(ParseError {
+                message: "weak-owner sequence elements are not supported in v0".to_owned(),
+                span: marker.join(token.span),
+            });
+        }
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "handle") {
             let marker = self.advance().span;
             if !self.arena_element_type_starts_at(self.index) {
@@ -845,7 +901,7 @@ impl<'a> Parser<'a> {
     fn sequence_element_type_starts_at(&self, index: usize) -> bool {
         match self.tokens.get(index).map(|token| &token.kind) {
             Some(TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString) => true,
-            Some(TokenKind::Identifier(name)) if name == "shared" => self
+            Some(TokenKind::Identifier(name)) if matches!(name.as_str(), "shared" | "weak") => self
                 .tokens
                 .get(index + 1)
                 .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_))),
@@ -860,7 +916,7 @@ impl<'a> Parser<'a> {
     fn arena_element_type_starts_at(&self, index: usize) -> bool {
         match self.tokens.get(index).map(|token| &token.kind) {
             Some(TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString) => true,
-            Some(TokenKind::Identifier(name)) if name == "shared" => self
+            Some(TokenKind::Identifier(name)) if matches!(name.as_str(), "shared" | "weak") => self
                 .tokens
                 .get(index + 1)
                 .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_))),
@@ -870,6 +926,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_arena_element_type(&mut self) -> Result<TypeName, ParseError> {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "weak") {
+            let marker = self.advance().span;
+            let token = self.advance();
+            return Err(ParseError {
+                message: "weak-owner arena payloads are not supported in v0".to_owned(),
+                span: marker.join(token.span),
+            });
+        }
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared") {
             let marker = self.advance().span;
             let token = self.advance();
@@ -1170,6 +1234,11 @@ impl<'a> Parser<'a> {
                 if name == "lookup" && !matches!(self.current().kind, TokenKind::Equal) {
                     return self.parse_sequence_lookup(start);
                 }
+                if name == "upgrade"
+                    && matches!(self.current().kind, TokenKind::Identifier(_))
+                {
+                    return self.parse_weak_upgrade(start);
+                }
                 if !matches!(self.current().kind, TokenKind::Equal) {
                     return Err(self.error_here("expected '=' after binding name"));
                 }
@@ -1367,6 +1436,72 @@ impl<'a> Parser<'a> {
             kind: StmtKind::SequenceLookup {
                 owner,
                 index,
+                binding,
+                then_body,
+                else_body,
+            },
+            span: start.join(close),
+        })
+    }
+
+    fn parse_weak_upgrade(&mut self, start: Span) -> Result<Stmt, ParseError> {
+        let weak_token = self.advance();
+        let TokenKind::Identifier(weak) = weak_token.kind else {
+            return Err(ParseError {
+                message: "expected weak-handle local after 'upgrade'".to_owned(),
+                span: weak_token.span,
+            });
+        };
+        let as_token = self.advance();
+        if !matches!(&as_token.kind, TokenKind::Identifier(name) if name == "as") {
+            return Err(ParseError {
+                message: "expected contextual 'as' after weak handle".to_owned(),
+                span: as_token.span,
+            });
+        }
+        let binding_token = self.advance();
+        let TokenKind::Identifier(binding) = binding_token.kind else {
+            return Err(ParseError {
+                message: "expected success binding after upgrade 'as'".to_owned(),
+                span: binding_token.span,
+            });
+        };
+        if !matches!(self.current().kind, TokenKind::Newline) {
+            return Err(self.error_here("expected end of line after upgrade binding"));
+        }
+        self.skip_newlines();
+        let mut then_body = Vec::new();
+        while !matches!(self.current().kind, TokenKind::Else | TokenKind::End) {
+            if self.is_eof() {
+                return Err(self.error_here("missing 'else' and 'end' for upgrade block"));
+            }
+            let statement = self.parse_statement()?;
+            self.require_statement_terminator()?;
+            then_body.push(statement);
+            self.skip_newlines();
+        }
+        if !matches!(self.current().kind, TokenKind::Else) {
+            return Err(self.error_here("checked upgrade requires an explicit 'else' branch"));
+        }
+        self.advance();
+        if !matches!(self.current().kind, TokenKind::Newline) {
+            return Err(self.error_here("expected end of line after upgrade 'else'"));
+        }
+        self.skip_newlines();
+        let mut else_body = Vec::new();
+        while !matches!(self.current().kind, TokenKind::End) {
+            if self.is_eof() {
+                return Err(self.error_here("missing 'end' for upgrade block"));
+            }
+            let statement = self.parse_statement()?;
+            self.require_statement_terminator()?;
+            else_body.push(statement);
+            self.skip_newlines();
+        }
+        let close = self.advance().span;
+        Ok(Stmt {
+            kind: StmtKind::WeakUpgrade {
+                weak,
                 binding,
                 then_body,
                 else_body,
@@ -1591,7 +1726,7 @@ impl<'a> Parser<'a> {
         }
         let shared_operation = match &self.current().kind {
             TokenKind::Identifier(name)
-                if matches!(name.as_str(), "share" | "dup")
+                if matches!(name.as_str(), "share" | "dup" | "downgrade")
                     && self
                         .tokens
                         .get(self.index + 1)
@@ -1605,10 +1740,11 @@ impl<'a> Parser<'a> {
             let start = self.advance().span;
             let expr = self.parse_unary()?;
             let span = start.join(expr.span);
-            let kind = if operation == "share" {
-                ExprKind::SharedAlloc(Box::new(expr))
-            } else {
-                ExprKind::SharedDuplicate(Box::new(expr))
+            let kind = match operation.as_str() {
+                "share" => ExprKind::SharedAlloc(Box::new(expr)),
+                "dup" => ExprKind::SharedDuplicate(Box::new(expr)),
+                "downgrade" => ExprKind::WeakDowngrade(Box::new(expr)),
+                _ => unreachable!("contextual owner operation was filtered above"),
             };
             return Ok(Expr { kind, span });
         }
@@ -1751,7 +1887,7 @@ impl<'a> Parser<'a> {
     fn arena_element_type_width_at(&self, index: usize) -> Option<usize> {
         match self.tokens.get(index).map(|token| &token.kind) {
             Some(TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString) => Some(1),
-            Some(TokenKind::Identifier(name)) if name == "shared" => self
+            Some(TokenKind::Identifier(name)) if matches!(name.as_str(), "shared" | "weak") => self
                 .tokens
                 .get(index + 1)
                 .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
