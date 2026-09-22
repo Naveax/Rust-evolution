@@ -269,6 +269,22 @@ impl SuggestionCatalog {
                     self.walk_child(then_body, scopes, Some((binding.clone(), None)));
                     self.walk_child(else_body, scopes, None);
                 }
+                StmtKind::WeakUpgrade {
+                    weak,
+                    binding,
+                    then_body,
+                    else_body,
+                } => {
+                    if visible(scopes, weak).is_none() {
+                        let message = format!(
+                            "use of local {weak:?} before definition or outside its scope"
+                        );
+                        register(&message, statement.span, weak, visible_names(scopes));
+                    }
+                    let record_hint = visible(scopes, weak).cloned().flatten();
+                    self.walk_child(then_body, scopes, Some((binding.clone(), record_hint)));
+                    self.walk_child(else_body, scopes, None);
+                }
                 StmtKind::Match { value, arms } => {
                     let _ = self.walk_expr(value, scopes);
                     for arm in arms {
@@ -432,7 +448,8 @@ impl SuggestionCatalog {
             }
             ExprKind::SharedBorrow(inner)
             | ExprKind::SharedAlloc(inner)
-            | ExprKind::SharedDuplicate(inner) => self.walk_expr(inner, scopes),
+            | ExprKind::SharedDuplicate(inner)
+            | ExprKind::WeakDowngrade(inner) => self.walk_expr(inner, scopes),
             ExprKind::LogicalNot(inner) | ExprKind::UnaryMinus(inner) => {
                 let _ = self.walk_expr(inner, scopes);
                 None
@@ -480,7 +497,7 @@ fn register<'a>(
 
 fn named_type(type_name: &TypeName) -> Option<&str> {
     match type_name {
-        TypeName::Named(name) | TypeName::SharedOwner(name) => Some(name),
+        TypeName::Named(name) | TypeName::SharedOwner(name) | TypeName::WeakOwner(name) => Some(name),
         TypeName::SharedRef(inner) => named_type(inner),
         TypeName::Sequence(_)
         | TypeName::Arena(_)
