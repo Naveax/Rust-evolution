@@ -134,6 +134,13 @@ pub enum StmtKind {
         then_body: Vec<Stmt>,
         else_body: Vec<Stmt>,
     },
+    WeakUpgrade {
+        weak: String,
+        binding: String,
+        binding_used: bool,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,6 +182,7 @@ pub enum ExprKind {
     SharedOwnerBorrow(Box<Expr>),
     SharedAlloc(Box<Expr>),
     SharedDuplicate(Box<Expr>),
+    WeakDowngrade(Box<Expr>),
     SequenceNew {
         element_type: ValueType,
     },
@@ -213,6 +221,7 @@ pub enum ValueType {
     Bool,
     Record(String),
     SharedOwner(String),
+    WeakOwner(String),
     SharedRef(Box<ValueType>),
     Sequence(Box<ValueType>),
     Arena(Box<ValueType>),
@@ -451,6 +460,11 @@ fn statement_always_returns(statement: &Stmt) -> bool {
             then_body,
             else_body,
             ..
+        }
+        | StmtKind::WeakUpgrade {
+            then_body,
+            else_body,
+            ..
         } => block_always_returns(then_body) && block_always_returns(else_body),
         StmtKind::Let { .. }
         | StmtKind::Assign { .. }
@@ -468,6 +482,7 @@ fn semantic_type(value_type: &ValueType) -> SemanticType {
         ValueType::String => SemanticType::String,
         ValueType::Record(name) => SemanticType::Record(name.clone()),
         ValueType::SharedOwner(name) => SemanticType::SharedOwner(name.clone()),
+        ValueType::WeakOwner(name) => SemanticType::WeakOwner(name.clone()),
         ValueType::SharedRef(inner) => {
             SemanticType::SharedRef(Box::new(semantic_type(inner)))
         }
@@ -484,6 +499,7 @@ fn lowered_value_type(value_type: &SemanticType) -> ValueType {
         SemanticType::String => ValueType::String,
         SemanticType::Record(name) => ValueType::Record(name.clone()),
         SemanticType::SharedOwner(name) => ValueType::SharedOwner(name.clone()),
+        SemanticType::WeakOwner(name) => ValueType::WeakOwner(name.clone()),
         SemanticType::SharedRef(inner) => {
             ValueType::SharedRef(Box::new(lowered_value_type(inner)))
         }
@@ -500,6 +516,7 @@ fn type_label(value_type: &ValueType) -> String {
         ValueType::String => "string".to_owned(),
         ValueType::Record(name) => name.clone(),
         ValueType::SharedOwner(name) => format!("shared {name}"),
+        ValueType::WeakOwner(name) => format!("weak {name}"),
         ValueType::SharedRef(inner) => format!("&{}", type_label(inner)),
         ValueType::Sequence(inner) => format!("seq {}", type_label(inner)),
         ValueType::Arena(inner) => format!("arena {}", type_label(inner)),
@@ -696,6 +713,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
             &expression_type,
             ValueType::Record(_)
                 | ValueType::SharedOwner(_)
+                | ValueType::WeakOwner(_)
                 | ValueType::SharedRef(_)
                 | ValueType::Sequence(_)
                 | ValueType::Arena(_)
@@ -1181,6 +1199,90 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                     else_body,
                 }
             }
+            SyntaxStmtKind::WeakUpgrade {
+                weak,
+                binding,
+                then_body,
+                else_body,
+            } => {
+                let weak_binding = self.visible_binding(weak).ok_or_else(|| LowerError {
+                    message: format!("use of local {weak:?} before definition or outside its scope"),
+                    span: statement.span,
+                })?;
+                let inspected = self.move_tracker.inspect_value(weak, statement.span)?;
+                debug_assert_eq!(lowered_value_type(&inspected), weak_binding.value_type);
+                let ValueType::WeakOwner(payload) = &weak_binding.value_type else {
+                    return Err(LowerError {
+                        message: format!(
+                            "upgrade requires a weak owner; found {}",
+                            type_label(&weak_binding.value_type)
+                        ),
+                        span: statement.span,
+                    });
+                };
+                if self.visible_binding(binding).is_some() {
+                    return Err(LowerError {
+                        message: format!(
+                            "weak upgrade success binding {binding:?} conflicts with an already-visible local"
+                        ),
+                        span: statement.span,
+                    });
+                }
+                if Self::block_reassigns_name(then_body, binding) {
+                    return Err(LowerError {
+                        message: format!(
+                            "reassigning weak upgrade success binding {binding:?} is not supported in v0"
+                        ),
+                        span: statement.span,
+                    });
+                }
+                let binding_used = Self::identifier_uses_in_statements(then_body)
+                    .contains_key(binding);
+
+                let entry = self.move_tracker.clone();
+                self.move_tracker = entry.clone();
+                let then_body = self.lower_checked_lookup_success_scope(
+                    weak,
+                    binding,
+                    ValueType::SharedOwner(payload.clone()),
+                    false,
+                    statement.span,
+                    then_body,
+                )?;
+                let then_exit = self.move_tracker.clone();
+
+                self.move_tracker = entry.clone();
+                let else_body = self.lower_child_scope(else_body)?;
+                let else_exit = self.move_tracker.clone();
+
+                let then_returns = block_always_returns(&then_body);
+                let else_returns = block_always_returns(&else_body);
+                let mut merged = entry;
+                match (then_returns, else_returns) {
+                    (false, false) => merged.merge_if(&then_exit, &else_exit),
+                    (true, false) => {
+                        let continues = merged.merge_if_continuing(None, Some(&else_exit));
+                        debug_assert!(continues);
+                    }
+                    (false, true) => {
+                        let continues = merged.merge_if_continuing(Some(&then_exit), None);
+                        debug_assert!(continues);
+                    }
+                    (true, true) => {
+                        let continues = merged.merge_if_continuing(None, None);
+                        debug_assert!(!continues);
+                    }
+                }
+                self.move_tracker = merged;
+
+                StmtKind::WeakUpgrade {
+                    weak: weak.clone(),
+                    binding: binding.clone(),
+                    binding_used,
+                    then_body,
+                    else_body,
+                }
+            }
             SyntaxStmtKind::Match { .. } => {
                 return Err(LowerError {
                     message: "match statements are parsed, but Enums v0 semantic lowering/codegen is not implemented yet"
@@ -1283,6 +1385,11 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                 ..
             }
             | SyntaxStmtKind::SequenceLookup {
+                then_body,
+                else_body,
+                ..
+            }
+            | SyntaxStmtKind::WeakUpgrade {
                 then_body,
                 else_body,
                 ..
@@ -1570,6 +1677,32 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                     ValueType::SharedOwner(name),
                 )
             }
+            SyntaxExprKind::WeakDowngrade(inner) => {
+                let SyntaxExprKind::Identifier(name) = &inner.kind else {
+                    return Err(LowerError {
+                        message: "downgrade requires a shared-owner local in v0".to_owned(),
+                        span: expr.span,
+                    });
+                };
+                let value_type = self.move_tracker.inspect_value(name, inner.span)?;
+                let inner_type = lowered_value_type(&value_type);
+                let ValueType::SharedOwner(payload) = inner_type else {
+                    return Err(LowerError {
+                        message: format!(
+                            "downgrade requires a shared owner in v0; found {}",
+                            type_label(&inner_type)
+                        ),
+                        span: expr.span,
+                    });
+                };
+                (
+                    ExprKind::WeakDowngrade(Box::new(Expr {
+                        kind: ExprKind::Local(name.clone()),
+                        span: inner.span,
+                    })),
+                    ValueType::WeakOwner(payload),
+                )
+            }
             SyntaxExprKind::Binary { left, op, right } => {
                 let (left, left_type) = self.lower_expr(left)?;
                 if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
@@ -1577,6 +1710,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                         &left_type,
                         ValueType::Record(_)
                             | ValueType::SharedOwner(_)
+                            | ValueType::WeakOwner(_)
                             | ValueType::Sequence(_)
                             | ValueType::Arena(_)
                             | ValueType::Handle(_)
@@ -1604,6 +1738,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                             &right_type,
                             ValueType::Record(_)
                             | ValueType::SharedOwner(_)
+                            | ValueType::WeakOwner(_)
                             | ValueType::Sequence(_)
                             | ValueType::Arena(_)
                             | ValueType::Handle(_)
@@ -1686,6 +1821,10 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
         match value_type {
             ValueType::Record(_) => Ok((expr, value_type)),
             ValueType::SharedOwner(name) => Ok((expr, ValueType::Record(name))),
+            ValueType::WeakOwner(_) => Err(LowerError {
+                message: "immutable references cannot target weak owners in v0".to_owned(),
+                span,
+            }),
             ValueType::SharedRef(_) => Err(LowerError {
                 message: "nested immutable references are not supported in v0".to_owned(),
                 span,
@@ -1746,6 +1885,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
             | SyntaxExprKind::UnaryMinus(_)
             | SyntaxExprKind::SharedAlloc(_)
             | SyntaxExprKind::SharedDuplicate(_)
+            | SyntaxExprKind::WeakDowngrade(_)
             | SyntaxExprKind::SequenceNew { .. }
             | SyntaxExprKind::ArenaNew { .. }
             | SyntaxExprKind::Binary { .. } => Ok(None),
@@ -1782,6 +1922,7 @@ fn lower_statement(&mut self, statement: &SyntaxStmt) -> Result<Stmt, LowerError
                     ValueType::Integer
                     | ValueType::Bool
                     | ValueType::String
+                    | ValueType::WeakOwner(_)
                     | ValueType::Sequence(_)
                     | ValueType::Arena(_)
                     | ValueType::Handle(_) => {
@@ -1984,6 +2125,20 @@ fn collect_statement_identifier_uses(
                 Self::collect_statement_identifier_uses(statement, uses);
             }
         }
+        SyntaxStmtKind::WeakUpgrade {
+            weak,
+            then_body,
+            else_body,
+            ..
+        } => {
+            *uses.entry(weak.clone()).or_insert(0) += 1;
+            for statement in then_body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+            for statement in else_body {
+                Self::collect_statement_identifier_uses(statement, uses);
+            }
+        }
         SyntaxStmtKind::ArenaInsert { owner, value, .. } => {
             *uses.entry(owner.clone()).or_insert(0) += 1;
             Self::collect_expr_identifier_uses(value, uses);
@@ -2042,7 +2197,8 @@ fn collect_expr_identifier_uses(expr: &SyntaxExpr, uses: &mut HashMap<String, us
         | SyntaxExprKind::UnaryMinus(base)
         | SyntaxExprKind::SharedBorrow(base)
         | SyntaxExprKind::SharedAlloc(base)
-        | SyntaxExprKind::SharedDuplicate(base) => {
+        | SyntaxExprKind::SharedDuplicate(base)
+        | SyntaxExprKind::WeakDowngrade(base) => {
             Self::collect_expr_identifier_uses(base, uses);
         }
         SyntaxExprKind::Binary { left, right, .. } => {
@@ -2078,6 +2234,11 @@ fn collect_expr_identifier_uses(expr: &SyntaxExpr, uses: &mut HashMap<String, us
                     ..
                 }
                 | StmtKind::ArenaRemove {
+                    then_body,
+                    else_body,
+                    ..
+                }
+                | StmtKind::WeakUpgrade {
                     then_body,
                     else_body,
                     ..
