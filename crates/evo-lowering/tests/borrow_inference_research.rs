@@ -270,6 +270,18 @@ fn collect_statement_effects(statements: &[Stmt], parameter: &str, effects: &mut
                 collect_statement_effects(then_body, parameter, effects);
                 collect_statement_effects(else_body, parameter, effects);
             }
+            StmtKind::WeakUpgrade {
+                weak,
+                then_body,
+                else_body,
+                ..
+            } => {
+                if weak == parameter {
+                    effects.inspect_uses += 1;
+                }
+                collect_statement_effects(then_body, parameter, effects);
+                collect_statement_effects(else_body, parameter, effects);
+            }
             StmtKind::Match { value, arms } => {
                 collect_expr_effects(value, parameter, UseMode::Consume, effects);
                 for arm in arms {
@@ -320,6 +332,9 @@ fn collect_expr_effects(expr: &Expr, parameter: &str, mode: UseMode, effects: &m
         | ExprKind::SharedAlloc(inner)
         | ExprKind::SharedDuplicate(inner) => {
             collect_expr_effects(inner, parameter, UseMode::Consume, effects);
+        }
+        ExprKind::WeakDowngrade(inner) => {
+            collect_expr_effects(inner, parameter, UseMode::Inspect, effects);
         }
         ExprKind::Binary { left, right, .. } => {
             collect_expr_effects(left, parameter, UseMode::Consume, effects);
