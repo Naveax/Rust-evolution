@@ -161,8 +161,9 @@ impl<'a> EnumTypeEnvironment<'a> {
             }
             SyntaxExprKind::SharedBorrow(_)
             | SyntaxExprKind::SharedAlloc(_)
-            | SyntaxExprKind::SharedDuplicate(_) => Err(LowerError {
-                message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+            | SyntaxExprKind::SharedDuplicate(_)
+            | SyntaxExprKind::WeakDowngrade(_) => Err(LowerError {
+                message: "ownership expressions are not supported in enum-bearing programs in v0".to_owned(),
                 span: expr.span,
             }),
             SyntaxExprKind::Binary { left, op, right } => {
@@ -242,6 +243,12 @@ fn validate_statements(
             SyntaxStmtKind::ArenaInsert { .. } | SyntaxStmtKind::ArenaRemove { .. } => {
                 return Err(LowerError {
                     message: "generational arenas are not supported in enum-bearing programs in v0".to_owned(),
+                    span: statement.span,
+                });
+            }
+            SyntaxStmtKind::WeakUpgrade { .. } => {
+                return Err(LowerError {
+                    message: "weak ownership is not supported in enum-bearing programs in v0".to_owned(),
                     span: statement.span,
                 });
             }
@@ -416,6 +423,10 @@ fn resolve_signature_type(
         }),
         SyntaxTypeName::SharedRef(_) | SyntaxTypeName::SharedOwner(_) => Err(LowerError {
             message: "immutable reference semantic lowering is not implemented yet".to_owned(),
+            span,
+        }),
+        SyntaxTypeName::WeakOwner(_) => Err(LowerError {
+            message: "weak-owner function contracts are not supported in enum-bearing programs in v0".to_owned(),
             span,
         }),
         SyntaxTypeName::Sequence(_) => Err(LowerError {

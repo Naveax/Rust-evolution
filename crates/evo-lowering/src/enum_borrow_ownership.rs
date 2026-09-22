@@ -165,6 +165,10 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
                     span: statement.span,
                 })
             }
+            SyntaxStmtKind::WeakUpgrade { .. } => Err(LowerError {
+                message: "weak ownership is not supported in enum-bearing programs in v0".to_owned(),
+                span: statement.span,
+            }),
             SyntaxStmtKind::Match { value, arms } => {
                 self.use_expr(value, OwnershipUseMode::Consume, MoveReason::MatchScrutinee)?;
                 let entry = self.state.clone();
@@ -317,8 +321,9 @@ impl<'a, 'e> OwnershipAnalyzer<'a, 'e> {
             }),
             SyntaxExprKind::SharedBorrow(_)
             | SyntaxExprKind::SharedAlloc(_)
-            | SyntaxExprKind::SharedDuplicate(_) => Err(LowerError {
-                message: "immutable reference ownership lowering is not implemented yet".to_owned(),
+            | SyntaxExprKind::SharedDuplicate(_)
+            | SyntaxExprKind::WeakDowngrade(_) => Err(LowerError {
+                message: "ownership expressions are not supported in enum-bearing programs in v0".to_owned(),
                 span: expr.span,
             }),
             SyntaxExprKind::Binary { left, right, .. } => {
