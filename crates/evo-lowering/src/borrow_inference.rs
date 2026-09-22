@@ -120,6 +120,18 @@ fn collect_statement_effects(
                 collect_statement_effects(then_body, parameter, effects);
                 collect_statement_effects(else_body, parameter, effects);
             }
+            SyntaxStmtKind::WeakUpgrade {
+                weak,
+                then_body,
+                else_body,
+                ..
+            } => {
+                if weak == parameter {
+                    effects.inspect_uses += 1;
+                }
+                collect_statement_effects(then_body, parameter, effects);
+                collect_statement_effects(else_body, parameter, effects);
+            }
             SyntaxStmtKind::Match { value, arms } => {
                 collect_expr_effects(value, parameter, UseMode::Consume, effects);
                 for arm in arms {
@@ -183,6 +195,9 @@ fn collect_expr_effects(
         | SyntaxExprKind::SharedAlloc(inner)
         | SyntaxExprKind::SharedDuplicate(inner) => {
             collect_expr_effects(inner, parameter, UseMode::Consume, effects);
+        }
+        SyntaxExprKind::WeakDowngrade(inner) => {
+            collect_expr_effects(inner, parameter, UseMode::Inspect, effects);
         }
         SyntaxExprKind::Binary { left, right, .. } => {
             collect_expr_effects(left, parameter, UseMode::Consume, effects);

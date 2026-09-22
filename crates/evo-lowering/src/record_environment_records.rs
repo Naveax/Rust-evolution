@@ -12,6 +12,7 @@ pub(crate) enum SemanticType {
     String,
     Record(String),
     SharedOwner(String),
+    WeakOwner(String),
     SharedRef(Box<SemanticType>),
     Sequence(Box<SemanticType>),
     Arena(Box<SemanticType>),
@@ -23,7 +24,11 @@ impl SemanticType {
     pub(crate) fn is_trivially_reusable_v0(&self) -> bool {
         !matches!(
             self,
-            Self::Record(_) | Self::SharedOwner(_) | Self::Sequence(_) | Self::Arena(_)
+            Self::Record(_)
+                | Self::SharedOwner(_)
+                | Self::WeakOwner(_)
+                | Self::Sequence(_)
+                | Self::Arena(_)
         )
     }
 }
@@ -81,6 +86,16 @@ impl RecordEnvironment {
                 } else {
                     Err(LowerError {
                         message: format!("unknown record type {name:?} for shared owner"),
+                        span,
+                    })
+                }
+            }
+            SyntaxTypeName::WeakOwner(name) => {
+                if self.indices.contains_key(name) {
+                    Ok(SemanticType::WeakOwner(name.clone()))
+                } else {
+                    Err(LowerError {
+                        message: format!("unknown record type {name:?} for weak owner"),
                         span,
                     })
                 }
@@ -365,7 +380,8 @@ fn resolve_record_handle_payload(
                 })
             }
         }
-        SyntaxTypeName::SharedRef(_)
+        SyntaxTypeName::WeakOwner(_)
+        | SyntaxTypeName::SharedRef(_)
         | SyntaxTypeName::Sequence(_)
         | SyntaxTypeName::Arena(_)
         | SyntaxTypeName::Handle(_) => Err(LowerError {
@@ -448,6 +464,7 @@ fn semantic_type_label(value_type: &SemanticType) -> String {
         SemanticType::String => "string".to_owned(),
         SemanticType::Record(name) => name.clone(),
         SemanticType::SharedOwner(name) => format!("shared {name}"),
+        SemanticType::WeakOwner(name) => format!("weak {name}"),
         SemanticType::SharedRef(inner) => format!("&{}", semantic_type_label(inner)),
         SemanticType::Sequence(inner) => format!("seq {}", semantic_type_label(inner)),
         SemanticType::Arena(inner) => format!("arena {}", semantic_type_label(inner)),
