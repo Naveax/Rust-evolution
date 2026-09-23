@@ -54,7 +54,7 @@ jobs:
         id: fast_edit_run_turnaround
         if: matrix.os == 'ubuntu-24.04'
         env:
-          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_GIT_SHA: ${{ github.sha }}
           EVO_TURNAROUND_OUT: ${{ github.workspace }}/target/evo-fast-edit-run-turnaround
         run: cargo test -p evo-cli --test fast_edit_run_turnaround fast_edit_run_turnaround_reports_verified_warm_speedup -- --ignored --exact --nocapture
 
@@ -70,7 +70,7 @@ jobs:
         id: build_latency_baseline
         if: matrix.os == 'ubuntu-24.04'
         env:
-          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_GIT_SHA: ${{ github.sha }}
           EVO_BUILD_LATENCY_OUT: ${{ github.workspace }}/target/evo-build-latency
         run: cargo test -p evo-cli --test build_latency_baseline build_latency_baseline_reports_cold_warm_edit_and_rustc_attribution -- --ignored --exact --nocapture
 
@@ -86,7 +86,7 @@ jobs:
         id: incremental_build_research
         if: matrix.os == 'ubuntu-24.04'
         env:
-          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_GIT_SHA: ${{ github.sha }}
           EVO_INCREMENTAL_RESEARCH_OUT: ${{ github.workspace }}/target/evo-incremental-build-research
         run: |
           cargo test -p evo-cli --test incremental_build_research incremental_build_research_isolates_stable_path_and_persistent_rustc_state -- --ignored --exact --nocapture
@@ -107,7 +107,7 @@ jobs:
         id: build_cache_turnaround
         if: matrix.os == 'ubuntu-24.04'
         env:
-          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_GIT_SHA: ${{ github.sha }}
           EVO_BUILD_CACHE_OUT: ${{ github.workspace }}/target/evo-build-cache-turnaround
         run: cargo test -p evo-cli --test build_cache_turnaround verified_build_cache_reports_zero_warm_compiles_and_speedup -- --ignored --exact --nocapture
 
