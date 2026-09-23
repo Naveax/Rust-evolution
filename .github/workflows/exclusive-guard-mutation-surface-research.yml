@@ -88,7 +88,10 @@ jobs:
           assert all(row['run_matched'] == 'true' for row in rows), rows
           assert 'WHOLE-PAYLOAD-REPLACE-CANDIDATE' in markdown, markdown
           assert 'replace guard, expr' in markdown, markdown
-          assert 'replace edit, Item(value = 2)' in markdown.splitlines(), markdown
+          assert any(
+              line.strip() == 'replace edit, Item(value = 2)'
+              for line in markdown.splitlines()
+          ), markdown
           print(json.dumps(data, indent=2))
           PY
       - uses: actions/upload-artifact@v4
