@@ -132,6 +132,29 @@ raw-samples.csv
 
 The report includes the rustc verbose version, host target, sample configuration, correctness result, binary sizes, normalized LLVM IR equality, sample statistics, performance ratio, stability decision, and final verdict.
 
+### v0 provenance contract
+
+Benchmark report schema v3 makes retained artifacts self-identifying instead of relying only on surrounding CI metadata.
+
+Each JSON report records:
+
+- exact `git_sha`;
+- the fixed symmetric rustc `build_flags` list used for both reference and generated Evolution Rust;
+- host OS and architecture;
+- CI provider plus optional runner name/OS/architecture when exposed by the environment;
+- rustc host target and full `rustc -Vv`;
+- optional Linux CPU model and scaling governor when the host exposes them without privilege.
+
+The compiler command and serialized `build_flags` use one source-of-truth argument list. Changing an optimization/codegen argument therefore changes both execution and provenance together rather than allowing the report to describe a different build from the one actually measured.
+
+Dedicated permanent performance workflows check out the exact PR head (or exact push SHA), verify `git rev-parse HEAD`, pass that same SHA through `EVO_GIT_SHA`, and set `EVO_REQUIRE_GIT_SHA=1`. In required mode, a missing explicit SHA is a hard error before rustc executes. Their post-benchmark validators read `report.json` and require the report SHA, schema and build-flag contract to match the executed source.
+
+The general three-OS `CI` workflow intentionally keeps GitHub's normal pull-request merge-ref checkout so it tests the PR as integrated with the current base. Immediately after checkout, each OS verifies `git rev-parse HEAD == github.sha` before any build/test evidence is produced. Its `evo-bench` reports therefore record `github.sha`, which is the synthetic merge commit on pull requests and the pushed commit on `main`. The Ubuntu CI lane validates all nine generated benchmark reports against that actual checkout identity. It must not relabel a merge-ref execution as the PR head merely because the head is easier to recognize.
+
+For local runs, `evo-bench` uses explicit `EVO_GIT_SHA` when supplied, otherwise attempts `git rev-parse HEAD`. If neither source is available and exact provenance was not required, the report uses `unknown`; such an artifact is suitable for local diagnostics but not CI acceptance evidence.
+
+CPU/governor metadata is observational only. The harness never changes a governor, requires privilege, or tunes performance thresholds per machine.
+
 ### Initial smoke case
 
 `benchmarks/cases/arithmetic-smoke` exists to verify the full harness path across platforms. It is intentionally tiny and therefore **must not be cited as evidence that Evolution is faster than or equal to Rust at runtime**. Process startup and scheduler noise dominate such a case. Meaningful performance acceptance begins once Evolution can express workloads with runtime-dependent input and enough work to measure defensibly.

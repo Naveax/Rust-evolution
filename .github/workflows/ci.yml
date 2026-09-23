@@ -29,6 +29,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Verify CI checkout provenance
+        shell: bash
+        env:
+          EXPECTED_GIT_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_GIT_SHA"
+
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
 
@@ -114,6 +120,9 @@ jobs:
           if-no-files-found: error
 
       - name: Benchmark harness smoke
+        env:
+          EVO_GIT_SHA: ${{ github.sha }}
+          EVO_REQUIRE_GIT_SHA: '1'
         run: cargo run -p evo-bench -- run benchmarks/cases/arithmetic-smoke --out target/evo-bench-smoke --report-only
 
       - name: Upload benchmark smoke report
@@ -125,6 +134,9 @@ jobs:
 
       - name: Runtime repeat performance gate
         if: matrix.os == 'ubuntu-24.04'
+        env:
+          EVO_GIT_SHA: ${{ github.sha }}
+          EVO_REQUIRE_GIT_SHA: '1'
         run: cargo run -p evo-bench -- run benchmarks/cases/runtime-repeat-v0 --out target/evo-bench-runtime-repeat
 
       - name: Upload runtime repeat report
@@ -137,6 +149,9 @@ jobs:
 
       - name: Control-flow branch performance gate
         if: matrix.os == 'ubuntu-24.04'
+        env:
+          EVO_GIT_SHA: ${{ github.sha }}
+          EVO_REQUIRE_GIT_SHA: '1'
         run: cargo run -p evo-bench -- run benchmarks/cases/control-flow-branch-v0 --out target/evo-bench-control-flow
 
       - name: Upload control-flow branch report
@@ -149,6 +164,9 @@ jobs:
 
       - name: Logical operators performance gate
         if: matrix.os == 'ubuntu-24.04'
+        env:
+          EVO_GIT_SHA: ${{ github.sha }}
+          EVO_REQUIRE_GIT_SHA: '1'
         run: cargo run -p evo-bench -- run benchmarks/cases/logical-operators-v0 --out target/evo-bench-logical-operators
 
       - name: Upload logical operators report
@@ -161,6 +179,9 @@ jobs:
 
       - name: Functions v0 performance gate
         if: matrix.os == 'ubuntu-24.04'
+        env:
+          EVO_GIT_SHA: ${{ github.sha }}
+          EVO_REQUIRE_GIT_SHA: '1'
         run: cargo run -p evo-bench -- run benchmarks/cases/function-call-v0 --out target/evo-bench-functions
 
       - name: Upload functions v0 report
@@ -173,6 +194,9 @@ jobs:
 
       - name: Block locals v0 performance gate
         if: matrix.os == 'ubuntu-24.04'
+        env:
+          EVO_GIT_SHA: ${{ github.sha }}
+          EVO_REQUIRE_GIT_SHA: '1'
         run: cargo run -p evo-bench -- run benchmarks/cases/block-locals-v0 --out target/evo-bench-block-locals
 
       - name: Upload block locals v0 report
@@ -185,6 +209,9 @@ jobs:
 
       - name: Records v0 performance gate
         if: matrix.os == 'ubuntu-24.04'
+        env:
+          EVO_GIT_SHA: ${{ github.sha }}
+          EVO_REQUIRE_GIT_SHA: '1'
         run: cargo run -p evo-bench -- run benchmarks/cases/records-v0 --out target/evo-bench-records
 
       - name: Upload Records v0 report
@@ -198,6 +225,9 @@ jobs:
       - name: Inferred shared-borrow v0 performance gate
         id: inferred_shared_borrow_v0
         if: matrix.os == 'ubuntu-24.04'
+        env:
+          EVO_GIT_SHA: ${{ github.sha }}
+          EVO_REQUIRE_GIT_SHA: '1'
         run: cargo run -p evo-bench -- run benchmarks/cases/inferred-shared-borrow-v0 --out target/evo-bench-inferred-shared-borrow
 
       - name: Upload inferred shared-borrow v0 report
@@ -211,6 +241,9 @@ jobs:
       - name: Enums v0 performance gate
         id: enums_v0
         if: matrix.os == 'ubuntu-24.04'
+        env:
+          EVO_GIT_SHA: ${{ github.sha }}
+          EVO_REQUIRE_GIT_SHA: '1'
         run: cargo run -p evo-bench -- run benchmarks/cases/enums-v0 --out target/evo-bench-enums
 
       - name: Upload Enums v0 report
@@ -220,6 +253,56 @@ jobs:
           name: evo-bench-enums-ubuntu-24.04
           path: target/evo-bench-enums/
           if-no-files-found: error
+
+      - name: Validate evo-bench provenance reports
+        if: matrix.os == 'ubuntu-24.04'
+        env:
+          EXPECTED_GIT_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          reports = [
+              Path('target/evo-bench-smoke/report.json'),
+              Path('target/evo-bench-runtime-repeat/report.json'),
+              Path('target/evo-bench-control-flow/report.json'),
+              Path('target/evo-bench-logical-operators/report.json'),
+              Path('target/evo-bench-functions/report.json'),
+              Path('target/evo-bench-block-locals/report.json'),
+              Path('target/evo-bench-records/report.json'),
+              Path('target/evo-bench-inferred-shared-borrow/report.json'),
+              Path('target/evo-bench-enums/report.json'),
+          ]
+          expected_flags = [
+              '--crate-name',
+              'evo_benchmark_case',
+              '--edition=2024',
+              '-C',
+              'opt-level=3',
+              '-C',
+              'codegen-units=1',
+              '-C',
+              'lto=thin',
+              '-C',
+              'debuginfo=0',
+          ]
+          for path in reports:
+              report = json.loads(path.read_text())
+              assert report['schema_version'] == 3, (path, report)
+              assert report['git_sha'] == os.environ['EXPECTED_GIT_SHA'], (path, report)
+              assert report['build_flags'] == expected_flags, (path, report)
+              assert report['host_os'], (path, report)
+              assert report['host_arch'], (path, report)
+              assert report['ci_provider'] == 'github-actions', (path, report)
+              assert report['runner_name'], (path, report)
+              assert report['runner_os'], (path, report)
+              assert report['runner_arch'], (path, report)
+              assert report['target'], (path, report)
+              assert report['rustc_verbose'], (path, report)
+          print(f'validated {len(reports)} evo-bench provenance reports')
+          PY
 
       - name: Release build
         run: cargo build --workspace --release

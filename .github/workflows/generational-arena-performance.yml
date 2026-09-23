@@ -8,6 +8,8 @@ on:
       - 'crates/evo-formatter/**'
       - 'crates/evo-lowering/**'
       - 'crates/evo-codegen-rust/**'
+      - 'crates/evo-bench/src/**'
+      - 'crates/evo-bench/Cargo.toml'
       - 'crates/evo-bench/tests/generational_arena_reference.rs'
       - '.github/workflows/generational-arena-performance.yml'
   push:
@@ -19,6 +21,8 @@ on:
       - 'crates/evo-formatter/**'
       - 'crates/evo-lowering/**'
       - 'crates/evo-codegen-rust/**'
+      - 'crates/evo-bench/src/**'
+      - 'crates/evo-bench/Cargo.toml'
       - 'crates/evo-bench/tests/generational_arena_reference.rs'
       - '.github/workflows/generational-arena-performance.yml'
   workflow_dispatch:
@@ -36,8 +40,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - name: Checkout
+      - name: Checkout exact source
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact checkout provenance
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_GIT_SHA"
 
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
@@ -57,7 +68,52 @@ jobs:
 
       - name: Generational arena differential gate
         id: arena_bench
+        env:
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_REQUIRE_GIT_SHA: '1'
         run: cargo run -p evo-bench -- run benchmarks/cases/generational-arena-v0 --out target/evo-bench-generational-arena
+
+      - name: Validate benchmark provenance
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path('target/evo-bench-generational-arena/report.json').read_text())
+          assert report['schema_version'] == 3, report
+          assert report['git_sha'] == os.environ['EXPECTED_GIT_SHA'], report
+          assert report['build_flags'] == [
+              '--crate-name',
+              'evo_benchmark_case',
+              '--edition=2024',
+              '-C',
+              'opt-level=3',
+              '-C',
+              'codegen-units=1',
+              '-C',
+              'lto=thin',
+              '-C',
+              'debuginfo=0',
+          ], report
+          assert report['host_os'], report
+          assert report['host_arch'], report
+          assert report['ci_provider'] == 'github-actions', report
+          assert report['runner_name'], report
+          assert report['runner_os'], report
+          assert report['runner_arch'], report
+          assert report['target'], report
+          assert report['rustc_verbose'], report
+          print(json.dumps({
+              'git_sha': report['git_sha'],
+              'target': report['target'],
+              'host_os': report['host_os'],
+              'host_arch': report['host_arch'],
+              'build_flags': report['build_flags'],
+          }, indent=2))
+          PY
 
       - name: Upload generational arena report
         if: always() && steps.arena_bench.outcome != 'skipped'

@@ -7,6 +7,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static BUILD_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 const CANONICAL_SOURCE_FILE_NAME: &str = "benchmark.rs";
+pub(crate) const RUSTC_BUILD_ARGS: &[&str] = &[
+    "--crate-name",
+    "evo_benchmark_case",
+    "--edition=2024",
+    "-C",
+    "opt-level=3",
+    "-C",
+    "codegen-units=1",
+    "-C",
+    "lto=thin",
+    "-C",
+    "debuginfo=0",
+];
 
 pub(crate) fn rustc_program() -> OsString {
     env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc"))
@@ -173,19 +186,7 @@ fn aggregate_llvm_ir(dir: &Path, output: &Path) -> Result<(), String> {
 
 fn rustc_base_command(rustc: &OsStr, source: &Path) -> Command {
     let mut command = Command::new(rustc);
-    command
-        .arg(source)
-        .arg("--crate-name")
-        .arg("evo_benchmark_case")
-        .arg("--edition=2024")
-        .arg("-C")
-        .arg("opt-level=3")
-        .arg("-C")
-        .arg("codegen-units=1")
-        .arg("-C")
-        .arg("lto=thin")
-        .arg("-C")
-        .arg("debuginfo=0");
+    command.arg(source).args(RUSTC_BUILD_ARGS);
     command
 }
 
@@ -260,12 +261,14 @@ fn normalize_rust_symbol_hashes(line: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::RUSTC_BUILD_ARGS;
     use super::{
         CANONICAL_SOURCE_FILE_NAME, aggregate_llvm_ir, normalize_llvm_ir,
-        normalize_rust_symbol_hashes,
+        normalize_rust_symbol_hashes, rustc_base_command,
     };
+    use std::ffi::OsStr;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -273,6 +276,35 @@ mod tests {
     #[test]
     fn uses_canonical_source_name_for_compiler_comparisons() {
         assert_eq!(CANONICAL_SOURCE_FILE_NAME, "benchmark.rs");
+    }
+
+    #[test]
+    fn reported_build_args_are_the_compiler_args() {
+        assert_eq!(
+            RUSTC_BUILD_ARGS,
+            &[
+                "--crate-name",
+                "evo_benchmark_case",
+                "--edition=2024",
+                "-C",
+                "opt-level=3",
+                "-C",
+                "codegen-units=1",
+                "-C",
+                "lto=thin",
+                "-C",
+                "debuginfo=0",
+            ]
+        );
+
+        let command = rustc_base_command(OsStr::new("rustc"), Path::new("input.rs"));
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let mut expected = vec!["input.rs".to_owned()];
+        expected.extend(RUSTC_BUILD_ARGS.iter().map(|arg| (*arg).to_owned()));
+        assert_eq!(args, expected);
     }
 
     #[test]
