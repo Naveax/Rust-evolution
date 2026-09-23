@@ -189,7 +189,8 @@ fn collect_matches(
             | SyntaxStmtKind::SequenceAppend { .. }
             | SyntaxStmtKind::SequenceLookup { .. }
             | SyntaxStmtKind::ArenaInsert { .. }
-            | SyntaxStmtKind::ArenaRemove { .. } => {}
+            | SyntaxStmtKind::ArenaRemove { .. }
+            | SyntaxStmtKind::WeakUpgrade { .. } => {}
         }
     }
 }
@@ -220,7 +221,8 @@ fn collect_constructor_statements(
             SyntaxStmtKind::SequenceAppend { .. }
             | SyntaxStmtKind::SequenceLookup { .. }
             | SyntaxStmtKind::ArenaInsert { .. }
-            | SyntaxStmtKind::ArenaRemove { .. } => {}
+            | SyntaxStmtKind::ArenaRemove { .. }
+            | SyntaxStmtKind::WeakUpgrade { .. } => {}
             SyntaxStmtKind::Match { value, arms } => {
                 collect_constructor_expr(value, environment, lowered);
                 for arm in arms {
@@ -271,7 +273,8 @@ fn collect_constructor_expr(
         | SyntaxExprKind::UnaryMinus(base)
         | SyntaxExprKind::SharedBorrow(base)
         | SyntaxExprKind::SharedAlloc(base)
-        | SyntaxExprKind::SharedDuplicate(base) => {
+        | SyntaxExprKind::SharedDuplicate(base)
+        | SyntaxExprKind::WeakDowngrade(base) => {
             collect_constructor_expr(base, environment, lowered);
         }
         SyntaxExprKind::Binary { left, right, .. } => {

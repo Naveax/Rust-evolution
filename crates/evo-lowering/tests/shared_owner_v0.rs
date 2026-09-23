@@ -135,3 +135,134 @@ fn owned_reference_and_shared_owner_categories_do_not_convert_implicitly() {
     assert!(error.message.contains("expects Item"));
     assert!(error.message.contains("shared Item"));
 }
+
+#[test]
+fn weak_owner_function_contracts_are_owned_move_only_values() {
+    let source = format!(
+        "{ITEM}fn forward(edge weak Item) weak Item\nreturn edge\nend\nowner = share Item(value = 1)\nedge = downgrade owner\nkept = forward(edge)\nupgrade kept as live\nprint live.value\nelse\nprint 0\nend\n"
+    );
+    let program = lower_source(&source).expect("weak function contracts should lower");
+    let function = &program.functions[0];
+    assert_eq!(
+        function.parameters[0].value_type,
+        ValueType::WeakOwner("Item".to_owned())
+    );
+    assert_eq!(
+        function.return_type,
+        ValueType::WeakOwner("Item".to_owned())
+    );
+    assert_eq!(
+        function.parameters[0].passing_mode,
+        ParameterPassingMode::Owned
+    );
+}
+
+#[test]
+fn downgrade_and_upgrade_are_non_consuming_inspections() {
+    let source = format!(
+        "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nupgrade edge as first\nprint first.value\nelse\nprint 0\nend\nupgrade edge as second\nprint second.value\nelse\nprint 0\nend\nprint owner.value\n"
+    );
+    let program =
+        lower_source(&source).expect("repeated checked upgrade should not consume weak edge");
+    let StmtKind::Let { expr, .. } = &program.statements[1].kind else {
+        panic!("expected weak edge binding");
+    };
+    assert!(matches!(expr.kind, ExprKind::WeakDowngrade(_)));
+    assert!(matches!(
+        program.statements[2].kind,
+        StmtKind::WeakUpgrade { .. }
+    ));
+    assert!(matches!(
+        program.statements[3].kind,
+        StmtKind::WeakUpgrade { .. }
+    ));
+}
+
+#[test]
+fn ordinary_assignment_moves_weak_handle_and_reuse_is_rejected() {
+    let source = format!(
+        "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nmoved = edge\nupgrade edge as live\nprint live.value\nelse\nprint 0\nend\n"
+    );
+    let error = lower_source(&source).expect_err("ordinary assignment must move a weak handle");
+    assert!(error.message.contains("moved weak handle"));
+}
+
+#[test]
+fn checked_upgrade_success_binding_is_a_shared_owner() {
+    let source = format!(
+        "{ITEM}fn consume(item shared Item) int\nreturn item.value\nend\nowner = share Item(value = 1)\nedge = downgrade owner\nupgrade edge as live\nprint consume(live)\nelse\nprint 0\nend\n"
+    );
+    lower_source(&source).expect("upgrade success binding should behave as shared Item");
+}
+
+#[test]
+fn weak_surface_fails_closed_in_enum_bearing_programs() {
+    let source = concat!(
+        "record Item\nvalue int\nend\n",
+        "enum Flag\nOn\nOff\nend\n",
+        "owner = share Item(value = 1)\n",
+        "edge = downgrade owner\n",
+        "upgrade edge as live\n",
+        "print live.value\n",
+        "else\n",
+        "print 0\n",
+        "end\n",
+    );
+    let error = lower_source(source).expect_err("enum-bearing weak program must fail closed");
+    assert!(error.message.contains("weak ownership"));
+    assert!(error.message.contains("enum-bearing"));
+}
+
+#[test]
+fn weak_payload_access_requires_checked_upgrade() {
+    let source =
+        format!("{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nprint edge.value\n");
+    let error = lower_source(&source).expect_err("weak payload must not be dereferenced directly");
+    assert!(
+        error
+            .message
+            .contains("field access requires a record value")
+    );
+}
+
+#[test]
+fn immutable_borrow_cannot_target_a_weak_handle() {
+    let source = format!(
+        "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nr = &edge\nprint 0\n"
+    );
+    let error = lower_source(&source).expect_err("weak handles are not payload references");
+    assert!(
+        error
+            .message
+            .contains("immutable references cannot target weak owners")
+    );
+}
+
+#[test]
+fn upgrade_success_binding_does_not_escape_its_branch() {
+    let source = format!(
+        "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nupgrade edge as live\nprint live.value\nelse\nprint 0\nend\nprint live.value\n"
+    );
+    let error = lower_source(&source).expect_err("upgrade success binding must be lexical");
+    assert!(error.message.contains("outside its scope"));
+}
+
+#[test]
+fn moves_from_only_one_upgrade_branch_merge_into_outer_state() {
+    let source = format!(
+        "{ITEM}owner = share Item(value = 1)\nedge = downgrade owner\nother = share Item(value = 2)\nupgrade edge as live\nmoved = other\nprint live.value\nelse\nprint 0\nend\nprint other.value\n"
+    );
+    let error = lower_source(&source)
+        .expect_err("a move in one continuing upgrade branch must remain maybe-moved after merge");
+    assert!(error.message.contains("moved shared handle"));
+}
+
+#[test]
+fn downgrade_is_allowed_while_payload_is_immutably_borrowed() {
+    let source = format!(
+        "{ITEM}owner = share Item(value = 1)\nr = &owner\nedge = downgrade owner\nprint r.value\nupgrade edge as live\nprint live.value\nelse\nprint 0\nend\n"
+    );
+    lower_source(&source).expect(
+        "downgrade only inspects the shared handle and must not conflict with payload borrow",
+    );
+}

@@ -73,7 +73,8 @@ fn lower_handle_type(type_name: &SyntaxTypeName) -> RecordHandleType {
         SyntaxTypeName::String => RecordHandleType::String,
         SyntaxTypeName::Named(name) => RecordHandleType::Record(name.clone()),
         SyntaxTypeName::SharedOwner(name) => RecordHandleType::SharedOwner(name.clone()),
-        SyntaxTypeName::SharedRef(_)
+        SyntaxTypeName::WeakOwner(_)
+        | SyntaxTypeName::SharedRef(_)
         | SyntaxTypeName::Sequence(_)
         | SyntaxTypeName::Arena(_)
         | SyntaxTypeName::Handle(_) => {

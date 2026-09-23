@@ -311,6 +311,10 @@ fn resolve_payload_type(
             message: "immutable reference enum payloads are not supported in v0".to_owned(),
             span,
         }),
+        SyntaxTypeName::WeakOwner(_) => Err(LowerError {
+            message: "weak-owner enum payloads are not supported in v0".to_owned(),
+            span,
+        }),
         SyntaxTypeName::Sequence(_) => Err(LowerError {
             message: "append-only sequence enum payloads are not supported in v0".to_owned(),
             span,
@@ -363,6 +367,12 @@ fn validate_statement_constructor_shapes(
             SyntaxStmtKind::ArenaInsert { .. } | SyntaxStmtKind::ArenaRemove { .. } => {
                 return Err(LowerError {
                     message: "generational arenas are not supported in enum-bearing programs in v0".to_owned(),
+                    span: statement.span,
+                });
+            }
+            SyntaxStmtKind::WeakUpgrade { .. } => {
+                return Err(LowerError {
+                    message: "weak ownership is not supported in enum-bearing programs in v0".to_owned(),
                     span: statement.span,
                 });
             }
@@ -442,6 +452,10 @@ fn validate_expr_constructor_shapes(
         | SyntaxExprKind::SharedBorrow(base)
         | SyntaxExprKind::SharedAlloc(base)
         | SyntaxExprKind::SharedDuplicate(base) => validate_expr_constructor_shapes(base, environment),
+        SyntaxExprKind::WeakDowngrade(_) => Err(LowerError {
+            message: "weak ownership is not supported in enum-bearing programs in v0".to_owned(),
+            span: expr.span,
+        }),
         SyntaxExprKind::Binary { left, right, .. } => {
             validate_expr_constructor_shapes(left, environment)?;
             validate_expr_constructor_shapes(right, environment)
@@ -480,7 +494,8 @@ fn obvious_expr_type(expr: &SyntaxExpr) -> Option<ResolvedPayloadType> {
         | SyntaxExprKind::FieldAccess { .. }
         | SyntaxExprKind::SharedBorrow(_)
             | SyntaxExprKind::SharedAlloc(_)
-            | SyntaxExprKind::SharedDuplicate(_) => None,
+            | SyntaxExprKind::SharedDuplicate(_)
+            | SyntaxExprKind::WeakDowngrade(_) => None,
     }
 }
 

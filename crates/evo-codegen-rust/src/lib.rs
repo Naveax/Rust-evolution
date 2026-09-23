@@ -312,6 +312,34 @@ impl Generator {
                 }
                 self.push_mapped_line(format!("{padding}}}\n"), statement.span);
             }
+            StmtKind::WeakUpgrade {
+                weak,
+                binding,
+                binding_used,
+                then_body,
+                else_body,
+            } => {
+                let pattern = if *binding_used {
+                    generated_identifier(binding)
+                } else {
+                    "_".to_owned()
+                };
+                self.push_mapped_line(
+                    format!(
+                        "{padding}if let Some({pattern}) = std::rc::Weak::upgrade(&{}) {{\n",
+                        generated_identifier(weak)
+                    ),
+                    statement.span,
+                );
+                for statement in then_body {
+                    self.write_statement(statement, indent + 1);
+                }
+                self.push_mapped_line(format!("{padding}}} else {{\n"), statement.span);
+                for statement in else_body {
+                    self.write_statement(statement, indent + 1);
+                }
+                self.push_mapped_line(format!("{padding}}}\n"), statement.span);
+            }
             StmtKind::If {
                 condition,
                 then_body,
@@ -364,6 +392,9 @@ fn rust_type(value_type: &ValueType) -> String {
         ValueType::Record(name) => generated_record_name(name),
         ValueType::SharedOwner(name) => {
             format!("std::rc::Rc<{}>", generated_record_name(name))
+        }
+        ValueType::WeakOwner(name) => {
+            format!("std::rc::Weak<{}>", generated_record_name(name))
         }
         ValueType::SharedRef(inner) => format!("&{}", rust_type(inner)),
         ValueType::Sequence(inner) => format!("Vec<{}>", rust_type(inner)),
@@ -455,6 +486,9 @@ fn render_expr(expr: &Expr) -> String {
         ExprKind::SharedAlloc(inner) => format!("std::rc::Rc::new({})", render_expr(inner)),
         ExprKind::SharedDuplicate(inner) => {
             format!("std::rc::Rc::clone(&({}))", render_expr(inner))
+        }
+        ExprKind::WeakDowngrade(inner) => {
+            format!("std::rc::Rc::downgrade(&({}))", render_expr(inner))
         }
         ExprKind::SequenceNew { element_type } => {
             format!("Vec::<{}>::new()", rust_type(element_type))
@@ -583,7 +617,8 @@ fn value_type_uses_arena_support(value_type: &ValueType) -> bool {
         | ValueType::Bool
         | ValueType::String
         | ValueType::Record(_)
-        | ValueType::SharedOwner(_) => false,
+        | ValueType::SharedOwner(_)
+        | ValueType::WeakOwner(_) => false,
     }
 }
 
@@ -601,7 +636,8 @@ fn expr_uses_arena_support(expr: &Expr) -> bool {
         | ExprKind::SharedBorrow(base)
         | ExprKind::SharedOwnerBorrow(base)
         | ExprKind::SharedAlloc(base)
-        | ExprKind::SharedDuplicate(base) => expr_uses_arena_support(base),
+        | ExprKind::SharedDuplicate(base)
+        | ExprKind::WeakDowngrade(base) => expr_uses_arena_support(base),
         ExprKind::Binary { left, right, .. } => {
             expr_uses_arena_support(left) || expr_uses_arena_support(right)
         }
@@ -643,6 +679,14 @@ fn statement_uses_arena_support(statement: &Stmt) -> bool {
         } => {
             expr_uses_arena_support(condition)
                 || then_body.iter().any(statement_uses_arena_support)
+                || else_body.iter().any(statement_uses_arena_support)
+        }
+        StmtKind::WeakUpgrade {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body.iter().any(statement_uses_arena_support)
                 || else_body.iter().any(statement_uses_arena_support)
         }
     }
@@ -721,6 +765,14 @@ fn statement_uses_input_int(statement: &Stmt) -> bool {
                 || then_body.iter().any(statement_uses_input_int)
                 || else_body.iter().any(statement_uses_input_int)
         }
+        StmtKind::WeakUpgrade {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body.iter().any(statement_uses_input_int)
+                || else_body.iter().any(statement_uses_input_int)
+        }
     }
 }
 
@@ -737,7 +789,8 @@ fn expr_uses_input_int(expr: &Expr) -> bool {
         | ExprKind::SharedBorrow(inner)
         | ExprKind::SharedOwnerBorrow(inner)
         | ExprKind::SharedAlloc(inner)
-        | ExprKind::SharedDuplicate(inner) => expr_uses_input_int(inner),
+        | ExprKind::SharedDuplicate(inner)
+        | ExprKind::WeakDowngrade(inner) => expr_uses_input_int(inner),
         ExprKind::Binary { left, right, .. } => {
             expr_uses_input_int(left) || expr_uses_input_int(right)
         }

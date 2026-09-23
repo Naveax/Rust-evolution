@@ -90,3 +90,83 @@ fn rejects_shared_owner_storage_in_record_and_enum_v0() {
         assert!(error.message.contains("shared-owner"));
     }
 }
+
+#[test]
+fn parses_weak_owner_downgrade_and_checked_upgrade_surface() {
+    let program = parse_source(concat!(
+        "record Item\n",
+        "value int\n",
+        "end\n",
+        "fn forward(edge weak Item) weak Item\n",
+        "return edge\n",
+        "end\n",
+        "owner = share Item(value = 7)\n",
+        "edge = downgrade owner\n",
+        "upgrade edge as live\n",
+        "print live.value\n",
+        "else\n",
+        "print 0\n",
+        "end\n",
+    ));
+
+    assert_eq!(
+        program.functions[0].parameters[0].type_name,
+        TypeName::WeakOwner("Item".to_owned())
+    );
+    assert_eq!(
+        program.functions[0].return_type,
+        TypeName::WeakOwner("Item".to_owned())
+    );
+
+    let StmtKind::Bind { expr: edge, .. } = &program.statements[1].kind else {
+        panic!("expected weak edge binding");
+    };
+    assert!(matches!(edge.kind, ExprKind::WeakDowngrade(_)));
+
+    let StmtKind::WeakUpgrade {
+        weak,
+        binding,
+        then_body,
+        else_body,
+    } = &program.statements[2].kind
+    else {
+        panic!("expected checked weak upgrade");
+    };
+    assert_eq!(weak, "edge");
+    assert_eq!(binding, "live");
+    assert_eq!(then_body.len(), 1);
+    assert_eq!(else_body.len(), 1);
+}
+
+#[test]
+fn weak_contextual_words_preserve_ordinary_identifiers_and_calls() {
+    let program = parse_source(concat!(
+        "record weak\n",
+        "value int\n",
+        "end\n",
+        "fn downgrade(x int) int\n",
+        "return x\n",
+        "end\n",
+        "fn upgrade(x int) int\n",
+        "return x\n",
+        "end\n",
+        "fn keep(x weak) weak\n",
+        "return x\n",
+        "end\n",
+        "upgrade = 4\n",
+        "print downgrade(upgrade(upgrade))\n",
+    ));
+
+    assert_eq!(
+        program.functions[2].parameters[0].type_name,
+        TypeName::Named("weak".to_owned())
+    );
+    assert_eq!(
+        program.functions[2].return_type,
+        TypeName::Named("weak".to_owned())
+    );
+    let StmtKind::Bind { name, .. } = &program.statements[0].kind else {
+        panic!("expected ordinary upgrade binding");
+    };
+    assert_eq!(name, "upgrade");
+}

@@ -83,3 +83,40 @@ fn generated_duplicate_then_by_value_forward_compiles() {
         ),
     );
 }
+
+#[test]
+fn generated_live_weak_upgrade_compiles_as_safe_rust() {
+    assert_rustc_accepts(
+        "weak-live-upgrade",
+        concat!(
+            "record Item\nvalue int\nend\n",
+            "owner = share Item(value = 7)\n",
+            "edge = downgrade owner\n",
+            "upgrade edge as live\n",
+            "print live.value\n",
+            "else\n",
+            "print 0\n",
+            "end\n",
+            "print owner.value\n",
+        ),
+    );
+}
+
+#[test]
+fn generated_dead_weak_upgrade_branch_compiles_as_safe_rust() {
+    assert_rustc_accepts(
+        "weak-dead-upgrade",
+        concat!(
+            "record Item\nvalue int\nend\n",
+            "fn consume(item shared Item) int\nreturn item.value\nend\n",
+            "owner = share Item(value = 7)\n",
+            "edge = downgrade owner\n",
+            "print consume(owner)\n",
+            "upgrade edge as live\n",
+            "print live.value\n",
+            "else\n",
+            "print 0\n",
+            "end\n",
+        ),
+    );
+}

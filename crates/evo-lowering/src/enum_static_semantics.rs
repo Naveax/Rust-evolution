@@ -342,6 +342,10 @@ impl<'a> StaticEnvironment<'a> {
                     span: expr.span,
                 })
             }
+            SyntaxExprKind::WeakDowngrade(_) => Err(LowerError {
+                message: "weak ownership is not supported in enum-bearing programs in v0".to_owned(),
+                span: expr.span,
+            }),
             SyntaxExprKind::Binary { left, op, right } => {
                 let left_type = self.infer_expr(left, scopes)?;
                 let right_type = self.infer_expr(right, scopes)?;
@@ -565,6 +569,12 @@ fn validate_statements(
                     span: statement.span,
                 });
             }
+            SyntaxStmtKind::WeakUpgrade { .. } => {
+                return Err(LowerError {
+                    message: "weak ownership is not supported in enum-bearing programs in v0".to_owned(),
+                    span: statement.span,
+                });
+            }
             SyntaxStmtKind::Match { value, arms } => {
                 validate_match(value, arms, environment, scopes, expected_return)?;
             }
@@ -658,7 +668,8 @@ fn statement_always_returns(statement: &SyntaxStmt) -> bool {
         | SyntaxStmtKind::SequenceAppend { .. }
         | SyntaxStmtKind::SequenceLookup { .. }
         | SyntaxStmtKind::ArenaInsert { .. }
-        | SyntaxStmtKind::ArenaRemove { .. } => false,
+        | SyntaxStmtKind::ArenaRemove { .. }
+        | SyntaxStmtKind::WeakUpgrade { .. } => false,
     }
 }
 
@@ -689,6 +700,11 @@ fn resolve_type_name(
         }),
         TypeName::SharedOwner(_) => Err(LowerError {
             message: "explicit shared-owner function contracts are not supported in enum-bearing programs in v0"
+                .to_owned(),
+            span,
+        }),
+        TypeName::WeakOwner(_) => Err(LowerError {
+            message: "weak-owner function contracts are not supported in enum-bearing programs in v0"
                 .to_owned(),
             span,
         }),

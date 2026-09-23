@@ -362,6 +362,9 @@ impl<'a> BodyPromoter<'a> {
             SyntaxStmtKind::ArenaInsert { .. } | SyntaxStmtKind::ArenaRemove { .. } => {
                 unreachable!("arena syntax is rejected before enum executable IR promotion")
             }
+            SyntaxStmtKind::WeakUpgrade { .. } => {
+                unreachable!("weak ownership syntax is rejected before enum executable IR promotion")
+            }
             SyntaxStmtKind::Match { value, arms } => {
                 let resolved = self.match_at(statement.span.start).clone();
                 debug_assert_eq!(resolved.arms.len(), arms.len());
@@ -520,8 +523,9 @@ impl<'a> BodyPromoter<'a> {
             }
             SyntaxExprKind::SharedBorrow(_)
             | SyntaxExprKind::SharedAlloc(_)
-            | SyntaxExprKind::SharedDuplicate(_) => unreachable!(
-                "immutable reference expressions are rejected before enum executable IR promotion"
+            | SyntaxExprKind::SharedDuplicate(_)
+            | SyntaxExprKind::WeakDowngrade(_) => unreachable!(
+                "ownership expressions are rejected before enum executable IR promotion"
             ),
             SyntaxExprKind::Binary { left, op, right } => ExecutableExprKind::Binary {
                 left: Box::new(self.lower_expr(left)),
@@ -565,8 +569,8 @@ impl<'a> BodyPromoter<'a> {
             TypeName::Arena(_) | TypeName::Handle(_) => {
                 unreachable!("arena types are rejected before enum executable IR promotion")
             }
-            TypeName::SharedRef(_) | TypeName::SharedOwner(_) => unreachable!(
-                "immutable reference types are rejected before enum executable IR promotion"
+            TypeName::SharedRef(_) | TypeName::SharedOwner(_) | TypeName::WeakOwner(_) => unreachable!(
+                "ownership/reference types are rejected before enum executable IR promotion"
             ),
         }
     }
