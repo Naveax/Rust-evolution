@@ -1,0 +1,106 @@
+name: Weak storage surface research
+
+on:
+  pull_request:
+    paths:
+      - 'crates/evo-lowering/tests/weak_storage_surface_research.rs'
+      - '.github/workflows/weak-storage-surface-research.yml'
+      - 'docs/WEAK_STORAGE_SURFACE_RESEARCH.md'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/evo-lowering/tests/weak_storage_surface_research.rs'
+      - '.github/workflows/weak-storage-surface-research.yml'
+      - 'docs/WEAK_STORAGE_SURFACE_RESEARCH.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  research:
+    runs-on: ubuntu-24.04
+    name: ubuntu-24.04 / Rust 1.98.0
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact checkout provenance
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_GIT_SHA"
+
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+
+      - run: rustc -Vv
+
+      - run: cargo fmt --all -- --check
+
+      - name: Run Weak storage surface matrix
+        env:
+          EVO_REQUIRE_PINNED_RUSTC: '1'
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_WEAK_STORAGE_RESEARCH_OUT: ${{ github.workspace }}/target/evo-weak-storage-surface-research
+        run: >-
+          cargo test -p evo-lowering --test weak_storage_surface_research
+          weak_storage_surface_research_selects_record_field_first
+          -- --ignored --exact --nocapture
+
+      - name: Validate report
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import csv
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('target/evo-weak-storage-surface-research')
+          data = json.loads((root / 'report.json').read_text())
+          rows = list(csv.DictReader((root / 'report.csv').read_text().splitlines()))
+          markdown = (root / 'report.md').read_text()
+
+          assert data['git_sha'] == os.environ['EXPECTED_GIT_SHA'], data
+          assert data['verdict'] == 'WEAK-RECORD-FIELD-CANDIDATE', data
+          assert data['case_count'] >= 20, data
+          assert data['expectation_mismatches'] == 0, data
+          assert data['record_field_case_count'] >= 5, data
+          assert data['sequence_boundary_case_count'] >= 4, data
+          assert data['weak_duplication_boundary_count'] >= 1, data
+          assert data['arena_identity_boundary_count'] >= 2, data
+          assert data['enum_integration_boundary_count'] >= 1, data
+          assert data['recursive_layout_control_count'] >= 2, data
+          assert data['reject_hidden_cost_count'] >= 4, data
+          assert data['contextual_weak_identifier'] is True, data
+          assert data['ordinary_weak_named_type_compatibility'] is True, data
+          assert data['record_field_current_parser_rejects'] is True, data
+          assert data['sequence_element_current_parser_rejects'] is True, data
+          assert data['enum_payload_current_parser_rejects'] is True, data
+          assert data['arena_payload_current_parser_rejects'] is True, data
+          assert data['sequence_first_slice_blocked'] is True, data
+          assert data['enum_integration_authorized'] is False, data
+          assert data['arena_weak_identity_unified'] is False, data
+          assert data['implicit_weak_duplication_authorized'] is False, data
+          assert len(rows) == data['case_count'], (len(rows), data)
+          assert all(row['git_sha'] == data['git_sha'] for row in rows), rows
+          assert all(row['compile_matched'] == 'true' for row in rows), rows
+          assert all(row['run_matched'] == 'true' for row in rows), rows
+          assert 'WEAK-RECORD-FIELD-CANDIDATE' in markdown, markdown
+          assert 'next weak Node' in markdown, markdown
+          print(json.dumps(data, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evo-weak-storage-surface-research-ubuntu-24.04
+          path: target/evo-weak-storage-surface-research
+          if-no-files-found: error
+          retention-days: 30
