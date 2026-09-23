@@ -295,6 +295,87 @@ Production validation before the final documentation/PR commit:
 - artifact `10457925773`, digest `sha256:4852ab5c61da6c0e2848efff148beaba9fd2dcbafa1dbe650627bb3c04667a39`;
 - the earlier independent-reference run `35119416363` is retained as failed evidence at ratio `1.001201306`; artifact inspection showed identical hot executable code despite symbol/source-location identity differences. The permanent fixture therefore keeps the independently authored implementation as a compile/structure control while using a direct-runtime parity lock for timed acceptance.
 
+## D-024 — Dynamic borrow guards stay lexical over an explicit owned cell
+
+**Decision:** The accepted research direction for single-thread dynamic borrowing is an explicit owned cell plus lexical guard acquisition, not implicit interior mutability or a first-class escaping guard value.
+
+Accepted bounded surface family:
+
+~~~text
+state = cell Item(value = 1)
+
+borrow state as view
+    ...
+end
+
+borrow_mut state as edit
+    ...
+end
+
+try_borrow state as view
+    ...
+else
+    ...
+end
+
+try_borrow_mut state as edit
+    ...
+else
+    ...
+end
+~~~
+
+For this research decision:
+
+- `cell T` / `cell expr` are explicit owned `RefCell<T>`-class forms;
+- panicking and fallible acquisition remain distinct;
+- guard bindings are lexical;
+- returned/escaping guard values remain outside the decision;
+- `Rc` ownership and `RefCell` dynamic borrowing remain separate mechanisms;
+- payload mutation syntax is not selected here and is isolated in #148;
+- no implicit `RefCell`, `Rc`, `Arc`, lock, clone, registry, GC, unsafe aliasing, or generalized lifetime solver is implied.
+
+**Reason:** #134 / PR #147 produced 21/21 matching Rust 1.98 controls and the deterministic verdict **LEXICAL-GUARDS-FIRST** with **EXPLICIT-OWNED-CELL**.
+
+Accepted evidence: final PR head `7acb51495799d3b25e2f9dd9f425011584ad22fe`, exact-head research artifact `10642096339` digest `sha256:3b9ee0fcabf028ce82c694af84df4dccb054e658546ab97d77f80da25c04e358`, squash merge `b3b3eebe5c1d41b47e26e3bb2bc00db5a34c32c9`, and exact-main research artifact `10643971376` digest `sha256:007ab949a38a6ca060953e7007ec09d90b8a09c9f671e19e2b1ad9442dcd57a7`.
+
+## D-025 — Weak edge v0 is explicit, checked, and one-thread
+
+**Decision:** The first production Weak ownership slice uses contextual `weak T`, explicit non-consuming downgrade from `shared T`, and checked lexical upgrade branching.
+
+Accepted surface:
+
+~~~text
+fn forward(edge weak Item) weak Item
+    return edge
+end
+
+owner = share Item(value = 1)
+edge = downgrade owner
+
+upgrade edge as live
+    print live.value
+else
+    print 0
+end
+~~~
+
+For v0:
+
+- `weak T` is limited to nominal record local/function contracts;
+- Weak handles are move-only under ordinary assignment/call/return;
+- `downgrade owner` inspects a strong shared owner and emits one direct `Rc::downgrade(&owner)`;
+- `upgrade edge as binding ... else ... end` inspects the Weak without consuming it;
+- success binds lexical `shared T`; failure is explicit;
+- no first-class Option/result owner value is introduced;
+- record fields, enum payloads, sequences, arenas, nested Weak storage, and enum-bearing Weak programs remain fail-closed for this slice;
+- generated Rust is direct safe `std::rc::Weak<T>`, `Rc::downgrade`, and `Weak::upgrade`;
+- there is no hidden `Rc::clone`, implicit strong-count increment, GC, registry, unsafe, or custom ownership runtime.
+
+**Reason:** #138 proved the checked branch is sufficient for v0 without a first-class result type. #137 / PR #155 implements exactly that bounded surface and preserves the existing explicit-cost ownership model.
+
+Accepted evidence: #138 exact-head research artifact `10651252644` digest `sha256:1401fbcd09db781b8ee2d23d602ec60397d176dbbaa57443737956d30cff1f4f`, production PR #155 final head `5cac4516d0bf035ef53706832812aa881e877dde`, exact-head CI `35745511907`, squash merge `36022b386782775e449ae6a6eedcbbb8c8d1275f`, and exact-main CI `35842635637`.
+
 ## Changing a decision
 
 A future change should record:

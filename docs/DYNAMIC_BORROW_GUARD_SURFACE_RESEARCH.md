@@ -1,6 +1,6 @@
 # Dynamic borrow guard surface v0 research
 
-Acceptance rule: the research decision is authoritative only when the executable matrix, exact-head CI, artifact provenance, merge, and natural exact-main validation recorded on issue #134 are all green. Until then, this document describes a bounded candidate, not production semantics.
+Status: **ACCEPTED RESEARCH DECISION**. Exact-head CI, dedicated research, artifact provenance, squash merge, and natural exact-main validation recorded on issue #134 are green. This remains a research decision until a separately gated production implementation lands.
 
 Issue: #134. Parent research: #121 / PR #128.
 
@@ -12,7 +12,7 @@ This track is research-only. It adds no production cell, mutation, guard, or int
 
 Can the first explicit single-thread dynamic-borrow slice keep runtime guards lexical and local, so Evolution can expose RefCell-like checking without immediately adding a first-class escaping guard type or generalized lifetime solver?
 
-The leading bounded hypothesis is **LEXICAL-GUARDS-FIRST**.
+The accepted bounded result is **LEXICAL-GUARDS-FIRST** with recommended owned-cell surface **EXPLICIT-OWNED-CELL**.
 
 ## Candidate owned-cell and acquisition contract
 

@@ -1,6 +1,6 @@
 # Rust Evolution — Project State
 
-Last verified update: **2026-09-18**
+Last verified update: **2026-09-23**
 
 This is the durable project handoff. Always re-read live GitHub issue/PR/Actions state before changing code.
 
@@ -8,122 +8,153 @@ This is the durable project handoff. Always re-read live GitHub issue/PR/Actions
 
 - Repository: `Naveax/Rust-evolution`
 - Stable branch: `main`
-- Exact verified stable main: `368eb9a07ad423fa0a616715a7693457b43ff903`
+- Exact verified stable main: `36022b386782775e449ae6a6eedcbbb8c8d1275f`
 - Rust toolchain: **1.98.0**
-- Production flags: edition 2024, opt-level 3, codegen-units 1
-- Natural exact-main CI #579 / run `35083606472`: **SUCCESS** on Ubuntu 24.04, Windows and macOS
-- Natural exact-main Generational arena surface research #21 / run `35083606469`: **SUCCESS**
-- Natural exact-main Append-only sequence performance #24 / run `35083606389`: **SUCCESS**
-- Natural exact-main Explicit shared owner performance #67 / run `35083606392`: **SUCCESS**
+- Exact-main CI `35842635637`: **SUCCESS** on Ubuntu 24.04, Windows and macOS
+- Exact-main Generational arena surface research `35842635505`: **SUCCESS**
+- Exact-main Append-only sequence performance `35842635557`: **SUCCESS**
+- Exact-main Explicit shared owner performance `35842635675`: **SUCCESS**
+- Exact-main Generational arena performance `35842635563`: **SUCCESS**
 
-`368eb9a...` is PR #143 merge, completing #142 generational-arena surface research. PR #141 previously merged append-only sequence v0 and closed #140.
+## Accepted production foundations
 
-## Ownership / collection foundations already on main
+### Explicit shared ownership
 
-### Immutable references and explicit shared owners
+`shared T`, `share expr`, and `dup owner` remain explicit one-thread `Rc<T>`-class ownership. Ordinary assignment, call, and return move handles; only `dup` performs explicit owner duplication.
 
-The bounded `&T` reference model, inferred call-duration shared borrows, and explicit one-thread `shared T` / `share` / `dup` owners remain implemented. Shared-owner duplication is explicit; ordinary moves/calls/returns do not insert hidden refcount traffic.
+### Append-only sequence v0
 
-### Append-only sequences — #140 / PR #141 completed
+`seq T`, `append`, and checked `lookup ... else ... end` lower directly to safe Rust `Vec<T>` / `push` / `get`. Move-only element references use bounded final-use liveness.
 
-Production `seq T`, explicit `append`, and checked `lookup ... else ... end` lower directly to safe `Vec<T>` / `push` / `get`. Move-only element references participate in the existing bounded final-use liveness model. Sequence removal/reuse remains separate from arena semantics.
+### Generational arena v0
 
-### Generational arena research — #142 / PR #143 completed
+`arena T` / `handle T` support explicit insert, checked lookup, and checked removal. Handles identify runtime arena id + slot + generation. Stale, wrong-arena, vacant, and out-of-range handles fail through explicit branches. Slot reuse advances generation; generation-max slots retire.
 
-Accepted result: **RUNTIME-ARENA-ID-GENERATIONAL-CANDIDATE / CONTEXTUAL-ARENA-HANDLE-CANDIDATE**.
+### Dynamic borrow guard research — #134 / PR #147 completed
 
-The accepted identity is `(arena id, slot index, generation)`; reusable slots advance generation, generation exhaustion retires a slot, and arena-id exhaustion must fail closed.
+Accepted research decision:
 
-## Active P0 production — #144 generational arena v0
+- **LEXICAL-GUARDS-FIRST**
+- owned cell surface **EXPLICIT-OWNED-CELL**
+- `cell T` / `cell expr`
+- lexical `borrow`, `borrow_mut`, `try_borrow`, `try_borrow_mut`
+- returned/escaping guards remain outside the bounded surface
+- payload mutation syntax is intentionally separated into #148
 
-Branch:
+Exact-head research artifact: `10642096339`, digest `sha256:3b9ee0fcabf028ce82c694af84df4dccb054e658546ab97d77f80da25c04e358`.
 
-`feature/generational-arena-v0`
+Postmerge exact-main research artifact on `b3b3eebe5c1d41b47e26e3bb2bc00db5a34c32c9`: `10643971376`, digest `sha256:007ab949a38a6ca060953e7007ec09d90b8a09c9f671e19e2b1ad9442dcd57a7`.
 
-Validated production-gate head before the final documentation/PR commit:
+### Weak edge v0 — #138 research + #137 production completed
 
-`e59f41fc9a4f58bb352d663358fc1b12a130f445`
+Accepted production surface:
 
-Implemented source surface:
+~~~text
+fn forward(edge weak Item) weak Item
+    return edge
+end
 
-```text
-items = arena Item()
-insert items, Item(value = 1) as h
+owner = share Item(value = 1)
+edge = downgrade owner
 
-lookup items, h as item
-    print item.value
+upgrade edge as live
+    print live.value
 else
     print 0
 end
+~~~
 
-remove items, h as removed
-    print removed.value
-else
-    print 0
-end
-```
+Locked invariants:
 
-Type forms:
+- `weak T`, `downgrade`, and `upgrade` remain contextual;
+- `weak T` is bounded to nominal record local/function contracts in v0;
+- ordinary Weak values are move-only;
+- `downgrade owner` inspects a `shared T` non-consumingly and lowers to `Rc::downgrade(&owner)`;
+- `upgrade edge as owner ... else ... end` inspects the Weak non-consumingly and binds lexical `shared T` only in the success branch;
+- repeated upgrade checks do not consume the Weak handle;
+- no first-class Option/result owner value is added;
+- record fields, enum payloads, sequence elements, arena payloads, and enum-bearing Weak execution remain fail-closed in this first slice;
+- generated Rust uses direct safe `std::rc::Weak<T>`, `Rc::downgrade`, and `Weak::upgrade`;
+- no hidden clone, implicit strong-count increment, registry, GC, unsafe, or ownership runtime wrapper.
 
-```text
-arena Item
-handle Item
-```
+Research acceptance:
 
-Implemented invariants:
+- #138 / PR #146 exact-head artifact `10651252644`, digest `sha256:1401fbcd09db781b8ee2d23d602ec60397d176dbbaa57443737956d30cff1f4f`;
+- verdict **SCOPED-UPGRADE-CANDIDATE**, 15 cases, 0 mismatches;
+- research squash merge `bef3e1b7def9869fe4a8947b846ac6f3f481bd3b`.
 
-- `arena`, `handle`, `insert`, and `remove` remain contextual identifiers outside exact forms;
-- `arena T` is move-only owned storage for the bounded scalar/record/explicit-shared-owner payload set;
-- `handle T` is copy-like fixed-size identity carrying arena id, slot index, and generation;
-- same-payload arenas are runtime-distinct; stale, wrong-arena, vacant, and out-of-range handles take checked failure branches;
-- insert consumes move-only payloads without hidden clone and returns a fresh handle;
-- removal moves payload ownership out once, invalidates the old handle, increments generation before reuse, and retires a generation-max slot;
-- arena-id exhaustion fails closed;
-- live move-only element references block insert, remove, arena move, and reinitialization until bounded final-use release;
-- `handle T` works in function contracts and record fields across the supported arena payload set; `handle Node` self-edges avoid recursive-layout classification, and `seq handle T` supports adjacency-list-class storage;
-- shared-owner lookup/removal does not insert hidden `Rc::clone`;
-- generated support code is ordinary safe Rust with `Vec`, `Option`, `Cell`, and `PhantomData`; no unsafe pointer identity, registry, GC, `RefCell`, lock, or hidden refcount layer.
+Production acceptance:
 
-Validation evidence:
+- PR #155 final head `5cac4516d0bf035ef53706832812aa881e877dde`;
+- exact-head CI `35745511907`: **SUCCESS** on all three OSes;
+- squash merge / current main `36022b386782775e449ae6a6eedcbbb8c8d1275f`;
+- exact-main CI `35842635637`: **SUCCESS** on all three OSes;
+- exact-main arena research artifact `10741608107`, digest `sha256:1e0c527c56448e2cbcd3a9f29ba873759b4d343d7eaf85688963e339e09529f2`;
+- exact-main sequence artifact `10742151734`, digest `sha256:d1245947dc7015d757ccae7e3e9d4d8f4f48424e3d95fd56c8368b7e03b8834d`;
+- exact-main shared-owner artifact `10742411398`, digest `sha256:4ff6f462ba295f589122d3f955d3237d79ccfefeecdc39d43852d8a2d929621d`;
+- exact-main arena artifact `10742505232`, digest `sha256:8e6ab407c6d6717fa2b5a705a7a04dd4a85c942e6dc16c5c3586e3cff0195246`.
 
-- Dev arena semantics v0 run `35118469618`: focused semantic/runtime tests, workspace regression, and Clippy `-D warnings` **SUCCESS**;
-- Generational arena performance run `35120462329` on head `e59f41fc...`: focused parser/formatter/lowering/codegen/runtime tests **SUCCESS**;
-- differential correctness **true**, exact binary **true**, stable **true**, final verdict **PASS** by `byte-identical-binary-parity`;
-- observed timing ratio **1.000613481** is retained as timing-only FAIL evidence rather than rounded away;
-- artifact `10457925773`, digest `sha256:4852ab5c61da6c0e2848efff148beaba9fd2dcbafa1dbe650627bb3c04667a39`;
-- the earlier independent timed run `35119416363` remains retained failed evidence at ratio `1.001201306`.
+## Active P0 research — #148 / PR #156
 
-Permanent regression workflow: `.github/workflows/generational-arena-performance.yml`.
+Issue #148 researches the smallest mutation surface for an exclusive lexical dynamic-borrow guard without silently adding general mutable references or mutable-place syntax.
 
-## Explicit exclusions
+Branch: `research/exclusive-guard-mutation-surface-v0`
 
-Do not silently fold these into #144:
+Current exact head: `6a223c89352bb380cc6b00ee6379c3fc095f8271`
 
-- general Evolution generic syntax;
-- general-purpose vectors/maps/sets or algorithms;
-- mutable references;
-- cross-thread `Arc`/synchronization;
-- static per-runtime-arena-instance type provenance;
-- independent payload lifetime outside arena ownership;
-- hidden clone/refcount/GC;
-- process-global handle registries/tables;
-- unsafe pointer identity;
-- arena nesting/arbitrary generic payload composition;
-- unrelated allocator tuning.
+PR #156 is draft. Scope is exactly:
 
-## Current operational sequence
+- dedicated workflow;
+- 21-case executable Rust matrix;
+- research document.
 
-PR #145 is open from `feature/generational-arena-v0` to exact main `368eb9a...`.
+Pre-registered candidate: **WHOLE-PAYLOAD-REPLACE-CANDIDATE**, source spelling `replace guard with expr`.
 
-1. Keep one exact PR head and fix only evidence-backed gate failures; historical failed heads remain evidence.
-2. Require normal Ubuntu/Windows/macOS CI, Generational arena performance, and all naturally triggered append-only/shared-owner/research regressions on that exact head.
-3. Review the exact final diff and merge only with expected-head protection.
-4. Require natural exact-main postmerge CI and Generational arena performance before closing #144 completed.
-5. Choose the next graph/ownership successor only after #144 is durably closed; do not smuggle Weak, interior mutability, cross-thread ownership, or generalized generics into this slice.
+Direct field/index mutation and escaping guards remain unauthorized. The first PR head failed only rustfmt; current replacement head carries the exact formatter output and natural replacement runs.
+
+## Newly unblocked P0 research — #153
+
+#153 Weak storage surface research is now unblocked because #137 is complete.
+
+Branch: `research/weak-storage-surface-v0`
+
+Start/base main: `36022b386782775e449ae6a6eedcbbb8c8d1275f`
+
+No research files or PR have been created yet at this handoff.
+
+Primary decision families:
+
+- **WEAK-RECORD-FIELD-CANDIDATE**
+- **WEAK-RECORD-AND-SEQUENCE-CANDIDATE**
+- **ENUM-INTEGRATION-FIRST**
+- **NESTED-TYPE-INFRASTRUCTURE-FIRST**
+- **DEFER**
+
+Research must distinguish fixed-size Weak handle storage from recursive by-value payload layout and must not smuggle in hidden strong ownership, GC, general generics, or enum integration.
+
+## Prepared infrastructure lanes
+
+Prepared branches have no open PR unless live GitHub says otherwise.
+
+- #149 benchmark provenance: `infra/benchmark-provenance-v0`, head `1bce806e3d8fb582dab79c4421515fa5ae24a640`
+- #150 research workflow provenance: `infra/research-workflow-provenance-v0`, head `0a2664a6dc3c073d5033b51f9117e85473a6d667`
+- #151 tooling evidence provenance: `infra/tooling-evidence-provenance-v0`, stacked head `264103cc99e8fa62146dbb7ebdb06dd3da97621b`
+
+## Separate blocked lane
+
+#133 cross-thread shared-ownership research still needs a fresh exact-current-main dedicated research dispatch. Historical exhausted/cancelled attempts are not to be cosmetically rerun.
 
 ## CI / handoff invariant
 
-Never create duplicate active Actions for the same SHA/workflow/input. Historical failed SHAs remain evidence and are not rerun merely for cosmetic green. CI running does not block independent source/docs work.
+Never create duplicate active Actions for the same SHA/workflow/input. Historical failed SHAs remain evidence. A new SHA gets natural replacement runs.
+
+Before merging a PR:
+
+1. verify exact current head and base;
+2. require all mandatory exact-head gates;
+3. inspect artifacts/provenance;
+4. merge with expected-head protection;
+5. require natural exact-main postmerge evidence before closing the issue completed.
 
 Authority hierarchy:
 

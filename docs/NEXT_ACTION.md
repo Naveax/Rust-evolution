@@ -1,89 +1,94 @@
 # Rust Evolution — NEXT ACTION
 
-Last verified update: **2026-09-18**
+Last verified update: **2026-09-23**
 
 ## Stable gate
 
 Current exact verified `main`:
 
-`368eb9a07ad423fa0a616715a7693457b43ff903`
+`36022b386782775e449ae6a6eedcbbb8c8d1275f`
 
-This is PR #143 merge, completing #142 generational-arena surface research after PR #141 completed append-only sequence v0.
+This is PR #155 squash merge, completing production Weak edge v0.
 
 Natural exact-main validation:
 
-- CI #579 / run `35083606472`: **SUCCESS** on Ubuntu 24.04, Windows and macOS;
-- Generational arena surface research #21 / run `35083606469`: **SUCCESS**;
-- Append-only sequence performance #24 / run `35083606389`: **SUCCESS**;
-- Explicit shared owner performance #67 / run `35083606392`: **SUCCESS**.
+- CI `35842635637`: **SUCCESS** on Ubuntu 24.04, Windows and macOS
+- Generational arena surface research `35842635505`: **SUCCESS**
+- Append-only sequence performance `35842635557`: **SUCCESS**
+- Explicit shared owner performance `35842635675`: **SUCCESS**
+- Generational arena performance `35842635563`: **SUCCESS**
 
-## Active P0 production — #144
+## Immediate active P0 — #148 / PR #156
 
-`#144 P0 implement generational arena v0: contextual arena T, copyable handle T, checked insert/lookup/remove`
+Research question: bounded payload mutation through an exclusive lexical dynamic-borrow guard.
 
 Branch:
 
-`feature/generational-arena-v0`
+`research/exclusive-guard-mutation-surface-v0`
 
-Validated pre-finalizer production-gate head:
+Current exact head:
 
-`e59f41fc9a4f58bb352d663358fc1b12a130f445`
+`6a223c89352bb380cc6b00ee6379c3fc095f8271`
 
-Production validation already green:
+PR #156 is draft.
 
-- Dev arena semantics v0 run `35118469618`: focused semantic/runtime tests, full workspace regression, and Clippy `-D warnings` **SUCCESS**;
-- Generational arena performance run `35120462329`: format and focused parser/formatter/lowering/codegen/runtime tests **SUCCESS**;
-- differential correctness **true**;
-- exact executable bytes **true**;
-- stable measurement **true**;
-- reference median **11,721,632 ns**;
-- Evolution median **11,728,823 ns**;
-- observed ratio **1.000613481**;
-- timing-only verdict **FAIL**;
-- final verdict **PASS** by `byte-identical-binary-parity`;
-- artifact `10457925773`, digest `sha256:4852ab5c61da6c0e2848efff148beaba9fd2dcbafa1dbe650627bb3c04667a39`.
+Pre-registered verdict:
 
-The earlier fully independent timed reference run `35119416363` remains failed evidence at ratio `1.001201306`. Its independent implementation remains in the permanent fixture as a compile/structure control; timed acceptance uses the generated-runtime parity lock so symbol/source-location noise cannot masquerade as overhead.
+**WHOLE-PAYLOAD-REPLACE-CANDIDATE**
 
-Locked production semantics:
+Candidate research spelling:
 
-- `arena T` is a move-only bounded arena owner;
-- `handle T` is a copy-like `(arena id, index, generation)` identity;
-- insert is explicit exclusive mutation with no hidden payload clone;
-- lookup is checked and rejects stale/wrong-arena/vacant/out-of-range handles;
-- remove is checked, moves payload out once, advances generation on reuse, and retires generation-max slots;
-- arena-id exhaustion fails closed;
-- live element references block insert/remove/move/reinitialization until bounded final-use release;
-- typed handles are supported in function contracts, nominal record fields, and sequences;
-- generated runtime remains ordinary safe Rust with no pointer registry, unsafe identity, GC, `RefCell`, lock, or hidden refcount layer.
+~~~text
+borrow_mut state as edit
+    replace edit with Item(value = 2)
+end
+~~~
 
-## Immediate execution order
+Current rule:
 
-PR #145 is open on the production branch.
+1. follow only the natural replacement run set for `6a223c8...`;
+2. if a gate fails, patch only demonstrated evidence;
+3. do not authorize field/index mutation or escaping guards through this PR;
+4. if exact-head CI + dedicated research + regression/performance gates are green, inspect exact-SHA JSON/CSV/Markdown artifacts;
+5. merge with expected-head protection;
+6. require natural exact-main CI + dedicated research before closing #148.
 
-1. Push only evidence-backed fixes to the PR head; do not rerun failed historical SHAs.
-2. Require the exact final PR head to pass:
-   - normal CI on Ubuntu 24.04, Windows and macOS;
-   - Generational arena performance;
-   - Append-only sequence performance when naturally triggered;
-   - Explicit shared owner performance when naturally triggered;
-   - Generational arena surface research and every other naturally triggered regression.
-3. Review the exact final diff and merge only with expected-head protection.
-4. Track natural exact-main postmerge CI and Generational arena performance without duplicate dispatches.
-5. Close #144 completed only after required exact-main postmerge gates are green.
+## Parallel newly-unblocked P0 — #153
 
-## Separate ownership/research lanes
+Branch:
 
-Keep distinct from #144:
+`research/weak-storage-surface-v0`
 
-- explicit Weak/cycle-edge surface;
-- interior mutability;
-- cross-thread shared ownership / synchronization;
-- mutable references;
-- generalized lifetime solving;
-- general generic type syntax;
-- independent payload lifetime outside arena ownership.
+Exact start main:
+
+`36022b386782775e449ae6a6eedcbbb8c8d1275f`
+
+No PR yet.
+
+Research order:
+
+1. measure record-field Weak storage first;
+2. separately measure `seq weak T` storage;
+3. keep arena `handle T` identity distinct;
+4. keep enum Weak payloads fail-closed unless research specifically selects enum integration;
+5. choose exactly one bounded verdict among the issue’s registered outcomes.
+
+Do not start production Weak storage implementation in this issue.
+
+## Prepared infrastructure
+
+Current prepared heads:
+
+- #149 benchmark provenance: `1bce806e3d8fb582dab79c4421515fa5ae24a640`
+- #150 legacy research workflow provenance: `0a2664a6dc3c073d5033b51f9117e85473a6d667`
+- #151 tooling evidence provenance, stacked on #149: `264103cc99e8fa62146dbb7ebdb06dd3da97621b`
+
+Open them only with a clean scope audit and without creating pointless duplicate runner pressure.
+
+## Separate blocked lane — #133
+
+A fresh current-main Cross-thread shared ownership research dispatch is still required. Do not rerun exhausted historical attempts.
 
 ## CI rule
 
-Never create duplicate active Actions for the same SHA/workflow/input. Failed historical SHAs remain evidence. A new SHA gets a new natural run; do not rerun an old failing SHA just to repaint history.
+Never create duplicate active Actions for the same SHA/workflow/input. Failed historical SHAs remain evidence. Merge only with expected-head protection and require natural exact-main postmerge proof.
