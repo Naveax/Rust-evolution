@@ -24,8 +24,16 @@ jobs:
     name: ubuntu-24.04 / Rust 1.98.0
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout
+      - name: Checkout exact source
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact checkout provenance
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_GIT_SHA"
+
 
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.98.0 --profile minimal
