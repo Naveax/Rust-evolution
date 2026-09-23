@@ -75,6 +75,7 @@ pub enum TypeName {
     Named(String),
     SharedOwner(String),
     WeakOwner(String),
+    Cell(Box<TypeName>),
     SharedRef(Box<TypeName>),
     Sequence(Box<TypeName>),
     Arena(Box<TypeName>),
@@ -137,6 +138,32 @@ pub enum StmtKind {
         then_body: Vec<Stmt>,
         else_body: Vec<Stmt>,
     },
+    Borrow {
+        cell: String,
+        binding: String,
+        body: Vec<Stmt>,
+    },
+    BorrowMut {
+        cell: String,
+        binding: String,
+        body: Vec<Stmt>,
+    },
+    TryBorrow {
+        cell: String,
+        binding: String,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
+    TryBorrowMut {
+        cell: String,
+        binding: String,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
+    Replace {
+        guard: String,
+        value: Expr,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,6 +224,7 @@ pub enum ExprKind {
     SharedAlloc(Box<Expr>),
     SharedDuplicate(Box<Expr>),
     WeakDowngrade(Box<Expr>),
+    CellNew(Box<Expr>),
     SequenceNew {
         element_type: TypeName,
     },
@@ -571,6 +599,14 @@ impl<'a> Parser<'a> {
                 self.parse_arena_element_type()?,
             )));
         }
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "cell")
+            && self
+                .tokens
+                .get(self.index + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+        {
+            return Err(self.error_here("cell record fields are not supported in v0"));
+        }
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared")
             && self
                 .tokens
@@ -638,6 +674,14 @@ impl<'a> Parser<'a> {
                 if matches!(self.current().kind, TokenKind::Ampersand) {
                     return Err(self
                         .error_here("immutable reference enum payloads are not supported in v0"));
+                }
+                if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "cell")
+                    && self
+                        .tokens
+                        .get(self.index + 1)
+                        .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+                {
+                    return Err(self.error_here("cell enum payloads are not supported in v0"));
                 }
                 if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "shared")
                     && self
@@ -817,6 +861,27 @@ impl<'a> Parser<'a> {
             }
         }
 
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "cell") {
+            let next = self.tokens.get(self.index + 1);
+            if let Some(token) = next {
+                match &token.kind {
+                    TokenKind::Identifier(name) => {
+                        let name = name.clone();
+                        self.advance();
+                        self.advance();
+                        return Ok(TypeName::Cell(Box::new(TypeName::Named(name))));
+                    }
+                    TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString => {
+                        return Err(ParseError {
+                            message: "cell types require a nominal record type in v0".to_owned(),
+                            span: self.current().span.join(token.span),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         if !matches!(self.current().kind, TokenKind::Ampersand) {
             return self.parse_owned_type_name();
         }
@@ -845,6 +910,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_sequence_element_type(&mut self) -> Result<TypeName, ParseError> {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "cell")
+            && self
+                .tokens
+                .get(self.index + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+        {
+            let marker = self.advance().span;
+            let token = self.advance();
+            return Err(ParseError {
+                message: "cell sequence elements are not supported in v0".to_owned(),
+                span: marker.join(token.span),
+            });
+        }
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "weak") {
             let marker = self.advance().span;
             let token = self.advance();
@@ -899,10 +977,13 @@ impl<'a> Parser<'a> {
     fn sequence_element_type_starts_at(&self, index: usize) -> bool {
         match self.tokens.get(index).map(|token| &token.kind) {
             Some(TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString) => true,
-            Some(TokenKind::Identifier(name)) if matches!(name.as_str(), "shared" | "weak") => self
-                .tokens
-                .get(index + 1)
-                .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_))),
+            Some(TokenKind::Identifier(name))
+                if matches!(name.as_str(), "shared" | "weak" | "cell") =>
+            {
+                self.tokens
+                    .get(index + 1)
+                    .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+            }
             Some(TokenKind::Identifier(name)) if name == "handle" => {
                 self.arena_element_type_starts_at(index + 1)
             }
@@ -914,16 +995,32 @@ impl<'a> Parser<'a> {
     fn arena_element_type_starts_at(&self, index: usize) -> bool {
         match self.tokens.get(index).map(|token| &token.kind) {
             Some(TokenKind::TypeInt | TokenKind::TypeBool | TokenKind::TypeString) => true,
-            Some(TokenKind::Identifier(name)) if matches!(name.as_str(), "shared" | "weak") => self
-                .tokens
-                .get(index + 1)
-                .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_))),
+            Some(TokenKind::Identifier(name))
+                if matches!(name.as_str(), "shared" | "weak" | "cell") =>
+            {
+                self.tokens
+                    .get(index + 1)
+                    .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+            }
             Some(TokenKind::Identifier(_)) | Some(TokenKind::Ampersand) => true,
             _ => false,
         }
     }
 
     fn parse_arena_element_type(&mut self) -> Result<TypeName, ParseError> {
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "cell")
+            && self
+                .tokens
+                .get(self.index + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+        {
+            let marker = self.advance().span;
+            let token = self.advance();
+            return Err(ParseError {
+                message: "cell arena payloads are not supported in v0".to_owned(),
+                span: marker.join(token.span),
+            });
+        }
         if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "weak") {
             let marker = self.advance().span;
             let token = self.advance();
@@ -1235,6 +1332,25 @@ impl<'a> Parser<'a> {
                 if name == "upgrade" && matches!(self.current().kind, TokenKind::Identifier(_)) {
                     return self.parse_weak_upgrade(start);
                 }
+                if matches!(
+                    name.as_str(),
+                    "borrow" | "borrow_mut" | "try_borrow" | "try_borrow_mut"
+                ) && matches!(self.current().kind, TokenKind::Identifier(_))
+                    && self.tokens.get(self.index + 1).is_some_and(
+                        |token| matches!(&token.kind, TokenKind::Identifier(word) if word == "as"),
+                    )
+                {
+                    return self.parse_dynamic_borrow(start, &name);
+                }
+                if name == "replace"
+                    && matches!(self.current().kind, TokenKind::Identifier(_))
+                    && self
+                        .tokens
+                        .get(self.index + 1)
+                        .is_some_and(|token| matches!(token.kind, TokenKind::Comma))
+                {
+                    return self.parse_guard_replace(start);
+                }
                 if !matches!(self.current().kind, TokenKind::Equal) {
                     return Err(self.error_here("expected '=' after binding name"));
                 }
@@ -1437,6 +1553,139 @@ impl<'a> Parser<'a> {
                 else_body,
             },
             span: start.join(close),
+        })
+    }
+
+    fn parse_dynamic_borrow(
+        &mut self,
+        start: Span,
+        operation: &str,
+    ) -> Result<Stmt, ParseError> {
+        let cell_token = self.advance();
+        let TokenKind::Identifier(cell) = cell_token.kind else {
+            return Err(ParseError {
+                message: format!("expected cell local after '{operation}'"),
+                span: cell_token.span,
+            });
+        };
+        let as_token = self.advance();
+        if !matches!(&as_token.kind, TokenKind::Identifier(name) if name == "as") {
+            return Err(ParseError {
+                message: format!("expected contextual 'as' after cell local in '{operation}'"),
+                span: as_token.span,
+            });
+        }
+        let binding_token = self.advance();
+        let TokenKind::Identifier(binding) = binding_token.kind else {
+            return Err(ParseError {
+                message: format!("expected guard binding after '{operation}' 'as'"),
+                span: binding_token.span,
+            });
+        };
+        if !matches!(self.current().kind, TokenKind::Newline) {
+            return Err(self.error_here("expected end of line after dynamic borrow binding"));
+        }
+        self.skip_newlines();
+
+        let fallible = matches!(operation, "try_borrow" | "try_borrow_mut");
+        let mut then_body = Vec::new();
+        while !matches!(self.current().kind, TokenKind::Else | TokenKind::End) {
+            if self.is_eof() {
+                let message = if fallible {
+                    "missing 'else' and 'end' for checked dynamic borrow block"
+                } else {
+                    "missing 'end' for dynamic borrow block"
+                };
+                return Err(self.error_here(message));
+            }
+            let statement = self.parse_statement()?;
+            self.require_statement_terminator()?;
+            then_body.push(statement);
+            self.skip_newlines();
+        }
+
+        if !fallible {
+            if matches!(self.current().kind, TokenKind::Else) {
+                return Err(self.error_here(
+                    "panicking dynamic borrow blocks do not accept 'else'; use try_borrow or try_borrow_mut",
+                ));
+            }
+            let close = self.advance().span;
+            let kind = match operation {
+                "borrow" => StmtKind::Borrow {
+                    cell,
+                    binding,
+                    body: then_body,
+                },
+                "borrow_mut" => StmtKind::BorrowMut {
+                    cell,
+                    binding,
+                    body: then_body,
+                },
+                _ => unreachable!("fallible operations were filtered above"),
+            };
+            return Ok(Stmt {
+                kind,
+                span: start.join(close),
+            });
+        }
+
+        if !matches!(self.current().kind, TokenKind::Else) {
+            return Err(self.error_here(
+                "checked dynamic borrow requires an explicit 'else' branch",
+            ));
+        }
+        self.advance();
+        if !matches!(self.current().kind, TokenKind::Newline) {
+            return Err(self.error_here("expected end of line after dynamic borrow 'else'"));
+        }
+        self.skip_newlines();
+        let mut else_body = Vec::new();
+        while !matches!(self.current().kind, TokenKind::End) {
+            if self.is_eof() {
+                return Err(self.error_here("missing 'end' for checked dynamic borrow block"));
+            }
+            let statement = self.parse_statement()?;
+            self.require_statement_terminator()?;
+            else_body.push(statement);
+            self.skip_newlines();
+        }
+        let close = self.advance().span;
+        let kind = match operation {
+            "try_borrow" => StmtKind::TryBorrow {
+                cell,
+                binding,
+                then_body,
+                else_body,
+            },
+            "try_borrow_mut" => StmtKind::TryBorrowMut {
+                cell,
+                binding,
+                then_body,
+                else_body,
+            },
+            _ => unreachable!("panicking operations returned above"),
+        };
+        Ok(Stmt {
+            kind,
+            span: start.join(close),
+        })
+    }
+
+    fn parse_guard_replace(&mut self, start: Span) -> Result<Stmt, ParseError> {
+        let guard_token = self.advance();
+        let TokenKind::Identifier(guard) = guard_token.kind else {
+            return Err(ParseError {
+                message: "expected exclusive guard local after 'replace'".to_owned(),
+                span: guard_token.span,
+            });
+        };
+        self.expect_kind(TokenKind::Comma, "expected ',' after exclusive guard")?;
+        let value = self.parse_expression()?;
+        let span = start.join(value.span);
+        Ok(Stmt {
+            kind: StmtKind::Replace { guard, value },
+            span,
         })
     }
 
@@ -1722,7 +1971,7 @@ impl<'a> Parser<'a> {
         }
         let shared_operation = match &self.current().kind {
             TokenKind::Identifier(name)
-                if matches!(name.as_str(), "share" | "dup" | "downgrade")
+                if matches!(name.as_str(), "share" | "dup" | "downgrade" | "cell")
                     && self
                         .tokens
                         .get(self.index + 1)
@@ -1740,6 +1989,7 @@ impl<'a> Parser<'a> {
                 "share" => ExprKind::SharedAlloc(Box::new(expr)),
                 "dup" => ExprKind::SharedDuplicate(Box::new(expr)),
                 "downgrade" => ExprKind::WeakDowngrade(Box::new(expr)),
+                "cell" => ExprKind::CellNew(Box::new(expr)),
                 _ => unreachable!("contextual owner operation was filtered above"),
             };
             return Ok(Expr { kind, span });
