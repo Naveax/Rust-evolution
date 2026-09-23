@@ -1,0 +1,102 @@
+name: Exclusive guard mutation surface research
+
+on:
+  pull_request:
+    paths:
+      - 'crates/evo-lowering/tests/exclusive_guard_mutation_surface_research.rs'
+      - '.github/workflows/exclusive-guard-mutation-surface-research.yml'
+      - 'docs/EXCLUSIVE_GUARD_MUTATION_SURFACE_RESEARCH.md'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/evo-lowering/tests/exclusive_guard_mutation_surface_research.rs'
+      - '.github/workflows/exclusive-guard-mutation-surface-research.yml'
+      - 'docs/EXCLUSIVE_GUARD_MUTATION_SURFACE_RESEARCH.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  research:
+    runs-on: ubuntu-24.04
+    name: ubuntu-24.04 / Rust 1.98.0
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact checkout provenance
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_GIT_SHA"
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+      - run: rustc -Vv
+      - run: cargo fmt --all -- --check
+      - name: Run exclusive guard mutation surface matrix
+        env:
+          EVO_REQUIRE_PINNED_RUSTC: '1'
+          EVO_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVO_EXCLUSIVE_GUARD_MUTATION_RESEARCH_OUT: ${{ github.workspace }}/target/evo-exclusive-guard-mutation-surface-research
+        run: >-
+          cargo test -p evo-lowering --test exclusive_guard_mutation_surface_research
+          exclusive_guard_mutation_surface_research_selects_whole_payload_replacement
+          -- --ignored --exact --nocapture
+      - name: Validate report
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import csv
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('target/evo-exclusive-guard-mutation-surface-research')
+          data = json.loads((root / 'report.json').read_text())
+          rows = list(csv.DictReader((root / 'report.csv').read_text().splitlines()))
+          markdown = (root / 'report.md').read_text()
+
+          assert data['git_sha'] == os.environ['EXPECTED_GIT_SHA'], data
+          assert data['verdict'] == 'WHOLE-PAYLOAD-REPLACE-CANDIDATE', data
+          assert data['recommended_surface'] == 'replace guard, expr', data
+          assert data['case_count'] >= 20, data
+          assert data['expectation_mismatches'] == 0, data
+          assert data['whole_replace_case_count'] >= 8, data
+          assert data['mutable_place_boundary_count'] >= 4, data
+          assert data['explicit_update_comparison_count'] >= 1, data
+          assert data['guard_value_boundary_count'] >= 3, data
+          assert data['explicit_rc_refcell_case_count'] >= 2, data
+          assert data['concurrency_boundary_count'] >= 1, data
+          assert data['reject_hidden_cost_count'] >= 3, data
+          assert data['contextual_words_are_identifiers'] is True, data
+          assert data['ordinary_identifier_compatibility'] is True, data
+          assert data['whole_replace_candidate_current_parser_rejects'] is True, data
+          assert data['direct_field_assignment_current_parser_rejects'] is True, data
+          assert data['explicit_update_candidate_current_parser_rejects'] is True, data
+          assert data['field_mutation_authorized'] is False, data
+          assert data['index_mutation_authorized'] is False, data
+          assert data['escaping_guard_authorized'] is False, data
+          assert len(rows) == data['case_count'], (len(rows), data)
+          assert all(row['git_sha'] == data['git_sha'] for row in rows), rows
+          assert all(row['compile_matched'] == 'true' for row in rows), rows
+          assert all(row['run_matched'] == 'true' for row in rows), rows
+          assert 'WHOLE-PAYLOAD-REPLACE-CANDIDATE' in markdown, markdown
+          assert 'replace guard, expr' in markdown, markdown
+          assert any(
+              line.strip() == 'replace edit, Item(value = 2)'
+              for line in markdown.splitlines()
+          ), markdown
+          print(json.dumps(data, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evo-exclusive-guard-mutation-surface-research-ubuntu-24.04
+          path: target/evo-exclusive-guard-mutation-surface-research
+          if-no-files-found: error
+          retention-days: 30
