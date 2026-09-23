@@ -453,13 +453,41 @@ fn write_reports(findings: &[Finding], surface: &SurfaceEvidence, out: &Path, ru
     writeln!(json, "  \"recommended_surface\": {recommended_surface:?},").unwrap();
     writeln!(json, "  \"case_count\": {},", CASES.len()).unwrap();
     writeln!(json, "  \"expectation_mismatches\": {mismatches},").unwrap();
-    writeln!(json, "  \"whole_replace_case_count\": {whole_replace_count},").unwrap();
-    writeln!(json, "  \"mutable_place_boundary_count\": {mutable_place_count},").unwrap();
-    writeln!(json, "  \"explicit_update_comparison_count\": {explicit_update_count},").unwrap();
-    writeln!(json, "  \"guard_value_boundary_count\": {guard_value_count},").unwrap();
-    writeln!(json, "  \"explicit_rc_refcell_case_count\": {composition_count},").unwrap();
-    writeln!(json, "  \"concurrency_boundary_count\": {concurrency_count},").unwrap();
-    writeln!(json, "  \"reject_hidden_cost_count\": {reject_hidden_cost_count},").unwrap();
+    writeln!(
+        json,
+        "  \"whole_replace_case_count\": {whole_replace_count},"
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"mutable_place_boundary_count\": {mutable_place_count},"
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"explicit_update_comparison_count\": {explicit_update_count},"
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"guard_value_boundary_count\": {guard_value_count},"
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"explicit_rc_refcell_case_count\": {composition_count},"
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"concurrency_boundary_count\": {concurrency_count},"
+    )
+    .unwrap();
+    writeln!(
+        json,
+        "  \"reject_hidden_cost_count\": {reject_hidden_cost_count},"
+    )
+    .unwrap();
     writeln!(
         json,
         "  \"contextual_words_are_identifiers\": {},",
